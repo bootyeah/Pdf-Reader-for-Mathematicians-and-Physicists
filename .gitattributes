@@ -1,0 +1,19 @@
+# Mark binary assets so git diff never outputs binary noise to AI agents
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pfb binary
+*.bcmap binary
+*.pyc binary
+*.exe binary
+
+# Collapse diffs on vendored third-party libraries
+static/lib/** -diff linguist-vendored

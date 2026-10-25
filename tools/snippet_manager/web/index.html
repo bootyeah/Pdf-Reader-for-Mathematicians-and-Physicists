@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LaTeX 快捷键管理中心 · 全功能 PDF 阅读器</title>
+  
+  <!-- Phosphor Icons 本地离线版 -->
+  <link rel="stylesheet" href="/static/lib/phosphor/regular/style.css">
+  <link rel="stylesheet" href="/static/lib/phosphor/fill/style.css">
+
+  <!-- KaTeX 本地离线渲染库 -->
+  <link rel="stylesheet" href="/static/lib/katex/katex.min.css">
+  <script src="/static/lib/katex/katex.min.js"></script>
+  <script src="/static/lib/katex/contrib/auto-render.min.js"></script>
+
+  <link rel="stylesheet" href="/manager.css">
+  <script src="/manager.js" defer></script>
+</head>
+<body>
+  <!-- 顶栏：与 PDF 阅读器和 API 管理工具一致的 60px 扁平风格 -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 100 100" class="latex-icon-svg">
+          <path d="M20,5 h40 l25,25 v60 a10,10 0 0,1 -10,10 h-55 a10,10 0 0,1 -10,-10 v-75 a10,10 0 0,1 10,-10 z" fill="#ef4444"/>
+          <path d="M60,5 v25 h25 z" fill="#b91c1c"/>
+          <text x="50" y="74" font-family="KaTeX_Math, 'Times New Roman', serif" font-style="italic" font-weight="bold" font-size="34" fill="#ffffff" text-anchor="middle">f(x)</text>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <span class="brand-title">LaTeX 快捷键管理中心</span>
+        <span class="brand-sub">LaTeX Suite · Obsidian 兼容速录引擎</span>
+      </div>
+    </div>
+
+    <!-- 极简保存状态指示 -->
+    <div class="header-status">
+      <span id="dirty-dot" class="status-dot"></span>
+      <span id="save-status">所有更改已保存</span>
+    </div>
+
+    <!-- 顶部操作按钮组 -->
+    <div class="header-actions">
+      <button type="button" id="btn-toggle-sandbox" class="btn btn-secondary" title="开启/收起右侧实时演练沙盒">
+        <i class="ph ph-magic-wand btn-icon"></i>
+        <span>实时演练</span>
+      </button>
+
+      <button type="button" id="btn-import-export" class="btn btn-secondary" title="导入或导出快捷键配置">
+        <i class="ph ph-arrows-down-up btn-icon"></i>
+        <span>导入/导出</span>
+      </button>
+
+      <button type="button" id="reload" class="btn btn-secondary" title="放弃未保存修改并重新读取配置">
+        <i class="ph ph-arrows-clockwise btn-icon"></i>
+        <span>重新加载</span>
+      </button>
+
+      <button type="button" id="restore" class="btn btn-secondary" disabled title="使用上一版本备份覆盖当前配置">
+        <i class="ph ph-clock-counter-clockwise btn-icon"></i>
+        <span>恢复备份</span>
+      </button>
+
+      <button type="button" id="save" class="btn btn-primary" title="保存所有设置并同步至阅读器 (Ctrl+S)">
+        <i class="ph ph-floppy-disk btn-icon"></i>
+        <span>保存设置</span>
+        <kbd class="shortcut-key">Ctrl+S</kbd>
+      </button>
+
+      <button type="button" id="quit" class="btn btn-ghost" title="退出管理工具并关闭后台服务">
+        <i class="ph ph-sign-out btn-icon"></i>
+        <span>退出</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- 主体工作区 -->
+  <div class="app-body">
+    <!-- 侧边栏：分类与筛选 -->
+    <aside class="sidebar">
+      <!-- 搜索框 -->
+      <div class="sidebar-search">
+        <i class="ph ph-magnifying-glass search-icon"></i>
+        <input type="text" id="search-input" placeholder="搜索触发词、替换式、说明 ( / )" spellcheck="false" autocomplete="off">
+        <button type="button" id="search-clear" class="btn-icon-tiny" title="清空搜索" hidden>
+          <i class="ph ph-x"></i>
+        </button>
+      </div>
+
+      <!-- 新建按钮 -->
+      <div class="sidebar-action-wrap">
+        <button type="button" id="btn-new-snippet" class="btn btn-create">
+          <i class="ph ph-plus-circle"></i>
+          <span>新建快捷键</span>
+        </button>
+      </div>
+
+      <!-- 分类统计导航 -->
+      <div class="sidebar-section-title">
+        <span>快捷键分类</span>
+        <span class="badge" id="total-badge">0</span>
+      </div>
+      <nav id="category-nav" class="category-nav" aria-label="快捷键分类导航"></nav>
+
+      <!-- 模式过滤 Pills -->
+      <div class="sidebar-section-title">
+        <span>模式筛选</span>
+      </div>
+      <div class="filter-pills" id="mode-filters">
+        <button type="button" class="pill active" data-filter="all">全部</button>
+        <button type="button" class="pill" data-filter="opt-m">数学模式 (m)</button>
+        <button type="button" class="pill" data-filter="opt-t">正文模式 (t)</button>
+        <button type="button" class="pill" data-filter="opt-A">自动展开 (A)</button>
+        <button type="button" class="pill" data-filter="opt-r">正则模式 (r)</button>
+        <button type="button" class="pill" data-filter="opt-w">词边界 (w)</button>
+        <button type="button" class="pill pill-muted" data-filter="disabled">已停用</button>
+      </div>
+
+      <!-- 侧边栏底部：路径信息 -->
+      <div class="sidebar-footer">
+        <div class="meta-path-wrap" id="copy-path-wrap" title="点击复制配置文件路径">
+          <span class="meta-path" id="config-path">—</span>
+          <button type="button" id="copy-path-btn" class="btn-icon-tiny" title="复制配置文件路径">
+            <i class="ph ph-copy"></i>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 工作空间：快捷键列表 + 实时沙盒 -->
+    <main class="workspace" id="workspace">
+      <!-- 提示横幅 -->
+      <div id="notice" class="notice-bar" role="status" hidden></div>
+
+      <!-- 列表主区域 -->
+      <section class="list-section">
+        <!-- 列表工具栏 -->
+        <div class="list-toolbar">
+          <div class="list-meta">
+            <span class="list-title" id="current-category-title">全部快捷键</span>
+            <span class="list-count-desc" id="current-count-desc">共 0 条规则</span>
+          </div>
+          <div class="list-toolbar-actions">
+            <div class="sort-select-wrap">
+              <label for="sort-select" class="text-muted">排序：</label>
+              <select id="sort-select" class="form-select-sm">
+                <option value="default">默认原序</option>
+                <option value="trigger">触发词 A-Z</option>
+                <option value="priority">优先级从高到低</option>
+              </select>
+            </div>
+            <button type="button" id="btn-batch-toggle" class="btn btn-secondary-sm" title="一键全部启用/停用">
+              <span>批量操作</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 快捷键卡片容器 -->
+        <div class="snippets-grid" id="snippets-container" role="list"></div>
+      </section>
+
+      <!-- 实时演练沙盒（可随时开关） -->
+      <aside class="sandbox-panel" id="sandbox-panel">
+        <div class="sandbox-header">
+          <div class="sandbox-title-wrap">
+            <i class="ph ph-sparkle text-blue-500"></i>
+            <span class="sandbox-title">实时演练沙盒</span>
+          </div>
+          <div class="sandbox-actions">
+            <button type="button" id="sandbox-reset" class="btn-icon-tiny" title="清空沙盒内容">
+              <i class="ph ph-trash"></i>
+            </button>
+            <button type="button" id="sandbox-close" class="btn-icon-tiny" title="收起演练沙盒">
+              <i class="ph ph-caret-right"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="sandbox-body">
+          <div class="sandbox-context-bar">
+            <span class="text-muted">模拟上下文：</span>
+            <label class="radio-label">
+              <input type="radio" name="sandbox-context" value="math" checked>
+              <span>数学模式 $...$</span>
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="sandbox-context" value="text">
+              <span>普通正文</span>
+            </label>
+          </div>
+
+          <div class="sandbox-input-wrap">
+            <label for="sandbox-input" class="sandbox-label">
+              <span>速录测试输入框 (支持 Tab 键跳转占位符)：</span>
+            </label>
+            <textarea id="sandbox-input" rows="3" spellcheck="false" placeholder="在此键入触发词测试，例如输入 mk, dm, beg, fr, @a, @b, sum..."></textarea>
+            <div class="sandbox-tabstops-hint" id="sandbox-tabstops-hint">
+              <span class="dot-indicator"></span>
+              <span id="tabstops-text">无活动占位符</span>
+            </div>
+          </div>
+
+          <!-- 快速示例试用 Chips -->
+          <div class="sandbox-samples">
+            <span class="samples-title">试一试常用规则：</span>
+            <div class="sample-chips">
+              <button type="button" class="sample-chip" data-sample="mk">mk</button>
+              <button type="button" class="sample-chip" data-sample="dm">dm</button>
+              <button type="button" class="sample-chip" data-sample="fr">fr</button>
+              <button type="button" class="sample-chip" data-sample="sq">sq</button>
+              <button type="button" class="sample-chip" data-sample="@a">@a</button>
+              <button type="button" class="sample-chip" data-sample="@b">@b</button>
+              <button type="button" class="sample-chip" data-sample="sum">sum</button>
+              <button type="button" class="sample-chip" data-sample="pmat">pmat</button>
+              <button type="button" class="sample-chip" data-sample="cases">cases</button>
+            </div>
+          </div>
+
+          <!-- 实时 KaTeX 渲染效果预览 -->
+          <div class="sandbox-preview-wrap">
+            <span class="sandbox-label">实时公式渲染预览：</span>
+            <div id="sandbox-katex-preview" class="sandbox-katex-preview">
+              <span class="text-muted italic">（公式效果将在此处实时呈现）</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- 编辑 / 新建模态弹窗 -->
+  <div class="modal-backdrop" id="edit-modal" hidden>
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modal-title">编辑快捷键</h2>
+        <button type="button" class="modal-close" id="modal-close-btn" title="关闭 (Esc)">
+          <i class="ph ph-x"></i>
+        </button>
+      </div>
+
+      <form id="snippet-form" class="modal-body" autocomplete="off">
+        <input type="hidden" id="edit-id">
+
+        <!-- 触发词 -->
+        <div class="form-group">
+          <label for="edit-trigger" class="form-label">
+            <span>触发词 (Trigger)</span>
+            <span class="text-danger">*</span>
+          </label>
+          <div class="input-with-hint">
+            <input type="text" id="edit-trigger" class="form-input code-font" required placeholder="如 mk, dm, @a, fr 或正则式 ([A-Za-z])(\d)">
+          </div>
+          <div class="conflict-alert" id="conflict-alert" hidden></div>
+        </div>
+
+        <!-- 替换内容 -->
+        <div class="form-group">
+          <div class="form-label-row">
+            <label for="edit-replacement" class="form-label">
+              <span>替换结果 (Replacement)</span>
+              <span class="text-danger">*</span>
+            </label>
+            <div class="snippet-helpers" title="快速插入占位符">
+              <button type="button" class="helper-tag" data-insert="$0">$0 (首个占位)</button>
+              <button type="button" class="helper-tag" data-insert="$1">$1 (次级占位)</button>
+              <button type="button" class="helper-tag" data-insert="${0:默认}">${0:默认}</button>
+              <button type="button" class="helper-tag" data-insert="[[0]]">[[0]] (正则捕获组)</button>
+            </div>
+          </div>
+          <textarea id="edit-replacement" rows="3" class="form-textarea code-font" required placeholder="如 \dfrac{$0}{$1}$2 或 \alpha"></textarea>
+        </div>
+
+        <!-- 选项勾选组 Options -->
+        <div class="form-group">
+          <label class="form-label">生效模式与选项 (Options)</label>
+          <div class="options-checkbox-group">
+            <label class="checkbox-pill">
+              <input type="checkbox" id="opt-m" value="m">
+              <span><strong>m</strong> 数学模式 (公式内触发)</span>
+            </label>
+            <label class="checkbox-pill">
+              <input type="checkbox" id="opt-t" value="t">
+              <span><strong>t</strong> 正文模式 (普通文本触发)</span>
+            </label>
+            <label class="checkbox-pill">
+              <input type="checkbox" id="opt-A" value="A">
+              <span><strong>A</strong> 自动展开 (输入完毕即时替换)</span>
+            </label>
+            <label class="checkbox-pill">
+              <input type="checkbox" id="opt-r" value="r">
+              <span><strong>r</strong> 正则表达式 (使用正则匹配)</span>
+            </label>
+            <label class="checkbox-pill">
+              <input type="checkbox" id="opt-w" value="w">
+              <span><strong>w</strong> 单词边界 (前面不能紧贴单词)</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 分类与优先级 -->
+        <div class="form-row">
+          <div class="form-group col-6">
+            <label for="edit-category" class="form-label">分类 (Category)</label>
+            <select id="edit-category" class="form-select"></select>
+          </div>
+          <div class="form-group col-6">
+            <label for="edit-priority" class="form-label">优先级 (Priority，默认为 0)</label>
+            <input type="number" id="edit-priority" class="form-input" value="0" placeholder="数字越大越优先匹配">
+          </div>
+        </div>
+
+        <!-- 描述说明 -->
+        <div class="form-group">
+          <label for="edit-description" class="form-label">备注与中文说明 (可选)</label>
+          <input type="text" id="edit-description" class="form-input" placeholder="简要说明该快捷键用途，如“上下标字母自动转下标”">
+        </div>
+
+        <!-- 模态框底部按钮 -->
+        <div class="modal-footer">
+          <button type="button" id="modal-cancel-btn" class="btn btn-secondary">取消</button>
+          <button type="submit" class="btn btn-primary">确定并暂存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 导入 / 导出模态弹窗 -->
+  <div class="modal-backdrop" id="io-modal" hidden>
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h2 class="modal-title">导入与导出 LaTeX 快捷键</h2>
+        <button type="button" class="modal-close" id="io-close-btn" title="关闭 (Esc)">
+          <i class="ph ph-x"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="io-tabs">
+          <button type="button" class="io-tab active" id="tab-export-btn">导出配置</button>
+          <button type="button" class="io-tab" id="tab-import-btn">导入配置</button>
+        </div>
+
+        <!-- 导出面板 -->
+        <div class="io-panel" id="panel-export">
+          <p class="io-desc">将当前全部快捷键导出为标准 JSON 格式，可作为备份或在其他设备上恢复。</p>
+          <textarea id="export-text" rows="8" class="form-textarea code-font" readonly></textarea>
+          <div class="io-actions">
+            <button type="button" id="btn-copy-export" class="btn btn-primary">
+              <i class="ph ph-copy"></i>
+              <span>复制到剪贴板</span>
+            </button>
+            <button type="button" id="btn-download-export" class="btn btn-secondary">
+              <i class="ph ph-download-simple"></i>
+              <span>下载为 snippets.json</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 导入面板 -->
+        <div class="io-panel" id="panel-import" hidden>
+          <p class="io-desc">支持粘贴 Obsidian LaTeX Suite 插件导出的 JSON 或数组格式。选择导入模式后执行。</p>
+          <textarea id="import-text" rows="8" class="form-textarea code-font" placeholder="请在此粘贴 JSON 文本..."></textarea>
+          <div class="import-mode-select">
+            <label class="radio-label">
+              <input type="radio" name="import-mode" value="merge" checked>
+              <span><strong>智能合并</strong>（根据触发词更新并追加新规则）</span>
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="import-mode" value="replace">
+              <span><strong>完全覆盖</strong>（清空当前配置并使用导入内容覆盖）</span>
+            </label>
+          </div>
+          <div class="io-actions">
+            <button type="button" id="btn-do-import" class="btn btn-primary">
+              <i class="ph ph-check"></i>
+              <span>开始导入</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

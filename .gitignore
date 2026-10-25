@@ -1,0 +1,45 @@
+# Local model credentials, snippet backups, previous versions and manager session tokens.
+.api-manager/*
+!.api-manager/settings.example.json
+.snippet-manager/
+.latex-manager/
+
+# Binary executables and mobile tunnel assets (cloudflared.exe ~55MB)
+.phone-tunnel/
+*.exe
+
+# Python byte code and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Runtime logs and session data
+*.log
+.env
+.env.*
+!.env.example
+
+# Test execution outputs and artifacts
+tests/results/
+tests/.tmp*
+
+# Backup and temp files
+*.bak
+*.tmp
+*~
+*.swp
+*.swo
+.reader-save-*
+
+# Python / Node / Test environments and caches
+.pytest_cache/
+.coverage
+.venv/
+venv/
+env/
+node_modules/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini

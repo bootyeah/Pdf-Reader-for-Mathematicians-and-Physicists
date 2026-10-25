@@ -1,0 +1,17 @@
+{
+  "api_key": "",
+  "base_url": "https://open.bigmodel.cn/api/paas/v4",
+  "model": "glm-4.6v-flash",
+  "fallback_model": "glm-4v-flash",
+  "hotkey": "ctrl+alt+z",
+  "exit_hotkey": "ctrl+alt+x",
+  "pill_pos": [
+    -4,
+    0
+  ],
+  "prompt": "你是一个顶级的 LaTeX 排版专家。请准确识别图片中的数学公式，并将其转换为 LaTeX 代码。\n要求：\n1. 如果是简单的、单行的公式，请使用 $ 包围（例如 $E=mc^2$）。\n2. 如果是大型公式、矩阵、多行公式、积分、求和等复杂结构，请使用 $$ 包围（例如 $$\\int_0^1 x^2\\,dx$$）。\n3. 严禁使用 \\[ \\] 、\\( \\) 或 equation 等环境包裹，只能使用 $ 或 $$ 两种形式。\n4. 只输出完整的 LaTeX 代码本身，不要解释，不要任何多余的废话（例如“好的，公式如下：”）。\n5. 如果图片中没有数学公式，只输出：未检测到公式",
+  "proxy": "",
+  "temperature": 0.2,
+  "timeout": 60,
+  "max_side": 4096
+}

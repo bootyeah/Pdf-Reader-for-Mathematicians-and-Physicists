@@ -1,0 +1,30 @@
+{
+  "api_key": "",
+  "base_url": "https://open.bigmodel.cn/api/paas/v4",
+  "model": "glm-4.6v-flash",
+  "fallback_model": "glm-4v-flash",
+  "proxy": "",
+  "temperature": 0.2,
+  "timeout": 60,
+  "max_side": 4096,
+  "host": "0.0.0.0",
+  "port": 8765,
+  "token": "",
+  "window_pos": [
+    -4,
+    0
+  ],
+  "window_width": 503,
+  "window_alpha": 0.9,
+  "topmost": true,
+  "input_mode": "pc",
+  "canvas_view": "fill",
+  "pc_pen_width": 2,
+  "auto_copy": true,
+  "show_qr_on_start": false,
+  "auto_recognize": false,
+  "auto_recognize_delay": 1800,
+  "crop_margin": 28,
+  "min_side": 64,
+  "debug_keep_png": false
+}

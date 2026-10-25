@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LaTeX 宏包管理 · 全功能 PDF 阅读器</title>
+  <link rel="stylesheet" href="/manager.css">
+  <script src="/manager.js" defer></script>
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="brand-icon">T<span>E</span>X</span><h1>LaTeX 宏包管理</h1></div>
+    <span id="save-status" role="status">正在读取配置…</span>
+    <div class="actions">
+      <button id="reload" type="button">重新加载</button>
+      <button id="restore" type="button" disabled>恢复上一版</button>
+      <button id="save" type="button" class="primary" disabled>保存设置</button>
+      <button id="quit" type="button">退出</button>
+    </div>
+  </header>
+  <div class="app-body">
+    <aside class="sidebar"><nav id="navigation" aria-label="LaTeX 配置分类"></nav><p id="config-path"></p></aside>
+    <main>
+      <div id="notice" role="status" hidden></div>
+      <section class="editor" aria-labelledby="section-title">
+        <div class="section-header"><div><h2 id="section-title"></h2><p id="section-help"></p></div><button id="add" type="button" disabled>＋ 添加</button></div>
+        <div id="rows"></div>
+        <p id="empty" hidden>暂无配置，点击「添加」新增。</p>
+      </section>
+      <p class="footer">保存后刷新阅读器生效 · 自动保留上一版 · Ctrl+S 保存</p>
+    </main>
+  </div>
+</body>
+</html>

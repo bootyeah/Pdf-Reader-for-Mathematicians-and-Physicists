@@ -1,0 +1,4 @@
+# 全功能 PDF 阅读器 (PDF Reader Pro) Python 依赖列表
+# 核心功能基于 Python 标准库 (http.server, tkinter, ctypes, subprocess, json 等)
+# 公式识别与图像处理可选依赖：
+Pillow>=10.0.0

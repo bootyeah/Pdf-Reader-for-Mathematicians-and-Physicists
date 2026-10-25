@@ -1,0 +1,2171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#111318">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>airtex · 手写公式</title>
+<!--AIRTEX_BOOT-->
+<style>
+  :root{
+    --bg:#111318; --panel:#1a1d24; --line:#2b303a; --fg:#e8eaee;
+    --dim:#8b93a1; --accent:#4c8dff; --ok:#37b26c; --warn:#e0a23c;
+    --danger:#e0554b; --radius:14px;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-t: env(safe-area-inset-top, 0px);
+    --safe-l: env(safe-area-inset-left, 0px);
+    --safe-r: env(safe-area-inset-right, 0px);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei UI",sans-serif;
+    overscroll-behavior:none;touch-action:manipulation}
+  #app{display:flex;flex-direction:column;position:relative;height:100%;height:100dvh;
+    padding:var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l)}
+  header{display:flex;align-items:center;gap:8px;padding:8px 12px;
+    font-size:13px;color:var(--dim);flex:none}
+  #title{font-weight:600;color:var(--fg);letter-spacing:.3px}
+  #dot{position:relative;width:8px;height:8px;min-height:8px;padding:0;border:0;
+    background:transparent;flex:none;cursor:default}
+  #dot:active{transform:none}
+  #dot::before{content:"";position:absolute;left:50%;top:50%;width:8px;height:8px;
+    transform:translate(-50%,-50%);border-radius:50%;background:var(--danger);
+    transition:background .3s}
+  #dot.on::before{background:var(--ok);box-shadow:0 0 8px rgba(55,178,108,.8)}
+  #status{margin-left:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
+  #viewBtn{flex:none;min-height:40px;padding:8px 12px;font-size:13px}
+  #palmGuardBtn{flex:none;min-height:40px;padding:8px 10px;font-size:13px}
+  #palmGuardBtn svg{display:none}
+  #stage{flex:1;position:relative;min-height:0;margin:0 8px;
+    border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+    background:#fff;touch-action:none}
+  #board{position:absolute;inset:0;width:100%;height:100%;display:block;
+    touch-action:none;cursor:crosshair}
+  #canvasView{position:absolute;left:10px;bottom:10px;z-index:7;display:flex;align-items:center;gap:8px;
+    color:#64748b;font-size:12px;font-variant-numeric:tabular-nums}
+  #resetViewBtn{flex:none;min-height:40px;padding:8px 10px;font-size:12px;
+    background:rgba(26,29,36,.88)}
+  #app.writing-fullscreen #fullscreenSelectBtn{position:absolute;left:calc(6px + var(--safe-l));
+    top:calc(6px + var(--safe-t));z-index:10}
+  #app.writing-fullscreen.tools-collapsed #fullscreenSelectBtn,
+  #app.writing-fullscreen.tools-collapsed #canvasView{display:none}
+  #selectionModes{position:absolute;left:10px;top:10px;z-index:10;display:flex;gap:4px;
+    padding:3px;border:1px solid var(--line);border-radius:12px;background:rgba(26,29,36,.92)}
+  #selectionModes[hidden]{display:none}
+  #selectionModes button{flex:none;min-height:40px;padding:8px 12px;font-size:13px}
+  #app.writing-fullscreen #selectionModes{left:calc(6px + var(--safe-l));top:calc(58px + var(--safe-t))}
+  #app.writing-fullscreen.tools-collapsed #selectionModes{display:none}
+  @media (max-width:380px){
+    .tools{gap:4px}.tools button.ghost{min-width:44px;padding:10px 6px;font-size:13px}
+    #app.writing-fullscreen header{gap:4px}
+    #app.writing-fullscreen #viewBtn{width:62px;min-height:44px;padding:4px;font-size:12px}
+  }
+  #hint{position:absolute;inset:0;display:flex;align-items:center;
+    justify-content:center;color:#bcc2cc;font-size:15px;pointer-events:none;
+    transition:opacity .25s;text-align:center;padding:0 24px;line-height:1.6}
+  #hint.hide{opacity:0}
+  /* 电脑端切到「鼠标手写」时本页暂停：盖上遮罩，避免两边抢同一块画布 */
+  #lock{position:absolute;inset:0;display:none;align-items:center;
+    justify-content:center;text-align:center;padding:24px;line-height:1.75;
+    font-size:14px;color:#e8eaee;background:rgba(15,17,22,.94);z-index:6}
+  #lock.show{display:flex}
+  #lock b{font-size:16px;display:block;margin-bottom:8px}
+  #lock .tip{color:var(--dim);font-size:13px;margin-top:10px}
+  #busy{position:absolute;left:0;right:0;top:0;padding:6px 10px;font-size:12px;
+    color:#fff;background:rgba(76,141,255,.92);display:none;align-items:center;
+    gap:8px}
+  #busy.show{display:flex}
+  .spin{width:12px;height:12px;border:2px solid rgba(255,255,255,.4);
+    border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;flex:none}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  #err{flex:none;margin:8px 8px 0;padding:8px 12px;border-radius:var(--radius);
+    background:rgba(224,85,75,.14);border:1px solid rgba(224,85,75,.5);
+    color:#ffb3ad;font-size:13px;display:none}
+  #err.show{display:block}
+  footer{flex:none;padding:10px 8px 8px;display:flex;flex-direction:column;gap:8px}
+  .row{display:flex;gap:8px}
+  button{flex:1;appearance:none;border:1px solid var(--line);background:var(--panel);
+    color:var(--fg);border-radius:12px;padding:13px 10px;font-size:15px;
+    font-weight:600;min-height:48px;transition:transform .06s,background .15s}
+  button:active{transform:scale(.97)}
+  button:disabled{opacity:.4}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:disabled{background:#33415c;border-color:#33415c}
+  button.ghost{flex:0 0 auto;min-width:64px;font-weight:500;font-size:14px}
+  button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .tools{display:flex;gap:8px;align-items:center}
+  .tools label{font-size:12px;color:var(--dim);display:flex;align-items:center;
+    gap:6px}
+  #width{flex:1;min-width:32px;width:60px;accent-color:var(--accent)}
+  #colorPalette{display:flex;flex:none;justify-content:center;gap:4px;margin:6px 8px 0;
+    padding:4px;border:1px solid var(--line);border-radius:12px;background:var(--panel);z-index:10}
+  #colorPalette button{flex:none;width:40px;height:40px;min-height:40px;padding:8px;
+    display:grid;place-items:center;background:transparent;border-color:transparent}
+  #colorPalette button::before{content:"";width:22px;height:22px;border-radius:50%;
+    background:var(--pen-color);border:1px solid rgba(255,255,255,.5)}
+  #colorPalette button[aria-pressed="true"]{border-color:var(--fg);background:rgba(255,255,255,.1)}
+  #colorPalette button[aria-pressed="true"]::before{box-shadow:0 0 0 2px var(--panel),0 0 0 3px var(--fg)}
+  #toast{position:fixed;left:50%;bottom:calc(18px + var(--safe-b));
+    transform:translateX(-50%) translateY(20px);background:rgba(20,22,28,.96);
+    color:#fff;font-size:13px;padding:9px 16px;border-radius:999px;
+    border:1px solid var(--line);opacity:0;pointer-events:none;
+    transition:opacity .2s,transform .2s;z-index:20;white-space:nowrap;
+    max-width:92vw;overflow:hidden;text-overflow:ellipsis}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  details{font-size:13px;color:var(--dim);padding:0 4px}
+  details summary{cursor:pointer;padding:4px 0}
+  code{font-family:ui-monospace,Menlo,Consolas,monospace;color:#cfd6e4;
+    word-break:break-all}
+  #pageNav{display:flex;align-items:center;gap:6px;flex:none;align-self:flex-end;
+    margin:6px 8px 0;padding:3px;border:1px solid var(--line);border-radius:12px;background:var(--panel);z-index:10}
+  #pageNav[hidden]{display:none}
+  #pageNav button{flex:none;width:44px;min-height:44px;padding:8px;font-size:20px}
+  #pageNumber{min-width:58px;text-align:center;font-size:13px;font-variant-numeric:tabular-nums}
+  #app.writing-fullscreen #pageNav{position:absolute;right:calc(8px + var(--safe-r));
+    bottom:calc(8px + var(--safe-b));margin:0;background:rgba(26,29,36,.88)}
+  #app.whiteboard-pages.writing-fullscreen #err{bottom:calc(64px + var(--safe-b))}
+  /* 横屏工具压成一行；报错悬浮显示，避免把画板挤矮。 */
+  @media (orientation:landscape){
+    #colorPalette{position:absolute;right:calc(8px + var(--safe-r));top:calc(54px + var(--safe-t));margin:0;
+      background:rgba(26,29,36,.88)}
+    header{padding:4px 8px}
+    footer{flex-direction:row;align-items:center;padding:6px 8px;gap:8px}
+    .tools{flex:1;min-width:0;gap:6px}
+    #width{min-width:36px;width:60px;max-width:140px}
+    footer > .row{flex:none}
+    footer button{min-height:44px;padding:9px 10px;font-size:14px}
+    footer button.ghost{min-width:54px}
+    #fallbackBox{position:absolute;top:calc(52px + var(--safe-t));
+      right:calc(12px + var(--safe-r));z-index:8;max-width:calc(100% - 24px);
+      padding:4px 8px;border-radius:8px;background:var(--panel)}
+    #fallbackBox:not([open]){font-size:12px;opacity:.85}
+    #err{position:absolute;left:var(--safe-l);right:var(--safe-r);
+      bottom:calc(64px + var(--safe-b));z-index:7;max-height:55%;overflow:auto}
+  }
+  /* 全屏保留防误触、橡皮和清空入口，其余工具由「显示工具」展开。 */
+  .fullscreen-tool{display:none;flex:none;width:44px;min-height:44px;padding:10px}
+  .fullscreen-tool svg,#palmGuardBtn svg{width:22px;height:22px;fill:none;
+    stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .fullscreen-tool svg{display:block}
+  #app.writing-fullscreen #palmGuardBtn{width:44px;min-height:44px;padding:10px;
+    background:rgba(26,29,36,.88)}
+  #app.writing-fullscreen #palmGuardBtn span{display:none}
+  #app.writing-fullscreen #palmGuardBtn svg{display:block}
+  #app.writing-fullscreen #palmGuardBtn.on{background:var(--accent);border-color:var(--accent)}
+  #app.writing-fullscreen .fullscreen-tool{display:block;background:rgba(26,29,36,.88)}
+  #app.writing-fullscreen .fullscreen-tool.on{background:var(--accent);border-color:var(--accent)}
+  #app.writing-fullscreen #stage{margin:0;border:0;border-radius:0}
+  #app.writing-fullscreen header{position:absolute;top:calc(6px + var(--safe-t));
+    right:calc(6px + var(--safe-r));padding:0;z-index:10;gap:6px}
+  #app.writing-fullscreen header #title,#app.writing-fullscreen header #status,
+  #app.writing-fullscreen footer{display:none}
+  #app.writing-fullscreen #dot{width:44px;height:44px;min-height:44px;cursor:pointer}
+  #app.writing-fullscreen #dot::before{box-shadow:0 0 0 3px rgba(26,29,36,.8)}
+  #app.writing-fullscreen header.tools-collapsed > :not(#dot){display:none}
+  #app.writing-fullscreen.tools-collapsed #pageNav{display:none}
+  #app.writing-fullscreen #colorPalette{position:absolute;left:auto;right:calc(6px + var(--safe-r));
+    top:calc(58px + var(--safe-t));margin:0;gap:2px;padding:3px;flex-direction:column;justify-content:flex-start;
+    max-height:calc(100% - 74px - var(--safe-t) - var(--safe-b));overflow-y:auto;
+    background:rgba(26,29,36,.88)}
+  #app.whiteboard-pages.writing-fullscreen #colorPalette{max-height:calc(100% - 126px - var(--safe-t) - var(--safe-b))}
+  #app.writing-fullscreen.tools-collapsed #colorPalette{display:none}
+  #app.writing-fullscreen #viewBtn{background:rgba(26,29,36,.88)}
+  #app.writing-fullscreen #err{
+    position:absolute;left:var(--safe-l);right:var(--safe-r);
+    bottom:calc(8px + var(--safe-b));z-index:7;max-height:55%;overflow:auto}
+
+  /* 全屏模式下的快速识别与撤销按钮排版 */
+  #fullscreenUndoBtn svg{width:22px;height:22px}
+  #app.writing-fullscreen #fullscreenUndoBtn{display:none}
+  #fullscreenRecognizeBtn,
+  #app.writing-fullscreen #fullscreenRecognizeBtn{
+    display:none;
+    align-items:center;
+    justify-content:center;
+    width:auto;
+    min-width:88px;
+    height:44px;
+    min-height:44px;
+    padding:0 16px;
+    background:var(--accent);
+    border:1px solid var(--accent);
+    color:#fff;
+    border-radius:12px;
+    font-size:14px;
+    font-weight:600;
+    cursor:pointer;
+    flex:none;
+    box-shadow:0 2px 8px rgba(76,141,255,.3);
+    transition:background .15s,transform .06s,opacity .15s;
+    line-height:1;
+    white-space:nowrap;
+  }
+  #fullscreenRecognizeBtn:active{
+    transform:scale(.96);
+  }
+  #fullscreenRecognizeBtn svg{
+    display:none;
+  }
+  #fullscreenRecognizeBtn .fullscreen-recog-text{
+    display:inline;
+    font-size:14px;
+    font-weight:600;
+    line-height:1;
+    color:#fff;
+    white-space:nowrap;
+  }
+  #fullscreenRecognizeBtn:disabled{
+    background:#252e42;
+    border-color:#2b354c;
+    color:#7e8b9f;
+    opacity:.55;
+    box-shadow:none;
+    cursor:not-allowed;
+  }
+  #fullscreenRecognizeBtn:disabled .fullscreen-recog-text{
+    color:#7e8b9f;
+  }
+  #fullscreenRecognizeBtn.busy{
+    opacity:.85;
+    cursor:wait;
+  }
+  #app.writing-fullscreen.tools-collapsed #fullscreenUndoBtn,
+  #app.writing-fullscreen.tools-collapsed #fullscreenRecognizeBtn{display:none}
+
+  /* 平板 / iPad 专属深度排版适配 (>= 640px 且高 >= 500px，避免手机横屏误命中) */
+  @media (min-width: 640px) and (min-height: 500px) {
+    header{padding:10px 16px;gap:12px;font-size:14px}
+    #title{font-size:15px;letter-spacing:.4px}
+    #status{font-size:13px;max-width:320px}
+    #viewBtn{min-height:42px;padding:8px 16px;font-size:14px;border-radius:12px}
+    #palmGuardBtn{min-height:42px;padding:8px 14px;font-size:14px;border-radius:12px}
+    #stage{margin:0 12px;border-radius:16px}
+    #colorPalette{margin:8px 12px 0;padding:6px;gap:8px}
+    #colorPalette button{width:44px;height:44px;min-height:44px}
+    #colorPalette button::before{width:24px;height:24px}
+    footer{padding:12px 16px 14px;gap:12px}
+    .tools{justify-content:center;gap:10px;width:100%;max-width:760px;margin:0 auto}
+    .tools button.ghost{min-width:72px;padding:10px 14px;font-size:14px;min-height:44px}
+    .tools #width{width:80px}
+    footer > .row{justify-content:center}
+    #recognizeBtn{max-width:280px;width:100%;font-size:16px;min-height:50px;border-radius:14px}
+    #fallbackBox{max-width:640px;margin:0 auto;width:100%}
+
+    /* 平板全屏下开放撤销与识别按钮 */
+    #app.writing-fullscreen #fullscreenUndoBtn{display:block;background:rgba(26,29,36,.88)}
+    #app.writing-fullscreen #fullscreenRecognizeBtn{display:inline-flex}
+
+    #app.writing-fullscreen header{
+      top:calc(10px + var(--safe-t));right:calc(12px + var(--safe-r));
+      gap:8px;padding:4px 8px;
+      align-items:center;
+      background:rgba(26,29,36,.92);border:1px solid var(--line);
+      border-radius:14px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+      box-shadow:0 4px 20px rgba(0,0,0,.35);
+    }
+    #app.writing-fullscreen #viewBtn{
+      min-height:44px;height:44px;padding:0 14px;font-size:13px;border-radius:12px;
+      display:flex;align-items:center;justify-content:center;
+    }
+    #app.writing-fullscreen #palmGuardBtn{
+      display:flex;align-items:center;gap:6px;padding:0 12px;
+      font-size:13px;width:auto;min-width:44px;
+    }
+    #app.writing-fullscreen #palmGuardBtn span{display:inline}
+    #app.writing-fullscreen #palmGuardBtn svg{display:block;width:18px;height:18px}
+    #app.writing-fullscreen #colorPalette{
+      top:calc(70px + var(--safe-t));right:calc(12px + var(--safe-r));
+      padding:5px;gap:4px;border-radius:14px;
+      box-shadow:0 4px 20px rgba(0,0,0,.35);
+    }
+    #app.writing-fullscreen #fullscreenSelectBtn{
+      left:calc(12px + var(--safe-l));top:calc(10px + var(--safe-t));
+      border-radius:14px;min-height:44px;width:44px;
+      box-shadow:0 4px 20px rgba(0,0,0,.35);
+    }
+    #app.writing-fullscreen #selectionModes{
+      left:calc(62px + var(--safe-l));top:calc(10px + var(--safe-t));
+      box-shadow:0 4px 20px rgba(0,0,0,.35);
+    }
+    #app.writing-fullscreen #pageNav{
+      right:calc(12px + var(--safe-r));bottom:calc(12px + var(--safe-b));
+      box-shadow:0 4px 20px rgba(0,0,0,.35);
+    }
+    #app.writing-fullscreen #canvasView{
+      left:calc(12px + var(--safe-l));bottom:calc(12px + var(--safe-b));
+    }
+  }
+
+  /* 平板横屏专属排版 (高 >= 500px 确保仅对平板/桌面生效，不影响手机横屏) */
+  @media (min-width: 640px) and (min-height: 500px) and (orientation: landscape) {
+    header{padding:8px 16px}
+    #stage{margin:0 12px}
+    footer{flex-direction:row;align-items:center;justify-content:space-between;padding:8px 16px;gap:16px}
+    .tools{flex:1;justify-content:flex-start;max-width:none;margin:0}
+    .tools #width{width:80px;max-width:120px}
+    footer > .row{flex:none;margin:0}
+    #recognizeBtn{width:auto;min-width:180px;max-width:220px;min-height:46px;font-size:15px}
+    #colorPalette{position:absolute;right:calc(12px + var(--safe-r));top:calc(58px + var(--safe-t));margin:0;flex-direction:column}
+    #fallbackBox{position:static;max-width:320px;margin:0}
+  }
+
+  /* iPad 全局文本选区与系统长按菜单禁用，保障 Apple Pencil 纯粹手写 */
+  .is-ipad body, .is-ipad #stage, .is-ipad #board, .is-ipad #palmRest, .is-ipad #palmRestArea, .is-ipad .palm-rest-divider{
+    -webkit-touch-callout:none;
+    -webkit-user-select:none;
+    user-select:none;
+  }
+
+  /* iPad 及手机全屏横屏专属防误触掌托垫板 (可上下拖动直线，其下区域无法书写且手掌不误触) */
+  #palmRest{
+    position:absolute;left:0;right:0;bottom:0;
+    height:0;z-index:6;pointer-events:none;display:block;
+  }
+  #palmRest[hidden]{display:none !important}
+  .palm-rest-divider{
+    position:absolute;left:0;right:0;top:0;height:36px;margin-top:-18px;
+    display:flex;align-items:center;justify-content:center;
+    cursor:ns-resize;touch-action:none;pointer-events:auto;z-index:2;
+    -webkit-user-select:none;user-select:none;
+  }
+  .palm-rest-line{
+    position:absolute;left:0;right:0;top:50%;height:1px;
+    background:rgba(148,163,184,.38);pointer-events:none;
+    transition:background .2s;
+  }
+  .palm-rest-handle{
+    position:relative;z-index:1;padding:6px 14px;pointer-events:none;
+  }
+  .palm-rest-pill{
+    width:40px;height:4px;border-radius:999px;
+    background:rgba(148,163,184,.5);
+    box-shadow:0 1px 2px rgba(0,0,0,.04);
+    transition:background .2s,transform .2s;
+  }
+  .palm-rest-divider:active .palm-rest-line,
+  .palm-rest-divider.dragging .palm-rest-line{
+    background:rgba(99,102,241,.55);
+  }
+  .palm-rest-divider:active .palm-rest-pill,
+  .palm-rest-divider.dragging .palm-rest-pill{
+    background:rgba(99,102,241,.85);
+    transform:scaleY(1.25);
+  }
+  .palm-rest-area{
+    position:absolute;left:0;right:0;top:0;bottom:0;
+    background:rgba(248,250,252,.46);
+    backdrop-filter:blur(0.5px);-webkit-backdrop-filter:blur(0.5px);
+    touch-action:none;pointer-events:auto;z-index:1;
+    cursor:default;
+  }
+  #palmRest.docked .palm-rest-divider{
+    top:auto;bottom:0;margin-top:0;margin-bottom:-10px;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <button id="dot" type="button" tabindex="-1" aria-label="连接中…" title="连接中…"></button>
+    <span id="title">airtex</span>
+    <span id="status">连接中…</span>
+    <button id="palmGuardBtn" type="button" aria-label="辅助防误触" title="辅助防误触：减少大面积触碰和多指误写，无法完全区分普通电容笔与手指" aria-pressed="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 7v5c0 5 9 9 9 9s9-4 9-9V7Z"/><path d="m8 12 3 3 5-6"/></svg><span>防误触</span>
+    </button>
+    <button id="fullscreenEraserBtn" class="fullscreen-tool" type="button" aria-label="擦笔画" title="擦笔画" aria-pressed="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 3 7 7-11 11H6l-4-4Z"/><path d="m7 12 7 7M10 21h12"/></svg>
+    </button>
+    <button id="fullscreenUndoBtn" class="fullscreen-tool" type="button" aria-label="撤销上一笔" title="撤销上一笔">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>
+    </button>
+    <button id="fullscreenClearBtn" class="fullscreen-tool" type="button" aria-label="清空所有笔迹" title="清空所有笔迹">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg>
+    </button>
+    <button id="fullscreenRecognizeBtn" class="primary-tool" type="button" aria-label="识别公式" title="识别公式" disabled>
+      <span class="fullscreen-recog-text">识别公式</span>
+    </button>
+    <button id="viewBtn" type="button" aria-pressed="false">全屏书写</button>
+  </header>
+
+  <div id="stage">
+    <canvas id="board" aria-label="手写公式画板"></canvas>
+    <button id="fullscreenSelectBtn" class="fullscreen-tool" type="button" aria-label="框选并移动笔迹" title="框选并移动笔迹" aria-pressed="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path stroke-dasharray="3 3" d="M4 4h16v16H4Z"/><path d="m10 10 9 3-4 2-2 4Z"/></svg>
+    </button>
+    <div id="selectionModes" role="group" aria-label="选择方式" hidden>
+      <button id="lassoSelectBtn" type="button" aria-pressed="true">自由套索</button>
+      <button id="rectSelectBtn" type="button" aria-pressed="false">矩形</button>
+    </div>
+    <div id="canvasView"><button id="resetViewBtn" type="button" title="让全部笔迹回到视野内">查看全部</button><span id="zoomLevel">100%</span></div>
+    <div id="hint">用手指在白色区域手写公式<br>电脑浮窗会实时显示，写好后点「识别公式」</div>
+    <div id="lock">
+      <div>
+        <b>电脑端正在用鼠标手写</b>
+        本页已暂停，电脑上的画板和这里不是同一块。<br>
+        请到电脑浮窗上书写 / 识别。
+        <div class="tip">在电脑浮窗标题栏点「→手机」即可切回手机手写<br>切回来后这里的内容原样还在</div>
+      </div>
+    </div>
+    <div id="busy"><span class="spin"></span><span id="busyText">识别中…（通常 2–8 秒）</span></div>
+    <div id="palmRest" class="palm-rest" hidden aria-label="防误触掌托区域">
+      <div id="palmRestDivider" class="palm-rest-divider" title="拖动横线调节防误触区域">
+        <div class="palm-rest-line"></div>
+        <div class="palm-rest-handle">
+          <div class="palm-rest-pill"></div>
+        </div>
+      </div>
+      <div id="palmRestArea" class="palm-rest-area"></div>
+    </div>
+  </div>
+
+  <div id="colorPalette" role="group" aria-label="画笔颜色">
+    <button type="button" data-color="#111111" style="--pen-color:#111111" aria-label="黑色画笔" title="黑色画笔" aria-pressed="true"></button>
+    <button type="button" data-color="#dc2626" style="--pen-color:#dc2626" aria-label="红色画笔" title="红色画笔" aria-pressed="false"></button>
+    <button type="button" data-color="#2563eb" style="--pen-color:#2563eb" aria-label="蓝色画笔" title="蓝色画笔" aria-pressed="false"></button>
+    <button type="button" data-color="#16a34a" style="--pen-color:#16a34a" aria-label="绿色画笔" title="绿色画笔" aria-pressed="false"></button>
+    <button type="button" data-color="#ea580c" style="--pen-color:#ea580c" aria-label="橙色画笔" title="橙色画笔" aria-pressed="false"></button>
+    <button type="button" data-color="#9333ea" style="--pen-color:#9333ea" aria-label="紫色画笔" title="紫色画笔" aria-pressed="false"></button>
+  </div>
+
+  <nav id="pageNav" aria-label="手机白板翻页" hidden>
+    <button id="prevPageBtn" type="button" aria-label="上一页" title="上一页">‹</button>
+    <span id="pageNumber" role="status" aria-live="polite">1 / 1</span>
+    <button id="nextPageBtn" type="button" aria-label="下一页（末页新建）" title="下一页（末页新建）">›</button>
+  </nav>
+  <div id="err"></div>
+
+  <footer>
+    <div class="tools">
+      <span style="font-size:12px;color:var(--dim)">笔粗</span>
+      <input id="width" type="range" min="1" max="10" step="1" value="3" aria-label="笔画粗细">
+      <button id="selectBtn" class="ghost" type="button" aria-pressed="false">框选</button>
+      <button id="eraserBtn" class="ghost">擦笔画</button>
+      <button id="undoBtn" class="ghost">撤销</button>
+      <button id="clearBtn" class="ghost">清空</button>
+    </div>
+    <div class="row">
+      <button id="recognizeBtn" class="primary" disabled>识别公式</button>
+    </div>
+    <details id="fallbackBox">
+      <summary>没连上电脑？点这里</summary>
+      <div style="padding:6px 0">
+        电脑上的浮窗会显示地址和二维码；也可以手动填：
+        <div class="row" style="margin-top:6px">
+          <input id="serverInput" inputmode="url" placeholder="http://192.168.1.23:8765/"
+            style="flex:1;min-height:44px;border-radius:10px;border:1px solid var(--line);
+            background:#0d0f13;color:#fff;padding:0 10px;font-size:14px">
+          <button id="connectBtn" class="ghost">连接</button>
+        </div>
+        <div style="margin-top:6px">当前地址：<code id="curUrl"></code></div>
+        <div id="ipadTip" style="margin-top:8px;font-size:12px;color:#94a3b8;line-height:1.5;display:none">
+          iPad 提示：在 Safari 点击右上角「分享」按钮选择「添加到主屏幕」，即可享受真正的无边框独立手写板体验。
+        </div>
+      </div>
+    </details>
+  </footer>
+</div>
+<div id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var TOKEN = window.AIRTEX_TOKEN || "";
+  var PROTOCOL = window.AIRTEX_PROTOCOL || 0;
+  var $ = function (id) { return document.getElementById(id); };
+
+  // 识别 iPad / iOS 与平板设备（iPadOS 13+ 在 Safari 中默认伪装为 MacIntel，需结合 touchPoints 检测；同时兼容 ?ipad=1 与 .is-ipad 便于测试验证）
+  var isIPad = (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) ||
+               /iPad/i.test(navigator.userAgent) ||
+               (typeof location !== "undefined" && location.search && location.search.indexOf("ipad=1") !== -1) ||
+               (typeof document !== "undefined" && document.documentElement && document.documentElement.classList.contains("is-ipad"));
+  var isIOS = isIPad || /iPhone|iPod/i.test(navigator.userAgent);
+  var isTablet = isIPad || (Math.min(window.screen.width, window.screen.height) >= 600 && (navigator.maxTouchPoints > 0 || 'ontouchstart' in window));
+  if (isIPad) document.documentElement.classList.add("is-ipad");
+  if (isTablet) document.documentElement.classList.add("is-tablet");
+
+  // 每个页面实例一个客户端 id：服务端据此不回推自己写入的内容，
+  // 避免手机收到自己上一帧的旧内容（或空内容）而把画布清掉。
+  var CLIENT_ID = (function () {
+    try {
+      var k = "airtex_client_id";
+      var v = sessionStorage.getItem(k);
+      if (!v) {
+        v = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        sessionStorage.setItem(k, v);
+      }
+      return v;
+    } catch (e) {
+      return "c" + Date.now().toString(36);
+    }
+  })();
+
+  var canvas = $("board"), ctx = canvas.getContext("2d");
+  var stage = $("stage");
+  var landscape = window.matchMedia("(orientation: landscape)");
+  var writingFullscreen = false, resizeFrame = 0, toolsCollapsed = false;
+  var userToggledFullscreen = false;
+
+  function updateToolsToggle() {
+    $("dot").parentElement.classList.toggle("tools-collapsed", toolsCollapsed);
+    $("app").classList.toggle("tools-collapsed", toolsCollapsed);
+    var label = $("status").textContent;
+    if (writingFullscreen) {
+      label += toolsCollapsed ? "，点击展开工具和颜色板" : "，点击收起工具和颜色板";
+      $("dot").setAttribute("aria-expanded", String(!toolsCollapsed));
+      $("dot").tabIndex = 0;
+    } else {
+      $("dot").removeAttribute("aria-expanded");
+      $("dot").tabIndex = -1;
+    }
+    $("dot").title = label;
+    $("dot").setAttribute("aria-label", label);
+  }
+  $("dot").onclick = function () {
+    if (!writingFullscreen) return;
+    toolsCollapsed = !toolsCollapsed;
+    updateToolsToggle();
+  };
+
+  function scheduleFit() {
+    if (resizeFrame) return;
+    resizeFrame = requestAnimationFrame(function () {
+      resizeFrame = 0;
+      fitCanvas();
+    });
+  }
+
+  function updateViewBtnLabel() {
+    var label;
+    if (writingFullscreen) {
+      label = isTablet ? "退出全屏" : "显示工具";
+    } else {
+      label = "全屏书写";
+    }
+    $("viewBtn").textContent = label;
+    $("viewBtn").setAttribute("aria-pressed", String(writingFullscreen));
+    $("viewBtn").title = writingFullscreen ? (isTablet ? "退出全屏书写模式" : "显示撤销、橡皮和识别按钮") : "收起工具，全屏书写";
+  }
+
+  function setWritingFullscreen(on) {
+    writingFullscreen = on;
+    $("app").classList.toggle("writing-fullscreen", on);
+    updateViewBtnLabel();
+    updateToolsToggle();
+    // 手机进出全屏横屏时同步显示/隐藏掌托垫板
+    if (typeof updatePalmRestLayout === "function") updatePalmRestLayout();
+    scheduleFit();
+  }
+
+  $("viewBtn").onclick = function () {
+    userToggledFullscreen = true;
+    setWritingFullscreen(!writingFullscreen);
+    // iPad / iOS 上严禁调用原生 requestFullscreen()！
+    // 原因是 iPadOS Safari 原生全屏会触发系统“向下轻扫退出全屏”悬浮提示和手势拦截，
+    // 用户拿笔向下书写竖笔画或靠近顶部时会被系统判定为轻扫误退出。
+    // 使用纯净的页面级沉浸全屏（已填满 100dvh），完全免疫手势误退，手写不受打断。
+    if (!isIPad && !isIOS) {
+      if (writingFullscreen && !document.fullscreenElement && document.documentElement.requestFullscreen) {
+        try {
+          var request = document.documentElement.requestFullscreen();
+          if (request && request.catch) request.catch(function () {});
+        } catch (e) {}
+      } else if (!writingFullscreen && document.fullscreenElement && document.exitFullscreen) {
+        var exit = document.exitFullscreen();
+        if (exit && exit.catch) exit.catch(function () {});
+      }
+    }
+  };
+  document.addEventListener("fullscreenchange", function () {
+    if (!isIPad && !isIOS && !document.fullscreenElement) setWritingFullscreen(false);
+    scheduleFit();
+  });
+
+  // ---------- 文档模型 ----------
+  var doc = { w: 1000, h: 700, infinite: true, strokes: [] };
+  var redo = [], undo = [];
+  // 视角只存手机本地；笔迹始终用不受屏幕尺寸限制的世界坐标。
+  var view = { x: 0, y: 0, scale: 0 };
+  var pagesEnabled = !!window.AIRTEX_PARAGRAPH, pages = [], pageIndex = 0;
+  var notebookDb = null, pagesReady = false, restoredPages = false, notebookSaveError = false;
+  var notebookKey = TOKEN || "default", pendingRecognition = "";
+
+  function newPage() {
+    return { id: "p" + Date.now().toString(36) + Math.random().toString(36).slice(2),
+      doc: { w: doc.w, h: doc.h, infinite: true, strokes: [] }, redo: [], undo: [],
+      view: { x: 0, y: 0, scale: view.scale } };
+  }
+  function currentPageId() { return pagesEnabled && pages[pageIndex] ? pages[pageIndex].id : ""; }
+  function storageError() {
+    if (!notebookSaveError) toast("手机本地保存不可用，关闭页面前请保留草稿");
+    notebookSaveError = true;
+  }
+  function readNotebook(store, key) {
+    return new Promise(function (resolve, reject) {
+      var request = notebookDb.transaction(store).objectStore(store).get(key);
+      request.onsuccess = function () { resolve(request.result); };
+      request.onerror = function () { reject(request.error); };
+    });
+  }
+  async function initializePages() {
+    if (!pagesEnabled) return;
+    $("app").classList.add("whiteboard-pages");
+    try {
+      notebookDb = await new Promise(function (resolve, reject) {
+        var request = indexedDB.open("airtex-whiteboard-notebooks", 1);
+        request.onupgradeneeded = function () {
+          request.result.createObjectStore("books"); request.result.createObjectStore("pages");
+        };
+        request.onsuccess = function () { resolve(request.result); };
+        request.onerror = request.onblocked = function () { reject(request.error); };
+      });
+      var book = await readNotebook("books", notebookKey);
+      if (book && Array.isArray(book.ids) && book.ids.length) {
+        var stored = await Promise.all(book.ids.map(function (id) { return readNotebook("pages", notebookKey + ":" + id); }));
+        if (stored.every(function (p) { return p && p.id && p.doc && p.doc.w > 0 && p.doc.h > 0 && Array.isArray(p.doc.strokes); })) {
+          pages = stored; pageIndex = Math.max(0, Math.min(book.index || 0, pages.length - 1)); restoredPages = true;
+          serverCleared = book.clearedSeq || 0;
+        }
+      }
+    } catch (e) { storageError(); }
+    if (!pages.length) pages = [newPage()];
+    doc = pages[pageIndex].doc; redo = pages[pageIndex].redo || [];
+    undo = pages[pageIndex].undo || penHistory();
+    view = pages[pageIndex].view || { x: 0, y: 0, scale: 0 };
+    pagesReady = true; $("pageNav").hidden = false; updatePages();
+  }
+  function saveLocalPage() {
+    if (!pagesEnabled || !pagesReady) return;
+    pages[pageIndex].doc = doc; pages[pageIndex].redo = redo;
+    pages[pageIndex].undo = undo; pages[pageIndex].view = view;
+    if (!notebookDb) return;
+    try {
+      var tx = notebookDb.transaction(["books", "pages"], "readwrite");
+      tx.objectStore("pages").put({ id: currentPageId(), doc: compactDoc(), redo: redo, undo: undo, view: view }, notebookKey + ":" + currentPageId());
+      tx.objectStore("books").put({ ids: pages.map(function (p) { return p.id; }), index: pageIndex, clearedSeq: serverCleared }, notebookKey);
+      tx.onerror = tx.onabort = storageError;
+    } catch (e) { storageError(); }
+  }
+  function updatePages() {
+    if (!pagesEnabled) return;
+    $("pageNumber").textContent = (pageIndex + 1) + " / " + pages.length;
+    $("prevPageBtn").disabled = !pagesReady || locked() || pageIndex === 0;
+    $("nextPageBtn").disabled = !pagesReady || locked();
+    $("nextPageBtn").title = pageIndex === pages.length - 1 ? "新建下一页" : "下一页";
+  }
+  function turnPage(step) {
+    if (!pagesEnabled || !pagesReady || locked() || pageIndex + step < 0) return;
+    var heldTouch = touchActive || pageTouchBlocked;
+    onUp({ type: "touchcancel", cancelable: false }); saveLocalPage();
+    if (pageIndex + step === pages.length) pages.push(newPage());
+    pageIndex += step;
+    doc = pages[pageIndex].doc; redo = pages[pageIndex].redo || [];
+    undo = pages[pageIndex].undo || penHistory();
+    view = pages[pageIndex].view || { x: 0, y: 0, scale: 0 };
+    selection = null; selectionDrag = null; navigation = null; navigating = false;
+    drawing = null; lastPt = null; activeTouchId = null; activeTouchIsStylus = false; guardMouseDown = false;
+    pageTouchBlocked = heldTouch;
+    pendingRecognition = ""; lastLatex = ""; $("err").className = "";
+    dirty = true; fitDocToCanvas(); relayout(); redraw(); updatePages(); queueSync();
+  }
+  $("prevPageBtn").onclick = function () { turnPage(-1); };
+  $("nextPageBtn").onclick = function () { turnPage(1); };
+  var dirty = false;        // 本地有未同步的修改
+  var sending = false;
+  var sending2 = false;
+
+  // 电脑端当前的输入模式：phone=手机手写（本页可写）；pc=鼠标手写（本页暂停）。
+  // 两种模式在电脑上是两块不同的画布，所以这里必须真的停下来，
+  // 否则手机一笔就会把电脑鼠标写的内容覆盖掉。
+  var mode = "phone";
+  function locked() { return mode === "pc"; }
+
+  var penWidth = 3;
+  var eraser = false;
+  var selecting = false, selection = null, selectionDrag = null;
+  var selectionMode = "lasso";
+  try { if (localStorage.getItem("airtex_selection_mode") === "rect") selectionMode = "rect"; } catch (e) {}
+  var eraseUndo = [], inputDown = false;
+  var drawing = null;       // 当前正在画的笔迹
+  var erased = false;       // 本次擦除动作是否删掉过东西
+  var penColor = "#111111";
+  var colorButtons = Array.from($("colorPalette").querySelectorAll("button"));
+  try {
+    var savedColor = localStorage.getItem("airtex_pen_color");
+    if (colorButtons.some(function (button) { return button.dataset.color === savedColor; })) penColor = savedColor;
+  } catch (e) {}
+  function updateColorButtons() {
+    colorButtons.forEach(function (button) {
+      button.setAttribute("aria-pressed", String(button.dataset.color === penColor));
+    });
+  }
+  updateColorButtons();
+  colorButtons.forEach(function (button) {
+    button.onclick = function () {
+      onUp({ type: "touchcancel", cancelable: false });
+      penColor = button.dataset.color;
+      eraser = false;
+      selecting = false; selection = null;
+      updateEraserButtons();
+      updateSelectionButtons(); redraw();
+      updateColorButtons();
+      try { localStorage.setItem("airtex_pen_color", penColor); } catch (e) {}
+    };
+  });
+
+  // ---------- 笔画橡皮：点/划到哪一笔就整笔删掉 ----------
+  // 点到线段的距离平方
+  function segDist2(px, py, ax, ay, bx, by) {
+    var dx = bx - ax, dy = by - ay;
+    var len2 = dx * dx + dy * dy;
+    var t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    var qx = ax + t * dx, qy = ay + t * dy;
+    return (px - qx) * (px - qx) + (py - qy) * (py - qy);
+  }
+
+  function strokeHit(s, x, y, tol) {
+    var p = s.p, i;
+    var t2 = tol * tol;
+    if (p.length === 1) {
+      var dx = x - p[0][0], dy = y - p[0][1];
+      return dx * dx + dy * dy <= t2;
+    }
+    for (i = 1; i < p.length; i++) {
+      if (segDist2(x, y, p[i - 1][0], p[i - 1][1], p[i][0], p[i][1]) <= t2) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // 返回本次是否删除了笔画
+  function eraseAt(x, y) {
+    // 容差跟着笔宽走，手指touch更宽容一点
+    var base = Math.max(16, (penWidth + 4) * 5) * dpr / scale;
+    var removed = false;
+    for (var i = doc.strokes.length - 1; i >= 0; i--) {
+      var s = doc.strokes[i];
+      var tol = base + (s.w || 3);
+      if (strokeHit(s, x, y, tol)) {
+        eraseUndo.push({ index: i, stroke: s });
+        doc.strokes.splice(i, 1);
+        removed = true;
+        break;                 // 一次只擦一笔，避免划一下全没了
+      }
+    }
+    return removed;
+  }
+
+  // ---------- 画布尺寸 ----------
+  var dpr = 1, cssW = 0, cssH = 0;
+  var scale = 1, offX = 0, offY = 0;
+
+  // w/h 仅表示初始视野；旋转、全屏、缩放都不再改写已有笔迹。
+  function fitDocToCanvas() {
+    if (!view.scale) {
+      if (!doc.strokes.length) {
+        var unit = 1000 / Math.min(cssW, cssH);
+        doc.w = Math.round(cssW * unit); doc.h = Math.round(cssH * unit);
+      }
+      view.scale = Math.min(cssW / doc.w, cssH / doc.h);
+      view.x = (doc.w - cssW / view.scale) / 2;
+      view.y = (doc.h - cssH / view.scale) / 2;
+    }
+    if (!doc.infinite) {
+      doc.infinite = true;
+      if (doc.strokes.length) { dirty = true; queueSync(); }
+    }
+  }
+
+  // 文档坐标 <-> 画布像素 的映射（画板居中；比例一致时 offX/offY 就是 0）
+  function relayout() {
+    scale = view.scale * dpr;
+    offX = -view.x * scale; offY = -view.y * scale;
+    $("zoomLevel").textContent = Math.round(view.scale / Math.min(cssW / doc.w, cssH / doc.h) * 100) + "%";
+  }
+
+  function fitCanvas() {
+    var w = stage.clientWidth, h = stage.clientHeight;
+    if (!w || !h) return;
+    var nextDpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    if (w === cssW && h === cssH && dpr === nextDpr) return;
+    // 尺寸变化发生在落笔期间时先收笔，避免新旧坐标连接成一条斜线。
+    if (inputDown || navigation) onUp({ type: "touchcancel", cancelable: false });
+    var center = view.scale && cssW ? [view.x + cssW / view.scale / 2, view.y + cssH / view.scale / 2] : null;
+    cssW = w; cssH = h; dpr = nextDpr;
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    canvas.style.width = cssW + "px";
+    canvas.style.height = cssH + "px";
+    fitDocToCanvas();
+    if (center) { view.x = center[0] - cssW / view.scale / 2; view.y = center[1] - cssH / view.scale / 2; }
+    relayout();
+    if (typeof updatePalmRestLayout === "function") updatePalmRestLayout();
+    redraw();
+    saveLocalPage();
+  }
+
+  function toDoc(clientX, clientY) {
+    var r = canvas.getBoundingClientRect();
+    var x = ((clientX - r.left) * dpr - offX) / scale;
+    var y = ((clientY - r.top) * dpr - offY) / scale;
+    return [x, y];
+  }
+
+  // ---------- 绘制 ----------
+  function strokePath(s) {
+    var p = s.p;
+    if (p.length === 0) return;
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = Math.max(1, s.w * scale);
+    ctx.strokeStyle = ctx.fillStyle = s.k === "eraser" ? "#ffffff" : (s.c || "#111111");
+    if (p.length === 1) {
+      var r = ctx.lineWidth / 2;
+      ctx.beginPath();
+      ctx.arc(offX + p[0][0] * scale, offY + p[0][1] * scale, r, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(offX + p[0][0] * scale, offY + p[0][1] * scale);
+      for (var i = 1; i < p.length; i++) {
+        ctx.lineTo(offX + p[i][0] * scale, offY + p[i][1] * scale);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function redraw() {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+    for (var i = 0; i < doc.strokes.length; i++) strokePath(doc.strokes[i]);
+    if (drawing) strokePath(drawing);
+    drawSelection();
+    $("hint").className = (doc.strokes.length || locked()) ? "hide" : "";
+    updateButtons();
+  }
+
+  // 电脑端鼠标手写时，本页所有书写/识别入口都停用
+  function updateButtons() {
+    var lock = locked();
+    $("recognizeBtn").disabled = lock || busy || !!pendingRecognition || doc.strokes.length === 0;
+    $("undoBtn").disabled = lock;
+    $("clearBtn").disabled = lock;
+    $("eraserBtn").disabled = lock;
+    $("fullscreenClearBtn").disabled = lock;
+    $("fullscreenEraserBtn").disabled = lock;
+    if ($("fullscreenUndoBtn")) $("fullscreenUndoBtn").disabled = lock || (!doc.strokes.length && !undo.length);
+    if ($("fullscreenRecognizeBtn")) $("fullscreenRecognizeBtn").disabled = lock || busy || !!pendingRecognition || doc.strokes.length === 0;
+    $("selectBtn").disabled = lock;
+    $("fullscreenSelectBtn").disabled = lock;
+    $("lassoSelectBtn").disabled = lock || busy;
+    $("rectSelectBtn").disabled = lock || busy;
+    $("width").disabled = lock;
+    colorButtons.forEach(function (button) { button.disabled = lock; });
+    updatePages();
+  }
+
+  // ---------- 模式：手机手写 / 鼠标手写 ----------
+  function applyMode(m) {
+    var next = (m === "pc") ? "pc" : "phone";
+    if (next === mode) return;
+    if (next === "pc") {
+      cancelPreview(); navigation = null; navigating = false;
+      pageTouchBlocked = touchActive;
+      selection = null; selecting = false; updateSelectionButtons();
+    }
+    mode = next;
+    if (locked()) {
+      // 停笔、放弃正在画的一笔；本地笔迹原样留着，切回来接着写
+      drawing = null;
+      lastPt = null;
+      activeTouchId = null; activeTouchIsStylus = false; guardMouseDown = false;
+      eraser = false;
+      updateEraserButtons();
+      $("lock").className = "show";
+      setBusy(false);
+      setStatus("电脑鼠标手写中", true);
+    } else {
+      $("lock").className = "";
+      setStatus("已连接", true);
+      redraw();
+      if (dirty) syncNow();          // 暂停期间的本地修改在这里补发
+    }
+    updateButtons();
+    $("hint").className = (doc.strokes.length || locked()) ? "hide" : "";
+  }
+
+  // ---------- 框选与撤销 ----------
+  function penHistory() {
+    return doc.strokes.map(function (_, i) { return { kind: "add", index: i }; });
+  }
+  function recordUndo(entry) { undo.push(entry); redo = []; }
+  function boundsOf(strokes, pad) {
+    var b = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+    strokes.forEach(function (s) {
+      if (s.k === "eraser") return;
+      var r = (s.w || 3) / 2 + (pad || 0);
+      s.p.forEach(function (p) {
+        b.left = Math.min(b.left, p[0] - r); b.top = Math.min(b.top, p[1] - r);
+        b.right = Math.max(b.right, p[0] + r); b.bottom = Math.max(b.bottom, p[1] + r);
+      });
+    });
+    return isFinite(b.left) ? b : null;
+  }
+  function inside(p, b) { return p[0] >= b.left && p[0] <= b.right && p[1] >= b.top && p[1] <= b.bottom; }
+  function rectBetween(a, b) {
+    return { left: Math.min(a[0], b[0]), top: Math.min(a[1], b[1]),
+      right: Math.max(a[0], b[0]), bottom: Math.max(a[1], b[1]) };
+  }
+  function intersectsRect(s, b) {
+    if (s.k === "eraser") return false;
+    var r = (s.w || 3) / 2;
+    b = { left: b.left - r, top: b.top - r, right: b.right + r, bottom: b.bottom + r };
+    if (s.p.some(function (p) { return inside(p, b); })) return true;
+    // 线段与矩形相交；即便采样点都在框外，穿过选框的笔画也能选中。
+    for (var i = 1; i < s.p.length; i++) {
+      var a = s.p[i - 1], z = s.p[i], dx = z[0] - a[0], dy = z[1] - a[1];
+      var ps = [-dx, dx, -dy, dy], qs = [a[0] - b.left, b.right - a[0], a[1] - b.top, b.bottom - a[1]];
+      var low = 0, high = 1, hit = true;
+      for (var j = 0; j < 4; j++) {
+        if (ps[j] === 0) { if (qs[j] < 0) { hit = false; break; } }
+        else {
+          var t = qs[j] / ps[j];
+          if (ps[j] < 0) low = Math.max(low, t); else high = Math.min(high, t);
+          if (low > high) { hit = false; break; }
+        }
+      }
+      if (hit) return true;
+    }
+    return false;
+  }
+  function pointInPolygon(p, path) {
+    var contained = false;
+    for (var i = 0, j = path.length - 1; i < path.length; j = i++) {
+      var a = path[j], b = path[i];
+      if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]) contained = !contained;
+    }
+    return contained;
+  }
+  function segmentsDist2(a, b, c, d) {
+    function side(p, q, r) { return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]); }
+    var abC = side(a, b, c), abD = side(a, b, d), cdA = side(c, d, a), cdB = side(c, d, b);
+    if (((abC < 0 && abD > 0) || (abC > 0 && abD < 0)) && ((cdA < 0 && cdB > 0) || (cdA > 0 && cdB < 0))) return 0;
+    return Math.min(segDist2(a[0], a[1], c[0], c[1], d[0], d[1]), segDist2(b[0], b[1], c[0], c[1], d[0], d[1]),
+      segDist2(c[0], c[1], a[0], a[1], b[0], b[1]), segDist2(d[0], d[1], a[0], a[1], b[0], b[1]));
+  }
+  function intersectsPolygon(s, path, bounds) {
+    if (s.k === "eraser" || !s.p.length) return false;
+    var b = boundsOf([s], 0);
+    if (b.right < bounds.left || b.left > bounds.right || b.bottom < bounds.top || b.top > bounds.bottom) return false;
+    if (s.p.some(function (p) { return pointInPolygon(p, path); })) return true;
+    var radius2 = Math.pow((s.w || 3) / 2, 2);
+    for (var i = 0; i < s.p.length; i++) {
+      var a = s.p[i], z = s.p[Math.max(0, i - 1)];
+      for (var j = 0, prev = path.length - 1; j < path.length; prev = j++) {
+        if (segmentsDist2(a, z, path[prev], path[j]) <= radius2) return true;
+      }
+    }
+    return false;
+  }
+  function validLasso(path) {
+    if (path.length < 3) return false;
+    // 用三角形面积的绝对值之和，交叉轨迹的两个区域不会互相抵消。
+    var area = 0, a = path[0];
+    for (var i = 2; i < path.length; i++) {
+      var b = path[i - 1], c = path[i];
+      area += Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) / 2;
+    }
+    return area * scale * scale > 16 * dpr * dpr;
+  }
+  function drawSelection() {
+    var b = selectionDrag && selectionDrag.kind === "box" ? rectBetween(selectionDrag.start, selectionDrag.end)
+      : selection && selection.bounds;
+    var path = selectionDrag && selectionDrag.kind === "lasso" ? selectionDrag.path : selection && selection.path;
+    if (!b && !path) return;
+    ctx.save(); ctx.strokeStyle = "#2563eb"; ctx.fillStyle = "rgba(37,99,235,.07)";
+    ctx.lineWidth = 1.5 * dpr; ctx.setLineDash([6 * dpr, 4 * dpr]);
+    if (path) {
+      ctx.beginPath();
+      path.forEach(function (p, i) { if (i) ctx.lineTo(offX + p[0] * scale, offY + p[1] * scale); else ctx.moveTo(offX + p[0] * scale, offY + p[1] * scale); });
+      ctx.closePath(); ctx.fill("evenodd"); ctx.stroke();
+    } else {
+      var x = offX + b.left * scale, y = offY + b.top * scale;
+      var w = (b.right - b.left) * scale, h = (b.bottom - b.top) * scale;
+      ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+    }
+    ctx.restore();
+  }
+  function beginSelection(xy) {
+    var hit = selection && (selection.path ? pointInPolygon(xy, selection.path) || selection.indices.some(function (i) {
+      return strokeHit(doc.strokes[i], xy[0], xy[1], 8 * dpr / scale + (doc.strokes[i].w || 3) / 2);
+    }) : inside(xy, selection.bounds));
+    if (hit) {
+      selectionDrag = { kind: "move", start: xy, dx: 0, dy: 0,
+        original: selection.indices.map(function (i) { return doc.strokes[i].p.map(function (p) { return p.slice(); }); }) };
+      selectionDrag.originalPath = selection.path ? selection.path.map(function (p) { return p.slice(); }) : null;
+      selectionDrag.originalByIndex = Object.create(null);
+      selection.indices.forEach(function (index, n) { selectionDrag.originalByIndex[index] = selectionDrag.original[n]; });
+    } else {
+      selection = null;
+      selectionDrag = selectionMode === "lasso" ? { kind: "lasso", path: [xy] } : { kind: "box", start: xy, end: xy };
+    }
+    redraw();
+  }
+  function moveSelection(xy) {
+    if (!selectionDrag) return;
+    if (selectionDrag.kind === "box") selectionDrag.end = xy;
+    else if (selectionDrag.kind === "lasso") {
+      var last = selectionDrag.path[selectionDrag.path.length - 1];
+      if (Math.hypot(xy[0] - last[0], xy[1] - last[1]) * scale < 2 * dpr) return;
+      selectionDrag.path.push(xy);
+    }
+    else {
+      var dx = xy[0] - selectionDrag.start[0], dy = xy[1] - selectionDrag.start[1];
+      selectionDrag.dx = dx; selectionDrag.dy = dy;
+      selection.indices.forEach(function (index, n) {
+        doc.strokes[index].p = selectionDrag.original[n].map(function (p) { return [p[0] + dx, p[1] + dy]; });
+      });
+      selection.bounds = boundsOf(selection.indices.map(function (i) { return doc.strokes[i]; }), 8 * dpr / scale);
+      if (selectionDrag.originalPath) selection.path = selectionDrag.originalPath.map(function (p) { return [p[0] + dx, p[1] + dy]; });
+    }
+    redraw();
+  }
+  function finishSelection() {
+    if (!selectionDrag) return;
+    if (selectionDrag.kind === "box" || selectionDrag.kind === "lasso") {
+      var path = selectionDrag.kind === "lasso" ? selectionDrag.path : null;
+      var b = path ? boundsOf([{ p: path, w: 0 }], 0) : rectBetween(selectionDrag.start, selectionDrag.end), indices = [];
+      if (path ? validLasso(path) : (b.right - b.left) * scale > 4 * dpr || (b.bottom - b.top) * scale > 4 * dpr) {
+        doc.strokes.forEach(function (s, i) { if (path ? intersectsPolygon(s, path, b) : intersectsRect(s, b)) indices.push(i); });
+      }
+      selection = indices.length ? { indices: indices, path: path, bounds: boundsOf(indices.map(function (i) { return doc.strokes[i]; }), 8 * dpr / scale) } : null;
+      if (!selection) toast(path ? "圈内没有笔迹，请重新圈选" : "框内没有笔迹，拖动虚线框重新选择");
+    } else if (Math.abs(selectionDrag.dx) + Math.abs(selectionDrag.dy) > .001) {
+      recordUndo({ kind: "move", indices: selection.indices.slice(), dx: selectionDrag.dx, dy: selectionDrag.dy });
+      selectionDrag = null;
+      dirty = true; queueSync();
+    }
+    selectionDrag = null; redraw();
+  }
+  function updateSelectionButtons() {
+    $("selectBtn").className = selecting ? "ghost on" : "ghost";
+    $("selectBtn").setAttribute("aria-pressed", String(selecting));
+    $("fullscreenSelectBtn").classList.toggle("on", selecting);
+    $("fullscreenSelectBtn").setAttribute("aria-pressed", String(selecting));
+    $("selectionModes").hidden = !selecting;
+    $("lassoSelectBtn").classList.toggle("on", selectionMode === "lasso");
+    $("lassoSelectBtn").setAttribute("aria-pressed", String(selectionMode === "lasso"));
+    $("rectSelectBtn").classList.toggle("on", selectionMode === "rect");
+    $("rectSelectBtn").setAttribute("aria-pressed", String(selectionMode === "rect"));
+    $("fullscreenSelectBtn").title = selectionMode === "lasso" ? "自由套索选择并移动笔迹" : "矩形框选并移动笔迹";
+    $("fullscreenSelectBtn").setAttribute("aria-label", $("fullscreenSelectBtn").title);
+    $("fullscreenSelectBtn").querySelector("path").setAttribute("d", selectionMode === "lasso" ? "M5 17C1 13 3 4 11 3s12 8 9 13-13 7-15 1Z" : "M4 4h16v16H4Z");
+    canvas.style.cursor = selecting ? "default" : "crosshair";
+  }
+  $("selectBtn").onclick = $("fullscreenSelectBtn").onclick = function () {
+    if (locked() || busy) return;
+    onUp({ type: "touchcancel", cancelable: false });
+    selecting = !selecting; eraser = false; selection = null;
+    updateEraserButtons(); updateSelectionButtons(); redraw();
+    toast(selecting ? selectionMode === "lasso" ? "沿任意轨迹圈选，松手自动闭合；拖动圈内移动" : "拖出虚线框选择笔迹，再拖动框内移动" : "回到书写模式");
+  };
+  ["lasso", "rect"].forEach(function (shape) {
+    $(shape === "lasso" ? "lassoSelectBtn" : "rectSelectBtn").onclick = function () {
+      if (locked() || busy || shape === selectionMode) return;
+      onUp({ type: "touchcancel", cancelable: false });
+      selectionMode = shape; selection = null;
+      try { localStorage.setItem("airtex_selection_mode", shape); } catch (e) {}
+      updateSelectionButtons(); redraw();
+    };
+  });
+  updateSelectionButtons();
+  $("resetViewBtn").onclick = function () {
+    onUp({ type: "touchcancel", cancelable: false });
+    var b = boundsOf(doc.strokes, 0);
+    if (b) {
+      view.scale = Math.min(8, (cssW - 64) / Math.max(80, b.right - b.left), (cssH - 64) / Math.max(80, b.bottom - b.top));
+      view.x = (b.left + b.right - cssW / view.scale) / 2;
+      view.y = (b.top + b.bottom - cssH / view.scale) / 2;
+    } else { view.scale = Math.min(cssW / doc.w, cssH / doc.h); view.x = 0; view.y = 0; }
+    relayout(); redraw(); saveLocalPage();
+  };
+
+  // ---------- 输入 ----------
+  var lastPt = null;
+  var touchActive = false;      // 触摸进行中时忽略鼠标事件，避免重复落笔
+  var pageTouchBlocked = false; // 翻页时仍按着屏幕的触点必须抬起后才能写/擦新页
+  var palmGuard = false, activeTouchId = null, activeTouchIsStylus = false, guardMouseDown = false;
+  var navigation = null, navigating = false;
+
+  // ---------- iPad 及手机全屏横屏专属防误触掌托垫板 (可上下拖动直线，其下区域无法书写且手掌不误触) ----------
+  var palmRestRatio = 0.33; // 默认下半部分 33% 掌托防误触区域
+  try {
+    var savedRatio = parseFloat(localStorage.getItem("airtex_ipad_palm_rest_ratio"));
+    if (Number.isFinite(savedRatio) && savedRatio >= 0 && savedRatio <= 0.85) {
+      palmRestRatio = savedRatio;
+    }
+  } catch (e) {}
+  var palmRestHeight = 0;
+  var palmRestVisible = false;
+  var palmRestDragging = false;
+  var palmRestDragStartY = 0;
+  var palmRestDragStartH = 0;
+
+  try {
+    var savedGuard = localStorage.getItem("airtex_palm_guard");
+    if (isIPad) {
+      // iPad 端默认开启防误触及掌托垫板；若用户之前显式关闭过则遵循偏好
+      palmGuard = savedGuard === null ? true : savedGuard === "on";
+    } else {
+      palmGuard = savedGuard === "on";
+    }
+  } catch (e) {}
+  // 掌托垫板适用场景：iPad 全程可用；手机仅在「全屏书写 + 横屏」时可用（其余手机场景保持原样）
+  function palmRestSupported() {
+    return isIPad || (!isTablet && writingFullscreen && landscape.matches);
+  }
+  palmRestVisible = palmGuard && palmRestSupported();
+
+  function updatePalmRestLayout() {
+    var el = $("palmRest");
+    if (!el) return;
+    palmRestVisible = palmGuard && palmRestSupported();
+    if (!palmRestVisible) {
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    var stageH = stage.clientHeight || stage.getBoundingClientRect().height;
+    if (stageH <= 0) return;
+    palmRestHeight = Math.round(stageH * palmRestRatio);
+    palmRestHeight = Math.max(0, Math.min(Math.round(stageH * 0.85), palmRestHeight));
+    el.style.height = palmRestHeight + "px";
+    el.classList.toggle("docked", palmRestHeight <= 8);
+  }
+
+  function isPointInPalmRest(clientX, clientY) {
+    if (!palmRestSupported() || !palmRestVisible || palmRestHeight <= 0) return false;
+    var r = canvas.getBoundingClientRect();
+    if (!r || !r.height) return false;
+    var lineY = r.bottom - palmRestHeight;
+    return clientY >= lineY;
+  }
+
+  function updatePalmGuardButton() {
+    $("palmGuardBtn").classList.toggle("on", palmGuard);
+    $("palmGuardBtn").setAttribute("aria-pressed", String(palmGuard));
+    $("palmGuardBtn").querySelector("span").textContent = palmGuard ? "防误触 · 开" : "防误触";
+  }
+  updatePalmGuardButton();
+  $("palmGuardBtn").onclick = function () {
+    // 切换时先收笔；仍贴在屏幕上的触点必须重新落笔，避免接出跳线。
+    onUp({ type: "touchcancel", cancelable: false });
+    palmGuard = !palmGuard;
+    activeTouchId = null; activeTouchIsStylus = false; guardMouseDown = false;
+    updatePalmGuardButton();
+    updatePalmRestLayout();
+    try { localStorage.setItem("airtex_palm_guard", palmGuard ? "on" : "off"); } catch (e) {}
+    var restMode = palmRestSupported();
+    toast(palmGuard
+      ? (restMode ? "防误触掌托已开启；拖动横线可调节范围" : "辅助防误触已开启；若笔尖被拦截可随时关闭")
+      : (restMode ? "防误触掌托已关闭" : "辅助防误触已关闭"));
+  };
+
+  (function initPalmRestControls() {
+    var divider = $("palmRestDivider");
+    var area = $("palmRestArea");
+    if (!divider || !area) return;
+
+    // 掌托区域完全吸收所有触碰与鼠标事件，防止手掌落下时误触画布产生笔迹
+    var absorbEvents = ["touchstart", "touchmove", "touchend", "touchcancel", "mousedown", "pointerdown", "pointermove", "pointerup"];
+    absorbEvents.forEach(function (evt) {
+      area.addEventListener(evt, function (e) {
+        if (e.cancelable) e.preventDefault();
+        e.stopPropagation();
+      }, { passive: false });
+    });
+
+    var startDrag = function (clientY, target, pointerId) {
+      palmRestDragging = true;
+      palmRestDragStartY = clientY;
+      palmRestDragStartH = palmRestHeight;
+      divider.classList.add("dragging");
+      if (pointerId !== undefined && target && target.setPointerCapture) {
+        try { target.setPointerCapture(pointerId); } catch (_) {}
+      }
+    };
+
+    var moveDrag = function (clientY) {
+      if (!palmRestDragging) return;
+      var stageH = stage.clientHeight || stage.getBoundingClientRect().height;
+      if (stageH <= 0) return;
+      var dy = clientY - palmRestDragStartY;
+      var newH = palmRestDragStartH - dy;
+      newH = Math.max(0, Math.min(Math.round(stageH * 0.85), newH));
+      palmRestHeight = newH;
+      palmRestRatio = newH / stageH;
+      var el = $("palmRest");
+      if (el) {
+        el.style.height = palmRestHeight + "px";
+        el.classList.toggle("docked", palmRestHeight <= 8);
+      }
+    };
+
+    var endDrag = function (target, pointerId) {
+      if (!palmRestDragging) return;
+      palmRestDragging = false;
+      divider.classList.remove("dragging");
+      if (pointerId !== undefined && target && target.releasePointerCapture) {
+        try { target.releasePointerCapture(pointerId); } catch (_) {}
+      }
+      try {
+        localStorage.setItem("airtex_ipad_palm_rest_ratio", palmRestRatio.toFixed(3));
+      } catch (_) {}
+    };
+
+    if (window.PointerEvent) {
+      divider.addEventListener("pointerdown", function (e) {
+        if (e.button !== 0 && e.button !== undefined) return;
+        if (e.cancelable) e.preventDefault();
+        e.stopPropagation();
+        startDrag(e.clientY, divider, e.pointerId);
+      });
+      divider.addEventListener("pointermove", function (e) {
+        if (!palmRestDragging) return;
+        if (e.cancelable) e.preventDefault();
+        e.stopPropagation();
+        moveDrag(e.clientY);
+      });
+      var onPointerDone = function (e) {
+        if (palmRestDragging) {
+          if (e.cancelable) e.preventDefault();
+          e.stopPropagation();
+          endDrag(divider, e.pointerId);
+        }
+      };
+      divider.addEventListener("pointerup", onPointerDone);
+      divider.addEventListener("pointercancel", onPointerDone);
+      window.addEventListener("pointerup", onPointerDone);
+      window.addEventListener("pointercancel", onPointerDone);
+    } else {
+      divider.addEventListener("touchstart", function (e) {
+        if (e.cancelable) e.preventDefault();
+        e.stopPropagation();
+        if (e.touches.length) startDrag(e.touches[0].clientY, divider);
+      }, { passive: false });
+      window.addEventListener("touchmove", function (e) {
+        if (!palmRestDragging) return;
+        if (e.cancelable) e.preventDefault();
+        if (e.touches.length) moveDrag(e.touches[0].clientY);
+      }, { passive: false });
+      var onTouchDone = function (e) {
+        if (palmRestDragging) endDrag(divider);
+      };
+      window.addEventListener("touchend", onTouchDone);
+      window.addEventListener("touchcancel", onTouchDone);
+    }
+
+    // 双击/双触拖动手柄：在展开（默认33%）和折叠（底端0px）之间快速切换
+    var lastTap = 0;
+    divider.addEventListener("click", function (e) {
+      if (e.cancelable) e.preventDefault();
+      e.stopPropagation();
+      var now = Date.now();
+      if (now - lastTap < 360) {
+        var stageH = stage.clientHeight || stage.getBoundingClientRect().height;
+        if (palmRestHeight <= 10) {
+          palmRestRatio = 0.33;
+        } else {
+          palmRestRatio = 0;
+        }
+        updatePalmRestLayout();
+        try { localStorage.setItem("airtex_ipad_palm_rest_ratio", palmRestRatio.toFixed(3)); } catch (_) {}
+        lastTap = 0;
+      } else {
+        lastTap = now;
+      }
+    });
+  })();
+
+  function largeContact(t) {
+    if (t.touchType === "stylus") return false;
+    // Touch 半径单位为 CSS 像素。只拦明显的大接触点，给普通电容笔留余量。
+    // 缺失或固定为 0/1 的接触面积无法判别，仍允许书写。
+    var threshold = isIPad ? 36 : 18;
+    return Math.max(t.radiusX || 0, t.radiusY || 0) > threshold;
+  }
+  function isPalmContact(t) {
+    if (isPointInPalmRest(t.clientX, t.clientY)) return true;
+    if (t.touchType === "stylus") return false;
+    // 开启防误触时，遵循书写防误触的判定（手机 >18px，iPad >36px）；
+    // 未开启防误触时，仅过滤整片压在屏幕上的超大掌印（>55px），保留成年人手指在 iPad 上的双指缩放。
+    if (palmGuard) return largeContact(t);
+    return Math.max(t.radiusX || 0, t.radiusY || 0) > 55;
+  }
+  function findTouch(list, id) {
+    for (var i = 0; list && i < list.length; i++) {
+      if (list[i].identifier === id) return list[i];
+    }
+    return null;
+  }
+  // 统计不在掌托区内的触点数：搁在掌托上的手掌/手指不应影响书写区的状态判断。
+  function writingTouchCount(list) {
+    var n = 0;
+    for (var i = 0; list && i < list.length; i++) {
+      if (!isPointInPalmRest(list[i].clientX, list[i].clientY)) n++;
+    }
+    return n;
+  }
+
+  function evtPoint(e) {
+    if (e.touches && e.touches.length) return e.touches[0];
+    if (e.changedTouches && e.changedTouches.length) return e.changedTouches[0];
+    return e;
+  }
+
+  function cancelPreview() {
+    drawing = null; lastPt = null;
+    if (selectionDrag && selectionDrag.kind === "move") {
+      selection.indices.forEach(function (i, n) { doc.strokes[i].p = selectionDrag.original[n]; });
+      if (selectionDrag.originalPath) selection.path = selectionDrag.originalPath;
+      selection.bounds = boundsOf(selection.indices.map(function (i) { return doc.strokes[i]; }), 8 * dpr / scale);
+    }
+    selectionDrag = null;
+    for (var i = eraseUndo.length - 1; i >= 0; i--) doc.strokes.splice(eraseUndo[i].index, 0, eraseUndo[i].stroke);
+    erased = false; eraseUndo = []; inputDown = false;
+    guardMouseDown = false; activeTouchId = null; activeTouchIsStylus = false;
+    redraw();
+  }
+  function navigationTouches(e) {
+    var fingers = [];
+    for (var i = 0; e.touches && i < e.touches.length; i++) {
+      var t = e.touches[i];
+      if (t.touchType === "stylus") return []; // 可辨识的笔尖优先，另一只手不会抢走书写。
+      if (!isPalmContact(t)) fingers.push(t);
+    }
+    return fingers;
+  }
+  function startNavigation(e) {
+    if (navigating && navigation) return true;
+    var fingers = navigationTouches(e);
+    if (fingers.length < 2) return false;
+    cancelPreview();
+    var a = fingers[0], b = fingers[1], x = (a.clientX + b.clientX) / 2, y = (a.clientY + b.clientY) / 2;
+    navigation = { ids: [a.identifier, b.identifier], distance: Math.max(1, Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY)),
+      scale: view.scale, anchor: toDoc(x, y) };
+    navigating = true;
+    return true;
+  }
+  function moveNavigation(e) {
+    if (!navigation) return;
+    var a = findTouch(e.touches, navigation.ids[0]), b = findTouch(e.touches, navigation.ids[1]);
+    if (!a || !b || isPalmContact(a) || isPalmContact(b)) return;
+    var r = canvas.getBoundingClientRect();
+    view.scale = Math.max(Math.min(.025, navigation.scale), Math.min(8, navigation.scale * Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY) / navigation.distance));
+    view.x = navigation.anchor[0] - ((a.clientX + b.clientX) / 2 - r.left) / view.scale;
+    view.y = navigation.anchor[1] - ((a.clientY + b.clientY) / 2 - r.top) / view.scale;
+    relayout(); redraw();
+  }
+
+  function onDown(e) {
+    if (locked() || (pagesEnabled && !pagesReady)) return;
+    if (pageTouchBlocked) { if (e.cancelable) e.preventDefault(); return; }
+    var t0 = evtPoint(e);
+    if (e.type === "touchstart") {
+      // 只看本次新落下的触点：掌托区里早已按着的手掌（e.touches[0]）不能连累书写区的新落笔。
+      var allInRest = true;
+      for (var c = 0; c < e.changedTouches.length; c++) {
+        if (!isPointInPalmRest(e.changedTouches[c].clientX, e.changedTouches[c].clientY)) { allInRest = false; break; }
+      }
+      if (allInRest) { if (e.cancelable) e.preventDefault(); return; }
+    } else if (isPointInPalmRest(t0.clientX, t0.clientY)) {
+      if (e.cancelable) e.preventDefault();
+      return;
+    }
+    if (e.type === "touchstart") {
+      touchActive = true;
+      if (e.cancelable) e.preventDefault();
+      if (startNavigation(e)) return;
+    }
+    else if (touchActive) return;               // 触摸设备上的合成鼠标事件
+    else if (e.button !== 0) return;
+    var t = evtPoint(e);
+    if (e.type === "touchstart") {
+      // 优先检测是否包含 Apple Pencil 笔尖 (touchType === "stylus")
+      var stylusTouch = null;
+      for (var s = 0; s < e.changedTouches.length; s++) {
+        if (e.changedTouches[s].touchType === "stylus" && !isPointInPalmRest(e.changedTouches[s].clientX, e.changedTouches[s].clientY)) {
+          stylusTouch = e.changedTouches[s];
+          break;
+        }
+      }
+      if (stylusTouch) {
+        // 如果手掌边缘先碰触屏幕（非 stylus），笔尖到达时立刻让笔尖接管主触点，避免跳线
+        if (activeTouchId !== null && !activeTouchIsStylus) {
+          cancelPreview();
+          activeTouchId = null;
+        }
+        if (activeTouchId === null) {
+          t = stylusTouch;
+          activeTouchId = stylusTouch.identifier;
+          activeTouchIsStylus = true;
+        } else {
+          return;
+        }
+      } else if (palmGuard) {
+        if (e.cancelable) e.preventDefault();  // 被过滤的触点也不能合成鼠标落笔
+        if (activeTouchId !== null || busy) return;
+        t = null;
+        for (var i = 0; i < e.changedTouches.length; i++) {
+          if (!isPointInPalmRest(e.changedTouches[i].clientX, e.changedTouches[i].clientY) && !largeContact(e.changedTouches[i])) { t = e.changedTouches[i]; break; }
+        }
+        if (!t) return;
+        activeTouchId = t.identifier;
+        activeTouchIsStylus = false;
+      } else {
+        if (activeTouchId !== null) return;
+        for (var i = 0; i < e.changedTouches.length; i++) {
+          if (!isPointInPalmRest(e.changedTouches[i].clientX, e.changedTouches[i].clientY)) {
+            t = e.changedTouches[i];
+            break;
+          }
+        }
+        if (!t || isPointInPalmRest(t.clientX, t.clientY)) return;
+        activeTouchId = t.identifier;
+        activeTouchIsStylus = (t.touchType === "stylus");
+      }
+    }
+    if (busy) return;
+    if (palmGuard && e.type === "mousedown") guardMouseDown = true;
+    inputDown = true; eraseUndo = [];
+    var xy = toDoc(t.clientX, t.clientY);
+    if (selecting) { beginSelection(xy); if (e.cancelable) e.preventDefault(); return; }
+    if (eraser) {
+      // 笔画橡皮：整笔删除，不产生新笔迹
+      erased = false;
+      if (eraseAt(xy[0], xy[1])) {
+        erased = true;
+        redraw();
+      }
+      drawing = null;
+      e.preventDefault();
+      return;
+    }
+    drawing = { k: "pen", c: penColor, w: penWidth, p: [xy] };
+    lastPt = xy;
+    e.preventDefault();
+  }
+
+  function onMove(e) {
+    if (locked() || (pagesEnabled && !pagesReady)) return;
+    if (pageTouchBlocked) { if (e.cancelable) e.preventDefault(); return; }
+    if (e.type === "touchmove") {
+      touchActive = true;
+      if (e.cancelable) e.preventDefault();
+      if (navigating) {
+        if (navigation) { moveNavigation(e); return; }
+        if (startNavigation(e)) { moveNavigation(e); return; }
+        return;
+      }
+      if (!activeTouchIsStylus && startNavigation(e)) { moveNavigation(e); return; }
+    }
+    else if (touchActive) return;
+    if (!inputDown) return;
+    var t = evtPoint(e);
+    if (palmGuard && e.type === "touchmove") {
+      if (e.cancelable) e.preventDefault();
+      t = findTouch(e.touches, activeTouchId);
+      if (!t) return;
+      if (!activeTouchIsStylus && (largeContact(t) || isPointInPalmRest(t.clientX, t.clientY))) {
+        // 初触很小、随后变大的手掌或移入防误触区域不保留正在形成的笔迹，也不换到另一触点。
+        cancelPreview();
+        onUp({ type: "touchcancel", cancelable: false });
+        redraw();
+        return;
+      }
+    } else if (e.touches) { t = findTouch(e.touches, activeTouchId); if (!t) return; }
+    else if (palmGuard && !guardMouseDown) return;
+    if (isPointInPalmRest(t.clientX, t.clientY)) {
+      if (drawing) {
+        // 笔画划入防误触掌托区域时阻止延伸，不记录此点
+        e.preventDefault();
+        return;
+      }
+      if (e.cancelable) e.preventDefault();
+      return;
+    }
+    if (selecting) { moveSelection(toDoc(t.clientX, t.clientY)); if (e.cancelable) e.preventDefault(); return; }
+    if (eraser) {
+      var exy = toDoc(t.clientX, t.clientY);
+      if (eraseAt(exy[0], exy[1])) {
+        erased = true;
+        redraw();
+      }
+      if (e.cancelable) e.preventDefault();
+      return;
+    }
+    if (!drawing) return;
+    var xy = toDoc(t.clientX, t.clientY);
+    var dx = xy[0] - lastPt[0], dy = xy[1] - lastPt[1];
+    if (dx * dx + dy * dy < 1.2) { e.preventDefault(); return; }
+    drawing.p.push(xy);
+    lastPt = xy;
+    var n = drawing.p.length;
+    if (n >= 2) {
+      ctx.save();
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.lineWidth = Math.max(1, drawing.w * scale);
+      ctx.strokeStyle = drawing.c || "#111111";
+      ctx.beginPath();
+      ctx.moveTo(offX + drawing.p[n - 2][0] * scale,
+                 offY + drawing.p[n - 2][1] * scale);
+      ctx.lineTo(offX + xy[0] * scale, offY + xy[1] * scale);
+      ctx.stroke();
+      ctx.restore();
+    }
+    e.preventDefault();
+  }
+
+  function onUp(e) {
+    if (pageTouchBlocked) return;
+    if (e.type === "touchend" || e.type === "touchcancel") {
+      // 掌托区里按着的手掌不算“仍在书写的触点”，否则会让双指缩放/翻页后的禁写状态一直解除不了。
+      touchActive = writingTouchCount(e.touches) > 0;
+      if (navigating) {
+        if (!e.touches || !navigation || !findTouch(e.touches, navigation.ids[0]) || !findTouch(e.touches, navigation.ids[1])) {
+          navigation = null; saveLocalPage();
+        }
+        // 一指先抬起后，剩下的触点不能变成新笔画。
+        if (!touchActive) navigating = false;
+        if (e.cancelable) e.preventDefault();
+        return;
+      }
+      if (e.changedTouches) {
+        if (activeTouchId === null || !findTouch(e.changedTouches, activeTouchId)) return;
+      }
+      activeTouchId = null;
+      activeTouchIsStylus = false;
+    }
+    else if (touchActive && e.type === "mouseup") return;
+    guardMouseDown = false;
+    inputDown = false;
+    if (locked()) { drawing = null; lastPt = null; return; }
+    if (selecting) { finishSelection(); return; }
+    if (eraser) {
+      // 擦完一笔再同步一次，避免频繁上传
+      if (erased) {
+        erased = false;
+        recordUndo({ kind: "erase", removed: eraseUndo }); eraseUndo = [];
+        dirty = true;
+        redraw();
+        queueSync();
+      }
+      if (e.cancelable) e.preventDefault();
+      return;
+    }
+    if (!drawing) return;
+    if (drawing.p.length) {
+      recordUndo({ kind: "add", index: doc.strokes.length });
+      doc.strokes.push(drawing);
+      dirty = true;
+      queueSync();
+    }
+    drawing = null;
+    lastPt = null;
+    redraw();
+    if (e.cancelable) e.preventDefault();
+  }
+
+  // 触摸与鼠标同时注册：手机用触摸，电脑浏览器打开时用鼠标（方便调试）
+  canvas.addEventListener("touchstart", onDown, { passive: false });
+  canvas.addEventListener("touchmove", onMove, { passive: false });
+  canvas.addEventListener("touchend", onUp, { passive: false });
+  canvas.addEventListener("touchcancel", onUp, { passive: false });
+  function releasePageTouch(e) {
+    if (!writingTouchCount(e.touches)) { pageTouchBlocked = false; touchActive = false; }
+  }
+  window.addEventListener("touchend", releasePageTouch, { passive: true });
+  window.addEventListener("touchcancel", releasePageTouch, { passive: true });
+  canvas.addEventListener("mousedown", onDown);
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup", onUp);
+
+  function onWheel(e) {
+    if (locked() || (pagesEnabled && !pagesReady)) return;
+    if (e.cancelable) e.preventDefault();
+    var r = canvas.getBoundingClientRect();
+    var mouseX = e.clientX - r.left;
+    var mouseY = e.clientY - r.top;
+    var anchor = toDoc(e.clientX, e.clientY);
+    if (e.ctrlKey) {
+      // iPad 妙控键盘触控板双指捏合缩放或 Ctrl+滚轮缩放
+      var zoomFactor = Math.exp(-e.deltaY * 0.01);
+      var newScale = Math.max(0.025, Math.min(8, view.scale * zoomFactor));
+      view.scale = newScale;
+      view.x = anchor[0] - mouseX / view.scale;
+      view.y = anchor[1] - mouseY / view.scale;
+    } else {
+      // 触控板双指滑动或滚轮平移画布
+      view.x += (e.deltaX || 0) / view.scale;
+      view.y += (e.deltaY || 0) / view.scale;
+    }
+    relayout();
+    redraw();
+    saveLocalPage();
+  }
+  stage.addEventListener("wheel", onWheel, { passive: false });
+
+  // ---------- 与服务端同步 ----------
+  var ws = null, wsReady = false, pollTimer = null, syncTimer = null;
+  var busy = false;
+  var serverSession = null;      // 服务端会话 id：变了说明电脑端重启过
+  var serverRev = -1;            // 服务端文档版本号
+  var serverCleared = 0;         // 服务端主动清空的次数（电脑端点「清空」）
+  var editVersion = Date.now() * 1000, polling = false, lastWsMessage = Date.now(), syncError = '';
+
+  function api(path, body, cb) {
+    var xhr = new XMLHttpRequest();
+    var finished = false;
+    function done(status, data) { if (!finished) { finished = true; cb(status, data); } }
+    var url = path + (path.indexOf("?") < 0 ? "?" : "&") + "_c=" +
+      encodeURIComponent(CLIENT_ID) + (TOKEN ? "&t=" + encodeURIComponent(TOKEN) : "");
+    xhr.open(body ? "POST" : "GET", url, true);
+    xhr.timeout = 20000;
+    if (body) xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.setRequestHeader("X-Airtex-Client", CLIENT_ID);
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState !== 4) return;
+      var data = null;
+      try { data = JSON.parse(xhr.responseText); } catch (err) { data = null; }
+      done(xhr.status, data);
+    };
+    xhr.ontimeout = function () { done(0, null); };
+    xhr.onerror = function () { done(0, null); };
+    xhr.send(body ? JSON.stringify(body) : null);
+  }
+
+  function wsUrl() {
+    var proto = location.protocol === "https:" ? "wss:" : "ws:";
+    return proto + "//" + location.host + "/ws" +
+      (TOKEN ? "?t=" + encodeURIComponent(TOKEN) : "");
+  }
+
+  function connect() {
+    if (ws) return;
+    try { ws = new WebSocket(wsUrl()); } catch (err) { ws = null; return; }
+    ws.onopen = function () {
+      wsReady = true;
+      lastWsMessage = Date.now();
+      setStatus(locked() ? "电脑鼠标手写中" : "已连接", true);
+      send({ type: "hello", client: CLIENT_ID, device: navigator.userAgent });
+      if (dirty && !locked()) syncNow();
+    };
+    ws.onmessage = function (ev) {
+      lastWsMessage = Date.now();
+      var msg = null;
+      try { msg = JSON.parse(ev.data); } catch (err) { return; }
+      handleMessage(msg);
+    };
+    ws.onclose = function () {
+      wsReady = false; ws = null;
+      setStatus("已断开", false);
+      setTimeout(connect, 1500);
+    };
+    ws.onerror = function () { };
+  }
+
+  function send(msg) {
+    if (ws && wsReady && ws.readyState === 1) {
+      msg.client = CLIENT_ID;
+      try { ws.send(JSON.stringify(msg)); return true; } catch (err) { }
+    }
+    return false;
+  }
+
+  // 只有「电脑端清空」「电脑端重启过」或「本地空白而电脑有内容」时才采纳
+  // 服务端文档。其它情况一律保留手机本地笔迹 —— 这是修掉
+  // 「写一笔下一秒被清空」的关键。
+  function maybeAdoptServerDoc(msg) {
+    var adopted = false;
+    if (pagesEnabled && msg.pageId && msg.pageId !== currentPageId()) return false;
+    // 1) 电脑端主动清空：手机上也要清掉
+    if (typeof msg.clearedSeq === "number" && msg.clearedSeq > serverCleared) {
+      serverCleared = msg.clearedSeq;
+      if (doc.strokes.length || dirty || drawing || inputDown) {
+        drawing = null; lastPt = null; editVersion++;
+        pendingRecognition = "";
+        adopt({ w: doc.w, h: doc.h, strokes: [] });
+        adopted = true;
+      }
+    }
+    // 多页内容以手机本地记录为准；只接受电脑针对当前页的清空。
+    if (pagesEnabled) return adopted;
+    if (!msg.doc) return adopted;
+    // 电脑端鼠标手写中：服务端那份「手机画布」谁也没在写，不采纳、不回推，
+    // 免得暂停期间把本地内容换掉或覆盖掉
+    if (locked()) return adopted;
+    var sessionChanged = (serverSession !== null &&
+                          msg.session && msg.session !== serverSession);
+    var localN = doc.strokes ? doc.strokes.length : 0;
+    var serverN = (msg.doc.strokes || []).length;
+    if (serverN === 0) return adopted;               // 服务端空：不动本地
+    if (localN === 0 && !dirty && !drawing && !inputDown && !navigating) { // 不覆盖本地临时擦除或未确认的清空/撤销
+      adopt(msg.doc);
+      return true;
+    }
+    if (sessionChanged && !dirty && !drawing && !inputDown && !navigating) { // 电脑端重启过
+      adopt(msg.doc);
+      return true;
+    }
+    return adopted;
+  }
+
+  function adopt(newDoc) {
+    cancelPreview(); selection = null; navigation = null; navigating = false;
+    pageTouchBlocked = touchActive;
+    doc = newDoc;
+    redo = [];
+    undo = penHistory();
+    dirty = false;       // 采纳的是服务端那一版，本地没有待同步的修改了
+    fitDocToCanvas();
+    relayout();
+    redraw();
+    saveLocalPage();
+  }
+
+  function handleMessage(msg) {
+    if (msg.protocol && PROTOCOL && msg.protocol !== PROTOCOL) {
+      toast("网页版本过旧，请刷新页面");
+    }
+    if (msg.type !== "state") {
+      if (msg.type === "pong") setStatus("已连接", true);
+      if (msg.type === "ack") {
+        // 服务端确认收到了我们的写入，并告知它当前的版本号
+        if (typeof msg.rev === "number") serverRev = msg.rev;
+        // accepted=false：电脑端在鼠标手写模式，这份写入被拒了——留着待同步，
+        // 等切回手机手写时会自动补发，不会悄悄丢掉刚写的那一笔
+        if (msg.accepted === false) dirty = true;
+        setStatus(locked() ? "电脑鼠标手写中" : "已连接", true);
+      }
+      return;
+    }
+    // 电脑端可能刚切换了输入模式
+    if (msg.mode !== undefined) applyMode(msg.mode);
+    // 采纳服务端文档（受严格条件限制）
+    maybeAdoptServerDoc(msg);
+    if (msg.session) serverSession = msg.session;
+    if (typeof msg.rev === "number" && msg.rev > serverRev) serverRev = msg.rev;
+    if (typeof msg.clearedSeq === "number") serverCleared = msg.clearedSeq;
+    if (msg.recognizing !== undefined) setBusy(!!msg.recognizing && !locked());
+    if (locked()) {
+      setStatus("电脑鼠标手写中", true);
+    } else {
+      setStatus(msg.online === false ? "电脑端已断开" : "已连接",
+        msg.online !== false);
+    }
+    // 结果仅在电脑显示；手机按模式和当前页处理识别状态与报错。
+    var res = msg.result;
+    var pageMatches = !pagesEnabled || !msg.pageId || msg.pageId === currentPageId();
+    if (!pageMatches) res = null;
+    if (res && res.mode && res.mode !== "phone") res = null;
+    var errMine = pageMatches && !locked() && (!msg.errorMode || msg.errorMode === "phone");
+    applyResult(res, errMine ? msg.error : "", msg.recognized && errMine
+      ? msg.error : null);
+  }
+
+  function queueSync() {
+    editVersion++;
+    saveLocalPage();
+    if (locked()) return;
+    if (syncTimer) return;
+    syncTimer = setTimeout(function () {
+      syncTimer = null;
+      syncNow();
+    }, 180);
+  }
+
+  function compactDoc() {
+    // 同步与识别使用相同的坐标精度，避免长草稿携带冗长浮点尾数。
+    // 尚未收笔的擦除/移动只是预览，旧同步请求不能提前上传临时改动。
+    var strokes = doc.strokes;
+    if (inputDown && eraser && eraseUndo.length) {
+      strokes = strokes.slice();
+      for (var i = eraseUndo.length - 1; i >= 0; i--) strokes.splice(eraseUndo[i].index, 0, eraseUndo[i].stroke);
+    }
+    return { w: doc.w, h: doc.h, infinite: true, strokes: strokes.map(function (s, index) {
+      var points = selectionDrag && selectionDrag.kind === "move" && selectionDrag.originalByIndex[index] || s.p;
+      return { k: s.k, c: s.c || "#111111", w: s.w, p: points.map(function (p) {
+        return [Math.round(p[0] * 100) / 100, Math.round(p[1] * 100) / 100];
+      }) };
+    }) };
+  }
+
+  function syncNow() {
+    if (locked()) return;        // 暂停期间不发数据（本地修改留在 dirty 里）
+    if (sending) { sending2 = true; return; }
+    if (!dirty) return;
+    sending = true;
+    var sentVersion = editVersion;
+    // 写入使用串行 HTTP 确认，WebSocket 只负责状态推送。send() 成功不代表服务端收到。
+    var payload = { rev: serverRev, doc: compactDoc(), clearedSeq: serverCleared, client: CLIENT_ID, updateId: sentVersion };
+    if (pagesEnabled) payload.pageId = currentPageId();
+    api("/api/update", payload, function (status, data) {
+      sending = false;
+      if (status === 200 && data && data.ok) {
+        syncError = '';
+        if (typeof data.rev === "number") serverRev = data.rev;
+        if (data.accepted !== false && sentVersion === editVersion) dirty = false;
+        if (data.accepted === false) handleMessage(Object.assign({ type: 'state' }, data));
+        if (!dirty && pendingRecognition === currentPageId() && pendingRecognition) {
+          pendingRecognition = ""; requestRecognition();
+        }
+        setStatus(locked() ? "电脑鼠标手写中" : dirty ? "正在同步…" : "已同步", true);
+      } else {
+        syncError = data && data.error ? data.error : "连接中断，笔迹保留，正在重试…";
+        setStatus(syncError, false);
+      }
+      var again = sending2; sending2 = false;
+      if (again && status === 200 && dirty) syncNow();
+    });
+  }
+
+  function poll() {
+    if (polling) return;
+    polling = true;
+    api("/api/state?rev=" + serverRev, null, function (status, data) {
+      polling = false;
+      if (status === 200 && data) {
+        handleMessage(Object.assign({ type: "state" }, data));
+      } else if (status === 0) {
+        setStatus("未连接", false);
+      }
+    });
+  }
+
+  // ---------- UI 状态 ----------
+  function setStatus(text, online) {
+    if (dirty && !locked() && !busy) { text = syncError || '正在同步…'; online = !syncError && online; }
+    $("status").textContent = text;
+    $("dot").className = online ? "on" : "";
+    updateToolsToggle();
+  }
+
+  function setBusy(on) {
+    busy = on;
+    $("busy").className = on ? "show" : "";
+    $("recognizeBtn").textContent = on ? "识别中…" : window.AIRTEX_PARAGRAPH ? "识别段落" : "识别公式";
+    if ($("fullscreenRecognizeBtn")) {
+      $("fullscreenRecognizeBtn").classList.toggle("busy", on);
+      var fsTxt = $("fullscreenRecognizeBtn").querySelector(".fullscreen-recog-text");
+      if (fsTxt) fsTxt.textContent = on ? "识别中…" : (window.AIRTEX_PARAGRAPH ? "识别段落" : "识别公式");
+    }
+    updateButtons();
+  }
+
+  var lastLatex = "";
+  function applyResult(result, error, recognizedError) {
+    if (pagesEnabled && result && result.pageId && result.pageId !== currentPageId()) return;
+    if (result && result.latex && result.latex !== lastLatex) {
+      // 仅供只读诊断；手机不创建结果面板，也不改写剪贴板。
+      lastLatex = result.latex;
+      $("err").className = "";
+    }
+    if (recognizedError) {
+      $("err").textContent = recognizedError;
+      $("err").className = "show";
+    } else if (!error) {
+      $("err").className = "";
+    } else if (error && !result) {
+      $("err").textContent = error;
+      $("err").className = "show";
+    }
+  }
+
+  var toastTimer = null;
+  function toast(text) {
+    var el = $("toast");
+    el.textContent = text;
+    el.className = "show";
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.className = ""; }, 1800);
+  }
+
+  // ---------- 按钮 ----------
+  function requestRecognition() {
+    setBusy(true);
+    setStatus("识别中…", true);
+    $("err").className = "";
+    var body = { doc: compactDoc() };
+    if (pagesEnabled) body.pageId = currentPageId();
+    api("/api/recognize", body, function (status, data) {
+        if (status !== 200 || (data && data.started === false && !data.recognizing)) {
+          setBusy(false);
+          toast("识别请求失败");
+        }
+    });
+  }
+  $("recognizeBtn").onclick = $("fullscreenRecognizeBtn").onclick = function () {
+    if (busy || locked()) return;
+    onUp({ type: "touchcancel", cancelable: false });
+    if (!doc.strokes.length) return;
+    if (pagesEnabled && dirty) { pendingRecognition = currentPageId(); updateButtons(); syncNow(); return; }
+    requestRecognition();
+  };
+
+  $("undoBtn").onclick = $("fullscreenUndoBtn").onclick = function () {
+    if (busy || locked() || (!doc.strokes.length && !undo.length)) return;
+    onUp({ type: "touchcancel", cancelable: false });
+    selection = null;
+    var entry = undo.pop();
+    if (!entry) { redo.push(doc.strokes.pop()); }
+    else if (entry.kind === "add") redo.push(doc.strokes.splice(entry.index, 1)[0]);
+    else if (entry.kind === "erase") {
+      for (var i = entry.removed.length - 1; i >= 0; i--) doc.strokes.splice(entry.removed[i].index, 0, entry.removed[i].stroke);
+    } else if (entry.kind === "move") {
+      entry.indices.forEach(function (index) {
+        doc.strokes[index].p = doc.strokes[index].p.map(function (p) { return [p[0] - entry.dx, p[1] - entry.dy]; });
+      });
+    }
+    dirty = true;
+    redraw();
+    queueSync();
+  };
+
+  $("clearBtn").onclick = $("fullscreenClearBtn").onclick = function () {
+    if (busy || locked()) return;
+    if (!doc.strokes.length) return;
+    if (!confirm("清空整幅手写内容？")) return;
+    cancelPreview(); selection = null;
+    pendingRecognition = "";
+    doc.strokes = [];
+    redo = [];
+    undo = [];
+    dirty = true;
+    lastLatex = "";
+    $("err").className = "";
+    redraw();
+    queueSync();
+  };
+
+  function updateEraserButtons() {
+    $("eraserBtn").className = eraser ? "ghost on" : "ghost";
+    $("eraserBtn").textContent = eraser ? "擦笔画 · 开" : "擦笔画";
+    $("eraserBtn").setAttribute("aria-pressed", String(eraser));
+    $("fullscreenEraserBtn").classList.toggle("on", eraser);
+    $("fullscreenEraserBtn").setAttribute("aria-pressed", String(eraser));
+    $("fullscreenEraserBtn").title = eraser ? "回到书写模式" : "擦笔画";
+    $("fullscreenEraserBtn").setAttribute("aria-label", eraser ? "回到书写模式" : "擦笔画");
+  }
+
+  function toggleEraser(forceState, customToast) {
+    if (locked()) return;
+    onUp({ type: "touchcancel", cancelable: false });
+    eraser = typeof forceState === "boolean" ? forceState : !eraser;
+    selecting = false; selection = null; updateSelectionButtons(); redraw();
+    updateEraserButtons();
+    $("hint").textContent = eraser
+      ? "擦笔画模式：点到哪一笔就整笔删掉，点「擦笔画」或按 E 回到书写"
+      : (isIPad ? "支持 Apple Pencil 书写，点右上角「擦笔画」或按 E 切换橡皮" : "单指书写，两指缩放或移动画布\n电脑实时显示笔迹");
+    toast(customToast || (eraser ? "🧹 已切换为橡皮擦模式" : "✏️ 已切换为画笔书写模式"));
+  }
+
+  $("eraserBtn").onclick = $("fullscreenEraserBtn").onclick = function () {
+    toggleEraser();
+  };
+
+  // 快捷键支持（iPad 妙控键盘 / 蓝牙键盘 / 桌面浏览器）
+  window.addEventListener("keydown", function (e) {
+    var tag = (e.target && e.target.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if ((e.metaKey || e.ctrlKey) && (e.key === "z" || e.key === "Z")) {
+      e.preventDefault();
+      if (writingFullscreen && $("fullscreenUndoBtn") && !$("fullscreenUndoBtn").disabled && getComputedStyle($("fullscreenUndoBtn")).display !== "none") {
+        $("fullscreenUndoBtn").click();
+      } else if ($("undoBtn") && !$("undoBtn").disabled) {
+        $("undoBtn").click();
+      }
+      return;
+    }
+    if (e.key === "e" || e.key === "E") {
+      e.preventDefault();
+      toggleEraser();
+      return;
+    }
+    if (e.key === "b" || e.key === "B" || e.key === "p" || e.key === "P") {
+      e.preventDefault();
+      toggleEraser(false);
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (writingFullscreen && $("fullscreenRecognizeBtn") && !$("fullscreenRecognizeBtn").disabled && getComputedStyle($("fullscreenRecognizeBtn")).display !== "none") {
+        $("fullscreenRecognizeBtn").click();
+      } else if ($("recognizeBtn") && !$("recognizeBtn").disabled) {
+        $("recognizeBtn").click();
+      }
+      return;
+    }
+  });
+
+  $("width").oninput = function () { penWidth = parseInt(this.value, 10) || 3; };
+
+  $("connectBtn").onclick = function () {
+    var v = ($("serverInput").value || "").trim();
+    if (!v) return;
+    if (!/^https?:\/\//i.test(v)) v = "http://" + v;
+    location.href = v;
+  };
+
+  $("curUrl").textContent = location.href;
+
+  // ---------- 启动 ----------
+  // 暴露一个只读诊断入口，便于在手机浏览器控制台排查（不影响正常使用）
+  window.__airtex = {
+    get strokes() { return doc.strokes.length; },
+    get rev() { return serverRev; },
+    get session() { return serverSession; },
+    get client() { return CLIENT_ID; },
+    get size() { return [doc.w, doc.h]; },
+    get connected() { return !!(ws && wsReady); },
+    get busy() { return busy; },
+    get latex() { return lastLatex; },
+    get dirty() { return dirty; },
+    get eraser() { return eraser; },
+    get selecting() { return selecting; },
+    get selectionMode() { return selectionMode; },
+    get selection() { return selection ? selection.indices.length : 0; },
+    get view() { return { x: view.x, y: view.y, scale: view.scale }; },
+    get palmGuard() { return palmGuard; },
+    get page() { return pagesEnabled ? pageIndex + 1 : 1; },
+    get pages() { return pagesEnabled ? pages.length : 1; },
+    get isStylus() { return activeTouchIsStylus; },
+    get isIPad() { return isIPad; },
+    get palmRest() {
+      return {
+        get visible() { return palmRestVisible; },
+        get height() { return palmRestHeight; },
+        get ratio() { return palmRestRatio; },
+        isPointInPalmRest: isPointInPalmRest,
+        setLayout: updatePalmRestLayout,
+        setRatio: function (r) {
+          palmRestRatio = Math.max(0, Math.min(0.85, r));
+          updatePalmRestLayout();
+        }
+      };
+    },
+    get pageId() { return currentPageId(); },
+    get mode() { return mode; },
+    get locked() { return locked(); },
+    clear: function () {
+      cancelPreview(); selection = null; doc.strokes = []; undo = []; redo = [];
+      dirty = true; redraw(); queueSync();
+    }
+  };
+
+  async function init() {
+    await initializePages();
+    if (window.AIRTEX_PARAGRAPH) {
+      document.title = '手写草稿白板';
+      $("recognizeBtn").textContent = '识别段落';
+      if ($("fullscreenRecognizeBtn")) {
+        $("fullscreenRecognizeBtn").setAttribute("aria-label", "识别段落");
+        $("fullscreenRecognizeBtn").title = "识别段落";
+        var fsInitTxt = $("fullscreenRecognizeBtn").querySelector(".fullscreen-recog-text");
+        if (fsInitTxt) fsInitTxt.textContent = "识别段落";
+      }
+      $("hint").textContent = isIPad
+        ? '支持 Apple Pencil 与手写\n双指缩放或漫游画布，可框选移动文字与想法'
+        : '单指书写，两指缩放或移动画布\n可框选移动文字、想法和公式';
+    } else {
+      $("hint").textContent = isIPad
+        ? '支持 Apple Pencil 与手写\n双指缩放或漫游画布，写好后点「识别公式」'
+        : '单指书写，两指缩放或移动画布\n写好后点「识别公式」，也可框选移动笔迹';
+    }
+    if (isIPad && $("ipadTip")) $("ipadTip").style.display = "block";
+    $("serverInput").placeholder = location.origin + "/";
+    setWritingFullscreen(landscape.matches);
+    fitCanvas();
+    updatePalmRestLayout();
+    if (window.ResizeObserver) new ResizeObserver(scheduleFit).observe(stage);
+    if (window.visualViewport) window.visualViewport.addEventListener("resize", scheduleFit);
+    var onOrientation = function () {
+      userToggledFullscreen = false;
+      setWritingFullscreen(landscape.matches);
+    };
+    if (landscape.addEventListener) landscape.addEventListener("change", onOrientation);
+    else landscape.addListener(onOrientation);
+    document.addEventListener("gesturestart", function (e) { e.preventDefault(); });
+    document.addEventListener("dblclick", function (e) { e.preventDefault(); });
+
+    var helloPage = currentPageId(), helloEdit = editVersion;
+    api("/api/hello", { device: navigator.userAgent, client: CLIENT_ID },
+        function (status, data) {
+      if (status === 200 && data) {
+        if (data.protocol && PROTOCOL && data.protocol !== PROTOCOL) {
+          toast("请刷新页面（服务器已更新）");
+        }
+        if (data.mode !== undefined) applyMode(data.mode);
+        if (data.session) serverSession = data.session;
+        if (typeof data.rev === "number") serverRev = data.rev;
+        var helloState = data.state || data;
+        if (pagesEnabled && restoredPages) maybeAdoptServerDoc(helloState);
+        if (typeof helloState.clearedSeq === "number") serverCleared = helloState.clearedSeq;
+        // 刷新页面后：本地为空而电脑上还有内容 -> 接过来继续写
+        if ((!pagesEnabled || (!restoredPages && pages.length === 1 && currentPageId() === helloPage && editVersion === helloEdit)) && data.doc && (data.doc.strokes || []).length && !doc.strokes.length
+            && !locked()) {
+          if (pagesEnabled && data.state && data.state.pageId) pages[pageIndex].id = data.state.pageId;
+          adopt(data.doc);
+        }
+        if (data.state) {
+          if (data.state.session) serverSession = data.state.session;
+          if (data.state.mode !== undefined) applyMode(data.state.mode);
+          if (data.state.recognizing) setBusy(!locked());
+          var r0 = data.state.result;
+          if (r0 && r0.mode && r0.mode !== "phone") r0 = null;
+          if (!pagesEnabled || !data.state.pageId || data.state.pageId === currentPageId()) applyResult(r0, data.state.error, null);
+        }
+        setStatus(locked() ? "电脑鼠标手写中" : "已连接", true);
+        if (pagesEnabled) { dirty = true; queueSync(); }
+      } else if (status === 403) {
+        setStatus("token 错误", false);
+        $("err").textContent = "连接被拒绝：访问地址里的 token 不正确，请重新扫二维码。";
+        $("err").className = "show";
+      } else {
+        setStatus("未连接", false);
+      }
+    });
+
+    connect();
+    pollTimer = setInterval(function () {
+      // 暂停期间也要轮询：电脑端切回手机手写时得第一时间知道
+      poll();
+      if (dirty && !locked()) syncNow();
+      if (ws && wsReady && Date.now() - lastWsMessage > 20000) ws.close();
+      if (!ws) connect();
+    }, 1500);
+    window.addEventListener("resize", scheduleFit);
+    window.addEventListener("orientationchange", function () {
+      setTimeout(scheduleFit, 250);
+    });
+    setInterval(function () { send({ type: "ping", t: Date.now() }); }, 8000);
+    function resumeSync() { if (!document.hidden) { poll(); if (dirty) syncNow(); if (!ws) connect(); } }
+    window.addEventListener('online', resumeSync);
+    document.addEventListener('visibilitychange', resumeSync);
+    window.addEventListener("beforeunload", function () { if (dirty) syncNow(); });
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

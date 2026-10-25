@@ -1,0 +1,713 @@
+/* --- 页面布局样式 --- */
+        .page-wrapper {
+            position: relative;
+            background-color: white;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            margin-bottom: 24px;
+            margin-left: auto;
+            margin-right: auto;
+            transition: filter 0.3s ease;
+        }
+
+
+        /* 👇 修改3：侧翼物理结构与视效 (康奈尔网格风) */
+        .sidecar-bg {
+            position: absolute;
+            left: 100%;
+            top: 0;
+            width: 100%; /* 等宽扩展，相当于增加了一整张 A4 草稿纸 */
+            height: 100%;
+            background-color: #FDFCF9;
+            border: 1px solid #E5E7EB;
+            border-left: 2px dashed #CBD5E1; /* 边缘孔洞撕扯感 */
+            box-shadow: 10px 0 25px -5px rgba(0,0,0,0.05);
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none; /* 隐藏时绝对防误触 */
+            transition: opacity 0.3s ease, visibility 0.3s;
+            z-index: 0; /* 置于底层，让文本块可以凌驾其上 */
+            border-top-right-radius: 4px;
+            border-bottom-right-radius: 4px;
+        }
+
+        body.show-sidecars .sidecar-bg {
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto; /* 开启后允许接收点击事件，生成文本块 */
+        }
+
+        /* 护眼模式双屏同步联动 */
+        body.eye-protection-mode .sidecar-bg {
+            background-color: #FAF7F2 !important;
+            border-color: #E6E2D6 !important;
+            border-left-color: #D1CDA8 !important;
+        }
+
+        /* --- 护眼模式 (全局UI沉浸) --- */
+        /* 1. 阅读器外围背景（稍深，用来凸显纸张边界） */
+        body.eye-protection-mode #viewer-container {
+            background-color: #E6E2D6 !important; 
+        }
+        
+        /* 👇👇👇 新增：赋予纸张物理护眼底色 👇👇👇 */
+        body.eye-protection-mode .page-wrapper {
+            background-color: #F4EFE6 !important; 
+        }
+
+        /* 👇👇👇 新增：正片叠底魔法 (将 Canvas 中的纯白色过滤为透明，透出底色) 👇👇👇 */
+        body.eye-protection-mode .page-wrapper canvas {
+            mix-blend-mode: multiply;
+        }
+
+        /* 2. 顶栏、侧栏全局背景（比纸张颜色更淡、更透气） */
+        body.eye-protection-mode header, 
+        body.eye-protection-mode aside {
+            background-color: #FAF7F2 !important; /* 👈 变淡的核心：极浅的米白色 */
+            border-color: #F0EBE1 !important;     /* 👈 边框颜色同步变浅 */
+        }
+
+        /* 3. 抹除工具栏里原有的小块纯白/浅灰背景 */
+        body.eye-protection-mode header .bg-white,
+        body.eye-protection-mode header .bg-gray-50,
+        body.eye-protection-mode aside .bg-white,
+        body.eye-protection-mode aside .bg-gray-50 {
+            background-color: transparent !important;
+            border-color: #F0EBE1 !important;
+        }
+
+        /* 4. 按钮悬停时，使用匹配淡色背景的 hover 颜色 */
+        body.eye-protection-mode header button:hover:not(.color-btn),
+        body.eye-protection-mode aside .sidebar-item:hover,
+        body.eye-protection-mode #page-hud button:hover { /* 👈 新增：HUD 里的图钉和重置按钮悬停色 */
+            background-color: #F0EBE1 !important; 
+        }
+        
+        /* 5. 保护悬浮搜索框、标记阵列及打开菜单，防止其在护眼模式下被透明化误伤 */
+        body.eye-protection-mode #search-bar,
+        body.eye-protection-mode #outline-panel, 
+        body.eye-protection-mode #outline-trigger-btn, 
+        body.eye-protection-mode #page-hud, /* 👈 新增：让右上角页数标识同步护眼底色与边框 */
+        body.eye-protection-mode #marker-dropdown-wrapper .absolute,
+        body.eye-protection-mode #open-dropdown-wrapper .absolute,
+        body.eye-protection-mode #save-dropdown-wrapper .absolute {
+            background-color: #FAF7F2 !important; 
+            border-color: #E6E2D6 !important;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05) !important;
+        }
+        body.eye-protection-mode #search-input {
+            background-color: #FDFCF9 !important;
+            border-color: #E6E2D6 !important;
+        }
+        /* 👇 新增：目录悬停时的护眼底色 */
+        body.eye-protection-mode .outline-item:hover {
+            background-color: #F0EBE1 !important;
+        }
+
+        /* --- 文本层样式 --- */
+        .textLayer {
+            position: absolute;
+            left: 0; top: 0; right: 0; bottom: 0;
+            overflow: hidden;
+            line-height: 1.0;
+            pointer-events: text;
+            transform-origin: 0 0;
+            opacity: 1;
+            mix-blend-mode: multiply;
+            z-index: 1; /* 文本层在底层 */
+        }
+
+        .textLayer span {
+            color: transparent;
+            position: absolute;
+            white-space: pre;
+            cursor: text;
+            transform-origin: 0% 0%;
+        }
+
+        .textLayer ::selection {
+            background: rgba(0, 89, 255, 0.25);
+            color: transparent;
+        }
+
+        /* --- [新增] 链接层样式 --- */
+        .link-layer {
+            position: absolute;
+            left: 0; top: 0; right: 0; bottom: 0;
+            pointer-events: none; /* 让点击穿透空白区域 */
+            z-index: 5; /* 在文本层之上，但在标注层之下 */
+        }
+        
+        .link-layer a {
+            position: absolute;
+            cursor: pointer;
+            pointer-events: auto; /* 链接本体可点击 */
+        }
+        
+        /* 鼠标悬停链接时给予微弱反馈 */
+        .link-layer a:hover {
+            background-color: rgba(59, 130, 246, 0.1); 
+            box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3);
+            border-radius: 2px;
+        }
+
+        .annotation-layer {
+            position: absolute;
+            left: 0; top: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            z-index: 10; /* 用户标注层在最上 */
+            /* 👇 修复：使用手术刀级裁剪！
+               允许上方、下方、左方溢出 1000% (足够跨越十页不断裂)，
+               但严格把右侧的溢出裁剪为 0 (完美隐藏未展开的草稿本) */
+            clip-path: inset(-1000% 0 -1000% -1000%);
+        }
+
+        body.show-sidecars .annotation-layer {
+            right: -100%; 
+            /* 👇 修复：展开侧翼时，放下屠刀，解除裁剪，释放右侧笔记 */
+            clip-path: none;
+        }
+
+        /* --- 标注元素样式 --- */
+        .highlight-rect {
+            position: absolute;
+            cursor: pointer;
+            pointer-events: auto; 
+            mix-blend-mode: multiply; 
+            opacity: 0.35; 
+            transition: background-color 0.2s;
+            border-radius: 4px;
+        }
+        .highlight-rect:hover { opacity: 0.5; z-index: 20; }
+
+        .underline-rect {
+            position: absolute;
+            border-bottom-style: solid;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+        .underline-rect:hover { background-color: rgba(0, 0, 0, 0.05); }
+
+        /* --- 文本块样式 --- */
+        .text-annotation {
+            position: absolute;
+            z-index: 40;
+            /* 👇 降低透明度为 0.3，实现半透明 */
+            background-color: rgba(255, 255, 255, 0.3); 
+            border: 1px solid transparent; 
+            cursor: pointer; 
+            line-height: 1.5;
+            white-space: pre-wrap; 
+            word-wrap: break-word;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            transition: border-color 0.2s, background-color 0.2s; 
+            pointer-events: auto;
+            backdrop-filter: blur(2px);
+            user-select: none; 
+            -webkit-user-select: none;
+            font-family: ui-sans-serif, system-ui, sans-serif;
+            
+            /* 👇 增加原生缩放属性，右下角会出现拖拉角 */
+            resize: both; 
+            overflow: hidden; 
+            min-width: 30px;
+            min-height: 20px;
+        }
+        .text-annotation:hover {
+            border-color: #cbd5e1;
+            /* 👇 悬停时稍微不透明一点，方便阅读 */
+            background-color: rgba(255, 255, 255, 0.7);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        .text-annotation.dragging {
+            cursor: grabbing;
+            opacity: 0.85;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.2);
+            z-index: 9999 !important;
+        }
+        .text-annotation .katex { font-size: 1.0em; }
+
+        /* [搜索升级方案二] 矢量引擎搜索高亮遮罩 (彻底抛弃原生的背景色修改，防破坏 DOM) */
+        .search-vector-highlight {
+            position: absolute;
+            background-color: rgba(255, 165, 0, 0.35);
+            border-radius: 4px;
+            box-shadow: 0 0 0 1.5px rgba(249, 115, 22, 0.8), 0 0 20px rgba(249, 115, 22, 0.5);
+            animation: searchPulse 2s infinite;
+            pointer-events: none;
+            mix-blend-mode: multiply;
+            z-index: 25;
+            transform-origin: center;
+        }
+        @keyframes searchPulse {
+            0% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.03); }
+            100% { opacity: 0.6; transform: scale(1); }
+        }
+
+        .vector-svg {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            overflow: visible;
+        }
+        
+        .vector-path {
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            cursor: pointer;
+            pointer-events: stroke;
+            transition: stroke-width 0.2s;
+        }
+        .arrow-head { pointer-events: none; }
+
+        .note-popup {
+            animation: fadeIn 0.15s ease-out;
+            transform-origin: top left;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        /* Tailwind v3 没有内置 animate-fade-in，这里补上（搜索栏与快捷入口弹窗都在用）——
+           纯淡入、不做缩放，避免全屏蒙层缩放时露出屏幕边缘 */
+        .animate-fade-in {
+            animation: overlayFadeIn 0.15s ease-out;
+        }
+        @keyframes overlayFadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        #file-input { display: none; }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        aside { transition: width 0.3s ease, transform 0.3s ease; }
+        .sidebar-item { transition: all 0.2s; border-left: 3px solid transparent; }
+        .sidebar-item:hover { background-color: #f1f5f9; }
+        .sidebar-item.active { background-color: #eff6ff; border-left-color: #2563eb; }
+        .compact-prose p { margin-top: 0.25em; margin-bottom: 0.25em; }
+
+        .btn-saved { background-color: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
+        .btn-unsaved { background-color: #fefce8; color: #a16207; border-color: #fde047; }
+        .color-btn.selected { transform: scale(1.15); box-shadow: 0 0 0 2px white, 0 0 0 4px #9ca3af; }
+
+        body:fullscreen { background-color: #f3f4f6; }
+        .cursor-crosshair { cursor: crosshair !important; }
+        
+        #note-preview { white-space: pre-wrap; }
+        /* 👇 新增：O(1) 极速批注隐形护盾 */
+        body.hide-annotations .annotation-layer {
+            display: none !important; /* 彻底从渲染树中物理剥离，0 CPU 消耗 */
+        }
+
+        /* 👇 新增：极速侧翼折叠护盾 (物理剔除草稿本专属批注，释放缩放算力) */
+        body:not(.show-sidecars) .sidecar-only-anno {
+            display: none !important;
+        }
+
+        /* 👇 新增：当前目录激活状态的高亮特效 👇 */
+        .outline-item.active-outline {
+            background-color: #f0fdf4 !important; /* 浅绿色背景 bg-green-50 */
+            border-left: 3px solid #22c55e !important; /* 绿色左侧指示条 */
+        }
+        .outline-item.active-outline span.truncate {
+            color: #16a34a !important; /* 深绿色文字 text-green-600 */
+            font-weight: 700 !important;
+        }
+        .outline-item.active-outline .bg-gray-300 {
+            background-color: #22c55e !important; /* 子节点的小圆点也变绿 */
+        }
+
+        /* =========================================================================
+           词典翻译工具 (Dictionary / Translator) —— 悬浮气泡 + 结果面板
+           ========================================================================= */
+        .dict-bubble {
+            position: fixed;
+            z-index: 99999;
+            display: none;
+        }
+
+        .dict-panel {
+            position: fixed;
+            z-index: 99998;
+            display: none;
+            /* 进场动画 */
+            animation: dictFadeIn 0.16s ease-out;
+        }
+        @keyframes dictFadeIn {
+            from { opacity: 0; transform: translateY(6px) scale(0.98); }
+            to { opacity: 1; transform: none; }
+        }
+
+        /* 字典内容样式调整，保留内部细节类的设定 */
+
+        .dict-loading {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 2px;
+            color: #64748b;
+        }
+        .dict-spinner {
+            width: 16px;
+            height: 16px;
+            flex: none;
+            border: 2px solid #bfdbfe;
+            border-top-color: #2563eb;
+            border-radius: 50%;
+            animation: dictSpin 0.7s linear infinite;
+        }
+        @keyframes dictSpin { to { transform: rotate(360deg); } }
+
+        .dict-error {
+            color: #dc2626;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            padding: 8px 10px;
+        }
+
+        .dict-sentence { white-space: pre-wrap; word-break: break-word; }
+
+        .dict-word-head {
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 6px;
+        }
+        .dict-word { font-size: 20px; font-weight: 800; color: #111827; }
+        .dict-phonetic {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 13px;
+            color: #6b7280;
+        }
+        .dict-pos {
+            font-size: 12px;
+            font-weight: 700;
+            color: #2563eb;
+            background: #eff6ff;
+            padding: 1px 8px;
+            border-radius: 999px;
+        }
+        .dict-def-en { color: #475569; font-style: italic; margin: 4px 0; }
+        .dict-def-zh { color: #111827; margin: 4px 0; }
+
+        .dict-examples { margin: 10px 0 0; padding-left: 0; list-style: none; }
+        .dict-example {
+            padding: 8px 10px;
+            background: #f8fafc;
+            border-left: 3px solid #bfdbfe;
+            border-radius: 6px;
+            margin-bottom: 6px;
+        }
+        .dict-ex-en { color: #334155; font-weight: 600; }
+        .dict-ex-zh { color: #64748b; font-size: 13px; margin-top: 2px; }
+
+        /* 护眼模式下与整体配色统一 */
+        body.eye-protection-mode .dict-bubble,
+        body.eye-protection-mode .dict-panel {
+            background: rgba(250, 247, 242, 0.98) !important;
+            border-color: #E6E2D6 !important;
+        }
+        body.eye-protection-mode .dict-panel-header {
+            background: #FAF7F2 !important;
+            border-color: #F0EBE1 !important;
+        }
+
+        /* =========================================================================
+           视频播放器 (Video Player) —— 雅致中性深色磨砂晶体
+           ========================================================================= */
+        .video-panel {
+            position: fixed;
+            z-index: 99990;
+            width: 560px;
+            height: 380px;
+            display: flex;
+            flex-direction: column;
+            background: rgba(24, 24, 27, 0.96);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.09);
+            border-radius: 12px;
+            box-shadow: 0 24px 50px -12px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05);
+            resize: none;
+            overflow: hidden;
+            min-width: 280px;
+            min-height: 180px;
+            animation: videoPanelIn 0.16s ease-out;
+            transition: box-shadow 0.2s, border-color 0.2s;
+            outline: none !important;
+            user-select: none;
+        }
+        .video-panel:focus,
+        .video-panel:focus-visible,
+        .video-panel *:focus,
+        .video-panel *:focus-visible {
+            outline: none !important;
+        }
+        @keyframes videoPanelIn {
+            from { opacity: 0; transform: scale(0.97); }
+            to { opacity: 1; transform: none; }
+        }
+
+        /* 拖拽视频文件悬停时的雅致高亮动效 */
+        .video-panel.drag-over {
+            border-color: rgba(255, 255, 255, 0.35) !important;
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1), 0 24px 50px -12px rgba(0, 0, 0, 0.7) !important;
+        }
+
+        /* 折叠模式：只保留标题栏 */
+        .video-panel.is-collapsed {
+            height: 38px !important;
+            min-height: 38px !important;
+            resize: none !important;
+            box-shadow: 0 12px 28px -6px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08) !important;
+        }
+        .video-panel.is-collapsed video,
+        .video-panel.is-collapsed .video-panel-hint,
+        .video-panel.is-collapsed .video-overlay,
+        .video-panel.is-collapsed .video-hud-badge,
+        .video-panel.is-collapsed .video-resize-handle {
+            display: none !important;
+        }
+
+        .video-panel-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            height: 38px;
+            padding: 0 10px;
+            background: rgba(39, 39, 42, 0.95);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+            color: #e4e4e7;
+            cursor: move;
+            user-select: none;
+            flex: none;
+        }
+        .video-panel-filename {
+            font-size: 11px;
+            color: #a1a1aa;
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 9999px;
+            padding: 1.5px 8px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+            max-width: 220px;
+            line-height: 1.4;
+        }
+        .video-panel-spacer { flex: 1; min-width: 4px; }
+
+        .video-panel-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            border-radius: 6px;
+            color: #a1a1aa;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            flex: none;
+            transition: all 0.15s;
+        }
+        .video-panel-btn:hover { background: rgba(255, 255, 255, 0.08); color: #f4f4f5; }
+        .video-panel-btn.active { background: rgba(255, 255, 255, 0.14); color: #f4f4f5; }
+        .video-panel-btn-close:hover { background: rgba(239, 68, 68, 0.25); color: #fca5a5; }
+
+        .video-speed {
+            height: 24px;
+            padding: 0 4px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #d4d4d8;
+            background: rgba(24, 24, 27, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 6px;
+            outline: none;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .video-speed:hover { background: rgba(39, 39, 42, 0.9); border-color: rgba(255, 255, 255, 0.22); color: #fff; }
+        .video-speed:focus { border-color: #71717a; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.06); }
+
+        .video-panel video {
+            flex: 1 1 auto;
+            min-height: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #18181b;
+            display: block;
+            outline: none !important;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* 顶部透明交互遮罩层：隔绝 Edge 悬停菜单，点击直接播放/暂停，双击全屏 */
+        .video-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 46px; /* 留出底部原生播放控制条操作区 */
+            z-index: 5;
+            cursor: pointer;
+            background: transparent;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* 屏幕中央 HUD 浮层（倍速/快进快退反馈） */
+        .video-hud-badge {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.9);
+            background: rgba(24, 24, 27, 0.9);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            color: #f4f4f5;
+            font-size: 15px;
+            font-weight: 700;
+            padding: 7px 16px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.15s ease, transform 0.15s ease;
+            z-index: 10;
+            user-select: none;
+        }
+        .video-hud-badge.show {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+
+        /* 空状态区域升级为纯图案极简 Drop-zone（严丝合缝覆盖，无褐条、无文字） */
+        .video-panel-hint {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #18181b;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            user-select: none;
+        }
+        .video-panel-hint:hover {
+            background: #202024;
+        }
+        .video-panel-hint i {
+            font-size: 50px;
+            color: #71717a;
+            opacity: 0.5;
+            transition: transform 0.2s, opacity 0.2s, color 0.2s;
+        }
+        .video-panel-hint:hover i {
+            transform: scale(1.08);
+            opacity: 0.85;
+            color: #a1a1aa;
+        }
+
+        /* 右下角等比缩放手柄 */
+        .video-resize-handle {
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            width: 18px;
+            height: 18px;
+            display: flex;
+            align-items: flex-end;
+            justify-content: flex-end;
+            padding: 0 2px 2px 0;
+            pointer-events: auto;
+            cursor: nwse-resize;
+            opacity: 0.45;
+            z-index: 12;
+            transition: opacity 0.15s;
+        }
+        .video-resize-handle:hover {
+            opacity: 1;
+        }
+
+        /* 侧栏折叠过渡微动效 */
+        aside#sidebar {
+            transition: width 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* ============================================================
+           📁 顶部工具栏快捷教材文件夹按钮 (Quick Folder Buttons)
+           按钮不带任何 Tailwind 工具类，用「元素+类」选择器即可稳定压过
+           Tailwind preflight 的 [type='button'] 规则，无需 !important
+           ============================================================ */
+        button.quick-folder-btn {
+            width: 19px;
+            height: 15px;
+            padding: 0;
+            box-sizing: border-box;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            line-height: 1;
+            letter-spacing: -0.01em;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #ffffff;
+            border: 1px solid #d1d5db;
+            color: #475569;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+            transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            user-select: none;
+            cursor: pointer;
+        }
+        button.quick-folder-btn:hover {
+            background: #f8fafc;
+            border-color: #3b82f6;
+            color: #2563eb;
+            box-shadow: 0 2px 5px rgba(59, 130, 246, 0.18);
+            transform: translateY(-1px);
+        }
+        button.quick-folder-btn:active {
+            background: #eff6ff;
+            border-color: #2563eb;
+            color: #1d4ed8;
+            transform: translateY(0) scale(0.94);
+            box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05);
+        }
+
+        /* 护眼模式下快捷按钮与弹窗适配（选择器权重本身就高于基础规则，无需 !important） */
+        body.eye-protection-mode .quick-folder-btn {
+            background: #FAF7F2;
+            border-color: #E6E2D6;
+            color: #57534E;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+        }
+        body.eye-protection-mode .quick-folder-btn:hover {
+            background: #F0EBE1;
+            border-color: #B2AFA6;
+            color: #1C1917;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+        }
+        body.eye-protection-mode #quick-folder-modal-card {
+            background-color: #FAF7F2 !important;
+            border-color: #E6E2D6 !important;
+        }
+        body.eye-protection-mode #quick-folder-modal-card .bg-gray-50\/70,
+        body.eye-protection-mode #quick-folder-modal-card .bg-gray-50\/60,
+        body.eye-protection-mode #quick-folder-modal-card .bg-gray-50 {
+            background-color: #F4EFE6 !important;
+        }

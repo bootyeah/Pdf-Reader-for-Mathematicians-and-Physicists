@@ -1,0 +1,444 @@
+<!--
+  全功能 PDF 阅读器 (PDF Reader Pro) — 纯前端 SPA + Python 本地 TikZ 渲染服务，100% 离线运行。
+  架构与设计理念详见 README.md；各 JS 模块职责见文件底部 <script> 引用处的注释。
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全功能 PDF 阅读器（离线版）</title>
+    
+    <!-- 不要去请求图标就用 <link rel="icon" href="data:,">，否则用下面这个-->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><path d='M20,5 h40 l25,25 v60 a10,10 0 0,1 -10,10 h-55 a10,10 0 0,1 -10,-10 v-75 a10,10 0 0,1 10,-10 z' fill='%23ef4444'/><path d='M60,5 v25 h25 z' fill='%23b91c1c'/><text x='50' y='72' font-family='system-ui, sans-serif' font-weight='900' font-size='32' fill='%23ffffff' text-anchor='middle'>PDF</text></svg>">
+
+    <!-- 样式库: Tailwind CSS -->
+    <script src="./lib/tailwindcss.js"></script>
+    
+    <!-- 图标库: Phosphor Icons (本地离线版) -->
+    <link rel="stylesheet" href="./lib/phosphor/regular/style.css">
+    <link rel="stylesheet" href="./lib/phosphor/fill/style.css">
+
+    <!-- PDF.js 核心库 -->
+    <script src="./lib/pdf.min.js"></script>
+    <link rel="stylesheet" href="./lib/pdf_viewer.min.css">
+    
+    <!-- KaTeX LaTeX 渲染库 -->
+    <link rel="stylesheet" href="./lib/katex/katex.min.css">
+    <script src="./lib/katex/katex.min.js"></script>
+    <script src="./lib/katex/contrib/auto-render.min.js"></script>
+    <script src="./lib/katex/contrib/mhchem.min.js"></script>
+
+    <!-- PDF-Lib -->
+    <script src="./lib/pdf-lib.min.js"></script>
+    <script src="./lib/localforage.min.js"></script>
+
+    <script src="./config.js"></script>
+
+    <link rel="stylesheet" href="./style.css">
+</head>
+<body class="bg-gray-100 h-screen flex flex-col overflow-hidden text-gray-800 font-sans">
+
+    <!-- 顶部工具栏 (完美均衡尺寸) -->
+    <header class="bg-white border-b border-gray-300 shadow-sm z-50 flex items-center justify-between px-7 py-2.5 shrink-0 h-[80px] relative">
+        <div class="flex items-center space-x-3 min-w-0 flex-1 mr-6">
+            <button id="toggle-sidebar" class="p-2 hover:bg-gray-100 rounded-lg text-gray-600 focus:outline-none transition-colors" title="切换侧边栏">
+                <i class="ph ph-sidebar-simple text-[22px]"></i>
+            </button>
+            
+            <div class="flex items-center gap-2 min-w-0">
+                <button id="toggle-visibility-btn" class="shrink-0 focus:outline-none group cursor-pointer" title="隐藏/显示所有批注 (沉浸阅读)">
+                    <i id="visibility-icon" class="ph ph-file-pdf text-red-600 text-[32px] transition-colors duration-300 group-hover:scale-105"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- 搜索栏 -->
+        <div id="search-bar" class="hidden absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white shadow-xl border border-gray-200 rounded-xl p-2 flex items-center gap-2 z-50 animate-fade-in">
+            <input id="search-input" type="text" class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 w-56" placeholder="查找内容...">
+            <span id="search-count" class="text-xs text-gray-500 w-16 text-center">0/0</span>
+            <button id="search-prev" class="p-1 hover:bg-gray-100 rounded text-gray-600" title="上一个"><i class="ph ph-caret-up text-lg"></i></button>
+            <button id="search-next" class="p-1 hover:bg-gray-100 rounded text-gray-600" title="下一个"><i class="ph ph-caret-down text-lg"></i></button>
+            <button id="search-close" class="p-1 hover:bg-gray-100 rounded text-gray-600 ml-1"><i class="ph ph-x text-lg"></i></button>
+        </div>
+
+        <div class="flex items-center space-x-3.5 shrink-0">
+            <!-- 视图控制 -->
+            <div class="hidden md:flex items-center space-x-1.5 bg-gray-50 rounded-xl p-1.5 border border-gray-200">
+                <button id="toggle-search-btn" class="p-1.5 hover:bg-white hover:shadow-sm rounded-lg text-gray-600 transition" title="搜索 (Ctrl+F)">
+                    <i class="ph ph-magnifying-glass text-[20px]"></i>
+                </button>
+                
+                <button id="eye-protection-btn" class="p-1.5 hover:bg-white hover:shadow-sm rounded-lg text-gray-600 transition" title="护眼模式">
+                    <i class="ph ph-eye text-[20px]"></i>
+                </button>
+
+                <button id="hand-tool-btn" class="p-1.5 hover:bg-white hover:shadow-sm rounded-lg text-gray-600 transition" title="抓手模式 (按住右键拖拽屏幕)">
+                    <i class="ph ph-hand-palm text-[20px]"></i>
+                </button>
+
+                <button id="sidecar-btn" class="p-1.5 hover:bg-white hover:shadow-sm rounded-lg text-gray-600 transition group" title="无界草稿本 (在每一页右侧展开等高扩展画布)">
+                    <svg viewBox="0 0 24 24" class="w-[20px] h-[20px]" stroke="currentColor" stroke-width="2" fill="none">
+                        <rect x="3" y="4" width="18" height="16" rx="2" />
+                        <line x1="12" y1="4" x2="12" y2="20" stroke-dasharray="2 2" />
+                        <path d="M15 9h3 M15 13h3" stroke-linecap="round" />
+                    </svg>
+                </button>
+
+                <div class="w-px h-4 bg-gray-300 mx-0.5"></div>
+                <button id="zoom-out" class="p-1.5 hover:bg-white hover:shadow-sm rounded-lg text-gray-600 transition" title="缩小 (Ctrl + -)">
+                    <i class="ph ph-minus text-[20px]"></i>
+                </button>
+                <span id="zoom-level" class="text-[13px] font-medium w-11 text-center select-none">100%</span>
+                <button id="zoom-in" class="p-1.5 hover:bg-white hover:shadow-sm rounded-lg text-gray-600 transition" title="放大 (Ctrl + +)">
+                    <i class="ph ph-plus text-[20px]"></i>
+                </button>
+                <div id="zoom-slider-wrapper" class="relative w-6 h-[34px] flex justify-center items-center mx-1 cursor-ns-resize group opacity-70 hover:opacity-100 transition-opacity" title="上下拖动快捷缩放">
+                    <!-- 内部轨道定高 -->
+                    <div id="zoom-slider-track" class="relative w-1 h-[26px] bg-gray-200 rounded-full pointer-events-none">
+                        <!-- 刻度点 -->
+                        <div class="w-[5px] h-[5px] bg-gray-400 rounded-full absolute -top-[1px] transform -translate-x-1/2 left-1/2"></div>
+                        <div class="w-[4px] h-[4px] bg-gray-400 rounded-full absolute top-1/2 transform -translate-y-1/2 -translate-x-1/2 left-1/2"></div>
+                        <div class="w-[3px] h-[3px] bg-gray-400 rounded-full absolute -bottom-[1px] transform -translate-x-1/2 left-1/2"></div>
+                        
+                        <!-- 可拖动滑块本体 -->
+                        <div id="zoom-slider-thumb" class="absolute w-[10px] h-[10px] border border-gray-400 rounded-full shadow-sm transition-all duration-200 transform -translate-x-1/2 -translate-y-1/2 left-1/2 z-10 group-hover:scale-125 group-hover:border-blue-400" style="background-color: white !important; top: 100%;"></div>
+                    </div>
+                </div>
+                <div class="w-px h-4 bg-gray-300 mx-0.5"></div>
+                <button id="video-btn" class="p-1.5 hover:bg-white hover:shadow-sm rounded-lg text-gray-600 transition" title="视频播放器 (F9)">
+                    <i class="ph ph-video-camera text-[20px]"></i>
+                </button>
+
+                <button id="fullscreen-btn" class="p-1.5 hover:bg-white hover:shadow-sm rounded-lg text-gray-600 transition" title="全屏">
+                    <i class="ph ph-corners-out text-[20px]"></i>
+                </button>
+            </div>
+
+            <!-- 标注工具 -->
+            <div class="flex items-center space-x-2 bg-gray-50 p-1.5 rounded-xl border border-gray-200">
+                <div class="flex space-x-1.5" id="tool-group">
+                    <button data-tool="highlight" class="tool-btn flex items-center justify-center w-10 h-10 rounded-lg hover:bg-white hover:text-yellow-600 hover:shadow-sm text-gray-500 transition-all border border-transparent" title="高亮">
+                        <i class="ph ph-highlighter text-[22px]"></i>
+                    </button>
+                    <button data-tool="underline" class="tool-btn flex items-center justify-center w-10 h-10 rounded-lg hover:bg-white hover:text-red-600 hover:shadow-sm text-gray-500 transition-all border border-transparent" title="下划线">
+                        <i class="ph ph-text-underline text-[22px]"></i>
+                    </button>
+                    <button data-tool="parenthesis" class="tool-btn flex items-center justify-center w-10 h-10 rounded-lg hover:bg-white hover:text-purple-600 hover:shadow-sm text-gray-500 transition-all border border-transparent" title="括号标注">
+                        <i class="ph ph-brackets-round text-[22px]"></i>
+                    </button>
+                    <button data-tool="brace" class="tool-btn flex items-center justify-center w-10 h-10 rounded-lg hover:bg-white hover:text-orange-500 hover:shadow-sm text-gray-500 transition-all border border-transparent" title="大括号 (拖拽决定方向与伸展)">
+                        <i class="ph ph-brackets-curly text-[22px]"></i>
+                    </button>
+                    <button data-tool="text" class="tool-btn flex items-center justify-center w-10 h-10 rounded-lg hover:bg-white hover:text-gray-800 hover:shadow-sm text-gray-500 transition-all border border-transparent" title="添加文本块">
+                        <i class="ph ph-text-t text-[22px]"></i>
+                    </button>
+                    <button data-tool="arrow" class="tool-btn flex items-center justify-center w-10 h-10 rounded-lg hover:bg-white hover:text-blue-600 hover:shadow-sm text-gray-500 transition-all border border-transparent" title="绘制箭头">
+                        <i class="ph ph-arrow-up-right text-[22px]"></i>
+                    </button>
+                    <div class="relative group" id="marker-dropdown-wrapper">
+                        <!-- 主工具按钮 -->
+                        <button id="active-marker-btn" data-tool="star" class="tool-btn flex items-center justify-center w-10 h-10 rounded-lg hover:bg-white hover:text-red-500 hover:shadow-sm text-gray-500 transition-all border border-transparent" title="放置标记 (悬停选择更多)">
+                            <svg viewBox="0 0 51 48" class="w-[22px] h-[22px]" style="fill: currentColor;"><polygon points="25,1 32,18 50,18 36,29 40,46 25,36 10,46 14,29 0,18 18,18" /></svg>
+                        </button>
+                        
+                        <!-- 下拉菜单 -->
+                        <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-white border border-gray-200 shadow-xl rounded-xl p-1.5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 grid grid-cols-4 gap-1 w-[160px]">
+                            <button class="marker-select-btn flex items-center justify-center w-8 h-8 rounded hover:bg-red-50 text-red-500 transition-colors" data-type="star" title="红星">
+                                <svg viewBox="0 0 51 48" class="w-[18px] h-[18px]" style="fill: currentColor;"><polygon points="25,1 32,18 50,18 36,29 40,46 25,36 10,46 14,29 0,18 18,18" /></svg>
+                            </button>
+                            <button class="marker-select-btn flex items-center justify-center w-8 h-8 rounded hover:bg-blue-50 text-blue-500 transition-colors" data-type="asterisk" title="蓝*">
+                                <svg viewBox="0 0 24 24" class="w-[18px] h-[18px]" stroke="currentColor" stroke-width="4.5" stroke-linecap="round"><line x1="12" y1="2" x2="12" y2="22" /><line x1="3.3" y1="7" x2="20.7" y2="17" /><line x1="3.3" y1="17" x2="20.7" y2="7" /></svg>
+                            </button>
+                            <button class="marker-select-btn flex items-center justify-center w-8 h-8 rounded hover:bg-red-50 text-red-500 transition-colors" data-type="exclamation" title="红！">
+                                <svg viewBox="0 0 24 24" class="w-[18px] h-[18px]" stroke="currentColor" stroke-width="3" fill="none"><path d="M12 4v10" stroke-linecap="round"/><circle cx="12" cy="20" r="1.5" fill="currentColor" stroke="none"/></svg>
+                            </button>
+                            <button class="marker-select-btn flex items-center justify-center w-8 h-8 rounded hover:bg-red-50 text-red-500 transition-colors" data-type="question" title="红？">
+                                <svg viewBox="0 0 24 24" class="w-[18px] h-[18px]" stroke="currentColor" stroke-width="2.5" fill="none"><path d="M9 10a3 3 0 0 1 6 0c0 3-3 3-3 5v1" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="20" r="1.5" fill="currentColor" stroke="none"/></svg>
+                            </button>
+                            <button class="marker-select-btn flex items-center justify-center w-8 h-8 rounded hover:bg-red-50 text-red-500 transition-colors" data-type="check" title="红✔">
+                                <svg viewBox="0 0 24 24" class="w-[18px] h-[18px]" stroke="currentColor" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"/></svg>
+                            </button>
+                            <button class="marker-select-btn flex items-center justify-center w-8 h-8 rounded hover:bg-red-50 text-red-500 transition-colors" data-type="cross" title="红×">
+                                <svg viewBox="0 0 24 24" class="w-[18px] h-[18px]" stroke="currentColor" stroke-width="4" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>
+                            </button>
+                            <button class="marker-select-btn flex items-center justify-center w-8 h-8 rounded hover:bg-red-50 text-red-500 transition-colors" data-type="triangle" title="红三角">
+                                <svg viewBox="0 0 24 24" class="w-[18px] h-[18px]" style="fill: currentColor;"><polygon points="12,2 22,20 2,20"/></svg>
+                            </button>
+                            <button class="marker-select-btn flex items-center justify-center w-8 h-8 rounded hover:bg-red-50 text-red-500 transition-colors" data-type="exText" title="ex文本">
+                                <svg viewBox="0 0 24 24" class="w-[20px] h-[20px]" style="fill: currentColor;"><text x="12" y="17" font-size="15" font-family="ui-sans-serif, system-ui, sans-serif" font-weight="900" text-anchor="middle">ex</text></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="h-6 w-px bg-gray-300"></div>
+
+                <div class="flex items-center space-x-2 px-1" id="color-group">
+                    <button class="w-[22px] h-[22px] rounded-full bg-[#fde047] color-btn selected transition-transform" data-color="#fde047" title="黄色"></button>
+                    <button class="w-[22px] h-[22px] rounded-full bg-[#f87171] color-btn transition-transform" data-color="#f87171" title="红色"></button>
+                    <button class="w-[22px] h-[22px] rounded-full bg-[#4ade80] color-btn transition-transform" data-color="#4ade80" title="绿色"></button>
+                    <button class="w-[22px] h-[22px] rounded-full bg-[#60a5fa] color-btn transition-transform" data-color="#60a5fa" title="蓝色"></button>
+                    <button class="w-[22px] h-[22px] rounded-full bg-[#000000] border border-gray-300 color-btn transition-transform" data-color="#000000" title="黑色"></button>
+                    
+                    <div class="relative w-7 h-7 ml-1 overflow-hidden rounded-full border-2 border-gray-300 cursor-pointer shadow-sm hover:ring-2 hover:ring-gray-300 transition-all" title="自定义">
+                        <input type="color" id="custom-color-input" class="absolute -top-2 -left-2 w-10 h-10 cursor-pointer p-0 border-0" value="#fde047">
+                    </div>
+                </div>
+            </div>
+
+            <div class="h-7 w-px bg-gray-300 mx-1.5"></div>
+
+            <div class="flex space-x-2 items-center">
+                <!-- 快捷文件夹双按钮：绝对定位挂在「打开」按钮上方的 header 留白里
+                     （bottom-full + 2px 间距），因此这一列的高度 == 打开按钮自身 40px，
+                     与右侧保存按钮严格居中对齐。两条禁忌：
+                     ① 不要用负偏移 top 定位 —— 会被 body 的 overflow-hidden 裁掉顶边框；
+                     ② 不要把按钮条放进常规流 —— 列高变成 58px，会把打开按钮整体压下去错位。 -->
+                <div class="relative flex flex-col items-center">
+                    <!-- 快捷文件夹双按钮 (位于打开文件按钮正上方；简称与提示语由 JS 按配置写入) -->
+                    <div class="absolute bottom-full mb-[2px] left-0 w-10 h-[15px] flex items-center justify-between" id="quick-folders-bar">
+                        <button type="button" id="quick-folder-btn-1" class="quick-folder-btn">数</button>
+                        <button type="button" id="quick-folder-btn-2" class="quick-folder-btn">物</button>
+                    </div>
+
+                    <div class="relative group" id="open-dropdown-wrapper">
+                        <button id="open-btn" class="bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 w-10 h-10 rounded-lg flex items-center justify-center transition shadow-sm border border-gray-300 relative z-10" title="打开 PDF">
+                            <i class="ph ph-folder-open text-[22px]"></i>
+                        </button>
+                        <!-- 下拉菜单：极简纯图标 -->
+                        <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-white border border-gray-200 shadow-xl rounded-xl p-1.5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 flex justify-center w-auto">
+                            <button id="open-new-btn" class="flex items-center justify-center w-8 h-8 rounded hover:bg-blue-50 text-gray-600 hover:text-blue-600 transition-colors" title="在新标签页中平行打开另一个 PDF">
+                                <i class="ph ph-browsers text-[20px]"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="relative group" id="save-dropdown-wrapper">
+                    <button id="save-status-btn" class="btn-saved border w-10 h-10 rounded-lg flex items-center justify-center transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed relative z-10" title="保存">
+                        <i id="save-icon" class="ph ph-floppy-disk text-[22px] group-hover:scale-110 transition-transform"></i> 
+                    </button>
+                    <!-- 下拉菜单：极简纯图标 -->
+                    <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-white border border-gray-200 shadow-xl rounded-xl p-1.5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 flex justify-center w-auto">
+                        <button id="close-app-btn" class="flex items-center justify-center w-8 h-8 rounded hover:bg-red-50 text-gray-600 hover:text-red-600 transition-colors" title="关闭页面并退出后台引擎">
+                            <i class="ph ph-power text-[20px]"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <input type="file" id="file-input" accept="application/pdf" class="hidden">
+        </div>
+
+        <button id="outline-trigger-btn" class="hidden absolute left-1/2 top-full transform -translate-x-1/2 bg-white border border-gray-300 border-t-0 rounded-b-lg shadow-sm z-40 px-6 py-0 hover:bg-gray-50 transition-colors group cursor-pointer h-[16px] flex items-center justify-center" title="展开文档目录">
+            <!-- 图标加入 transition-transform duration-300 顺滑翻转 -->
+            <i class="ph ph-caret-down text-gray-400 group-hover:text-blue-500 transition-transform duration-300 ease-out text-[14px]"></i>
+        </button>
+
+        <div id="outline-panel" class="absolute left-1/2 top-full transform -translate-x-1/2 mt-6 w-[480px] max-h-[80vh] bg-white/95 backdrop-blur-md border border-gray-200 shadow-2xl rounded-xl z-50 flex flex-col overflow-hidden transition-all duration-300 ease-out origin-top opacity-0 invisible scale-y-95 -translate-y-3 pointer-events-none">
+            <div class="px-4 py-2 border-b border-gray-100 bg-gray-50/80 flex justify-between items-center shrink-0">
+                <span class="text-xs font-bold text-gray-500 uppercase flex items-center gap-1.5"><i class="ph ph-list-dashes text-blue-500 text-sm"></i> 目录</span>
+                <button id="close-outline-btn" class="text-gray-400 hover:text-red-500 hover:bg-red-50 rounded p-0.5 transition"><i class="ph ph-x"></i></button>
+            </div>
+            <!-- 目录列表容器 -->
+            <div id="outline-content" class="flex-1 overflow-y-auto p-3 text-[16px] text-gray-700 pb-4 custom-scrollbar"></div>
+        </div>
+    </header>
+
+
+
+
+    <div class="flex-1 flex overflow-hidden relative">
+        <aside id="sidebar" class="w-64 bg-white border-r border-gray-200 flex flex-col absolute md:relative z-20 h-full shadow-lg md:shadow-none -translate-x-full md:translate-x-0 overflow-hidden shrink-0">
+            <div id="sidebar-doc-header" class="px-3 py-2.5 border-b border-gray-100 bg-white shrink-0 group">
+                <div class="flex items-center justify-between gap-1.5 min-w-0">
+                    <span id="doc-title" class="flex-1 text-[13px] font-bold text-gray-500 leading-snug truncate select-text cursor-default" title="未打开文档">未打开文档</span>
+                    <button id="copy-doc-title-btn" class="opacity-0 group-hover:opacity-100 p-0.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition shrink-0" title="复制文件名">
+                        <i class="ph ph-copy text-[14px]"></i>
+                    </button>
+                </div>
+                <!-- 保存模式提示：能原位静默保存时（有句柄或本地路径）标题转绿且本行隐藏；
+                     只有降级为「另存为」时才显示这行小字，统一由 updateDocMeta() 维护 -->
+                <div id="doc-meta" class="hidden text-[11px] text-gray-400 mt-1 truncate select-none"></div>
+            </div>
+            <div class="p-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center whitespace-nowrap">
+                <h3 class="font-bold text-sm flex items-center gap-3">
+                    <span id="tab-annos" class="cursor-pointer text-blue-600 transition-colors">批注列表</span>
+                    <span class="text-gray-300 font-normal">|</span>
+                    <span id="tab-snippets" class="cursor-pointer text-gray-400 hover:text-blue-600 transition-colors">素材库</span>
+                </h3>                
+                <div class="flex items-center gap-1.5">
+                    <button id="import-anno-btn" class="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition" title="导入批注文件 (.json)">
+                        <i class="ph ph-upload-simple text-lg"></i>
+                    </button>
+                    <button id="export-anno-btn" class="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition" title="导出批注数据 (.json)">
+                        <i class="ph ph-download-simple text-lg"></i>
+                    </button>
+                    <span id="annotation-count" class="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full ml-1">0</span>
+                </div>
+                
+            </div>
+            
+            <input type="file" id="import-anno-input" accept=".json" class="hidden">
+
+	    <div class="px-3 py-2 border-b border-gray-100 bg-white shrink-0">
+                <div class="relative">
+                    <input type="text" id="anno-search-input" placeholder="检索批注内容..." class="w-full pl-8 pr-2 py-1.5 text-xs border border-gray-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors bg-gray-50">
+                    <i class="ph ph-magnifying-glass absolute left-2.5 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm"></i>
+                </div>
+            </div>
+
+            <div id="sidebar-list" class="flex-1 overflow-y-auto p-2 space-y-2">
+                <div class="text-center text-gray-400 text-sm mt-10 p-4">
+                    <i class="ph ph-highlighter text-3xl mb-2 opacity-30"></i>
+                    <p>暂无批注</p>
+                    <p class="text-xs mt-1">选中文本或拖动箭头进行标注</p>
+                </div>
+            </div>
+        </aside>
+
+        <main class="flex-1 overflow-y-auto relative bg-gray-100 p-4 md:p-8" id="viewer-container">
+            <div id="page-hud" class="fixed top-[92px] right-8 z-40 bg-white/90 backdrop-blur-md border border-gray-200 shadow-sm rounded-lg px-3 py-1.5 flex items-center gap-1.5 transition-opacity duration-300 opacity-0 pointer-events-none">
+                <div class="peer text-xs font-mono font-medium text-gray-600">
+                    <span id="hud-current-page" class="text-blue-600 font-bold text-[14px]">1</span> 
+                    <span class="text-gray-400 mx-0.5">/</span> 
+                    <span id="hud-total-pages">--</span>
+                </div>
+                
+                <div class="w-px h-4 bg-gray-300 mx-0.5"></div> <!-- 分隔线 -->
+
+                <!-- 设为起始页按钮：常态显示灰色，悬停变蓝 -->
+                <button id="set-offset-btn" class="flex items-center justify-center w-6 h-6 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors cursor-pointer" title="将当前页设为正文第 1 页">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4"><path d="M16 11V7a4 4 0 00-8 0v4l-2 3v2h6v6l2 2 2-2v-6h6v-2l-2-3z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                
+                <!-- 重置按钮：默认物理隐藏，触发偏移后才显示 -->
+                <button id="reset-offset-btn" class="hidden items-center justify-center w-6 h-6 rounded hover:bg-red-100 text-red-400 hover:text-red-600 transition-colors cursor-pointer" title="恢复文档原始页码">
+                    <i class="ph ph-arrow-counter-clockwise text-[16px]"></i>
+                </button>
+
+                <div id="hud-physical-total" class="absolute top-[calc(100%+4px)] right-1 bg-white/80 backdrop-blur-sm border border-gray-200 shadow-sm rounded px-1.5 py-0.5 text-[12px] text-gray-400 hidden opacity-0 invisible peer-hover:opacity-100 peer-hover:visible transition-all pointer-events-none whitespace-nowrap">
+                    共 <span id="hud-physical-number" class="font-mono">--</span> 页
+                </div>
+            </div>
+            <div id="pages-container" class="flex flex-col items-center min-h-full pb-20"></div>
+            <div id="empty-state" class="absolute inset-0 flex flex-col items-center justify-center text-gray-400 pointer-events-none z-0">
+                <div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-200 text-center">
+                    <i class="ph ph-files text-6xl mb-4 text-blue-100 text-blue-500"></i>
+                    <h2 class="text-xl font-bold text-gray-700 mb-2">准备阅读</h2>
+                    <p class="text-sm text-gray-500">点击右上角“打开”按钮加载 PDF</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <button id="back-jump-btn" class="fixed bottom-8 right-8 w-12 h-12 bg-white rounded-full flex items-center justify-center text-blue-600 transition-all duration-300 z-50 transform translate-y-24 opacity-0 pointer-events-none border border-gray-200" title="返回跳转前位置">
+        <i class="ph ph-arrow-u-up-left text-[24px]"></i>
+    </button>
+
+    <!-- 笔记弹窗 -->
+    <div id="note-modal" class="hidden fixed z-50 bg-white rounded-lg shadow-xl border border-gray-200 note-popup flex flex-col ring-1 ring-black/5" style="resize: both; overflow: hidden; min-width: 260px; min-height: 200px;">
+        <div class="flex justify-between items-center px-3 py-1.5 border-b bg-gray-50 rounded-t-lg cursor-move select-none shrink-0" id="note-header">
+            <span class="text-xs font-bold text-gray-500 uppercase flex items-center gap-1">
+                <i class="ph ph-note-pencil text-blue-500"></i> <span id="modal-title">笔记</span>
+            </span>
+            <div class="flex gap-1 items-center">
+                <div id="text-size-controls" class="hidden flex items-center bg-gray-200 rounded px-1 py-0.5 mr-1">
+                    <button id="font-minus-btn" class="text-gray-600 hover:text-black font-bold px-1 rounded hover:bg-gray-300 text-xs" title="缩小字体">A-</button>
+                    <div class="w-px h-3 bg-gray-400 mx-1"></div>
+                    <button id="font-plus-btn" class="text-gray-600 hover:text-black font-bold px-1 rounded hover:bg-gray-300 text-xs" title="放大字体">A+</button>
+                </div>
+                
+                <button id="save-snippet-btn" class="hidden text-gray-400 hover:text-orange-500 hover:bg-orange-50 rounded p-0.5 transition" title="存为常用素材">
+                    <i class="ph-fill ph-star"></i>
+                </button>
+                <button id="delete-note-btn" class="text-gray-400 hover:text-red-500 hover:bg-red-50 rounded p-0.5 transition" title="删除">
+                    <i class="ph ph-trash"></i>
+                </button>
+                <button id="close-note-btn" class="text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded p-0.5 transition">
+                    <i class="ph ph-x"></i>
+                </button>
+            </div>
+        </div>
+        <!-- 下方包裹区设为 flex-1 撑满剩余空间 -->
+        <div class="p-2 bg-white rounded-b-lg flex-1 flex flex-col overflow-hidden">
+            <!-- 文本框设为 flex-1，去除固定高度 h-24 -->
+            <textarea id="note-input" class="w-full flex-1 text-sm p-2 border border-gray-200 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 focus:outline-none resize-none mb-2 bg-gray-50 text-gray-700 placeholder-gray-400 leading-snug hidden" placeholder="支持 LaTeX 公式，如 $$x^2$$"></textarea>
+            <!-- 预览区设为 flex-1，去除固定最大高度 max-h-32 -->
+            <div id="note-preview" class="w-full flex-1 text-sm p-2 bg-white compact-prose prose-sm max-w-none overflow-y-auto mb-2 cursor-pointer hover:bg-gray-50 rounded border border-transparent hover:border-gray-100 transition-colors empty:hidden" title="点击编辑"></div>
+            
+            <div class="flex justify-end items-center pt-0 shrink-0">
+                <button id="toggle-edit-btn" class="text-xs text-blue-600 hover:text-blue-800 font-medium px-2 py-1 rounded hover:bg-blue-50 transition mr-auto">编辑</button>
+                <button id="select-all-btn" class="hidden text-xs text-gray-600 hover:text-gray-800 font-medium px-2 py-1 rounded hover:bg-gray-100 transition mr-2">全选</button>
+                <button id="save-note-btn" class="bg-blue-600 text-white text-xs px-3 py-1 rounded shadow hover:bg-blue-700 transition font-medium">确定</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- 快捷文件夹配置弹窗 (极简紧凑版) -->
+    <div id="quick-folder-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm animate-fade-in">
+        <div class="bg-white rounded-xl shadow-2xl border border-gray-200/90 w-[360px] max-w-[92vw] overflow-hidden flex flex-col ring-1 ring-black/5" id="quick-folder-modal-card">
+            <div class="flex justify-between items-center px-3.5 py-2.5 border-b border-gray-100 bg-gray-50/70 shrink-0 select-none">
+                <span class="text-xs font-semibold text-gray-700 flex items-center gap-1.5">
+                    <i class="ph ph-folder-gear text-blue-500 text-sm"></i>
+                    <span id="quick-folder-modal-title">快捷入口设置</span>
+                </span>
+                <button type="button" id="close-quick-folder-btn" class="text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-md p-1 transition cursor-pointer" title="关闭">
+                    <i class="ph ph-x text-xs"></i>
+                </button>
+            </div>
+            <div class="p-3.5 space-y-3">
+                <!-- 文件夹路径输入框及内嵌浏览按钮 -->
+                <div>
+                    <label class="block text-[11px] font-medium text-gray-500 mb-1">目标文件夹路径</label>
+                    <div class="relative flex items-center">
+                        <input type="text" id="quick-folder-path-input" class="w-full text-xs pl-2.5 pr-[62px] py-1.5 bg-gray-50/60 hover:bg-white focus:bg-white border border-gray-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono text-gray-800 transition-colors" placeholder="例如：D:\下载\数学专业课" spellcheck="false">
+                        <button type="button" id="browse-quick-folder-btn" class="absolute right-1 px-2 py-1 text-[11px] font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors cursor-pointer flex items-center gap-0.5" title="浏览系统文件夹">
+                            <i class="ph ph-folder-notch text-xs"></i>
+                            <span>浏览</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 按钮文字与快捷辅助操作 -->
+                <div class="flex items-center justify-between pt-0.5">
+                    <div class="flex items-center gap-2">
+                        <span class="text-[11px] font-medium text-gray-500">按钮简称:</span>
+                        <input type="text" id="quick-folder-label-input" maxlength="1" class="w-10 text-center text-xs font-bold py-1 bg-gray-50 hover:bg-white focus:bg-white border border-gray-200 rounded-md focus:outline-none focus:border-blue-500 text-gray-800" placeholder="数">
+                    </div>
+                    <div class="flex items-center gap-2 text-[11px]">
+                        <button type="button" id="open-folder-explorer-btn" class="text-gray-400 hover:text-gray-700 transition-colors cursor-pointer flex items-center gap-0.5" title="在 Windows 资源管理器中打开此文件夹">
+                            <i class="ph ph-arrow-square-out text-xs"></i>
+                            <span>打开目录</span>
+                        </button>
+                        <span class="text-gray-200">|</span>
+                        <button type="button" id="reset-quick-folder-btn" class="text-gray-400 hover:text-blue-600 transition-colors cursor-pointer">
+                            恢复默认
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="flex justify-end items-center px-3.5 py-2 bg-gray-50/70 border-t border-gray-100 gap-2 shrink-0">
+                <button type="button" id="cancel-quick-folder-btn" class="px-3 py-1 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-200/60 rounded-md transition cursor-pointer">取消</button>
+                <button type="button" id="save-quick-folder-btn" class="px-3.5 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md shadow-sm transition cursor-pointer">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         应用脚本（按加载顺序，全局共享 state/els；请勿改为 ES Module）
+         修改某功能时，只需把对应 .js 文件单独发给 AI，可节省大量 token
+         ============================================================ -->
+    <script src="./js/foundation.js"></script>      <!-- ① 基础：PDF.js 初始化 + SVG 路径算法 + state/els/观察器 -->
+    <script src="./js/document.js"></script>        <!-- ② 文档：打开/加载/保存/撤销重做/历史栈 -->
+    <script src="./js/outline-search.js"></script>  <!-- ③ 目录解析 + 增量撤销包装(performAction) + 全文搜索 -->
+    <script src="./js/render.js"></script>          <!-- ④ 渲染：页面骨架/高清渲染/原生链接/TikZ/LaTeX -->
+    <script src="./js/annotate.js"></script>        <!-- ⑤ 批注：绘图工具/工具栏/配色/缩放滑块/HUD/页码雷达 -->
+    <script src="./js/note-sidebar.js"></script>    <!-- ⑥ 笔记弹窗 + 幻影光标 + 侧边栏虚拟列表 -->
+    <script src="./js/extras.js"></script>          <!-- ⑦ 附加：导出/无界草稿本/抓手工具/素材库/跳转 -->
+    <script src="./js/dictionary.js"></script>      <!-- ⑧ 词典：框选翻译悬浮气泡 + 单词/句子翻译（DeepSeek v4-flash） -->
+    <script src="./js/video.js"></script>          <!-- ⑨ 视频播放：悬浮播放器 (F9 唤出) -->
+    <script src="./js/boot.js"></script>            <!-- ⑩ 启动：批注导入导出 + 全局护盾 + init() 点火 -->
+</body>
+</html>

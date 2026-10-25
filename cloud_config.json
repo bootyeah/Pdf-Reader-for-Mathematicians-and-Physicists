@@ -1,0 +1,15 @@
+{
+  "_说明": "云端批注库配置：只保存批注 JSON（不保存 PDF）。改完即生效，不必重启 server.py。",
+  "enabled": false,
+  "provider": "github",
+  "owner": "",
+  "repo": "",
+  "token": "",
+  "branch": "",
+  "dir": "annotations",
+  "mirror_paths": false,
+  "device": "",
+  "proxy": "system",
+  "timeout": 20,
+  "api_base": ""
+}

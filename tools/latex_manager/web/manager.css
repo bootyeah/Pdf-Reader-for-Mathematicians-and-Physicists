@@ -1,0 +1,54 @@
+:root { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 13px; color: #334155; background: #f3f4f6; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; }
+button, input { font: inherit; }
+button { padding: 7px 11px; color: #475569; background: white; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+button:hover { background: #f8fafc; }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { color: white; background: #2563eb; border-color: #2563eb; }
+button.primary:hover { background: #1d4ed8; }
+button:focus-visible, input:focus { outline: 2px solid #93c5fd; outline-offset: 1px; }
+header { min-height: 64px; padding: 12px 22px; background: white; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.brand, .actions { display: flex; align-items: center; gap: 8px; }
+.brand { gap: 12px; }
+.brand-icon { color: #2563eb; font: bold 21px Georgia, serif; }
+.brand-icon span { position: relative; top: 4px; margin: 0 -2px; font-size: 17px; }
+h1 { font-size: 16px; color: #1e293b; margin: 0; font-weight: 600; }
+#save-status { font-size: 12px; color: #64748b; margin-right: auto; }
+#save-status.dirty { color: #d97706; }
+.app-body { display: flex; min-height: calc(100vh - 65px); }
+.sidebar { width: 195px; flex-shrink: 0; background: white; border-right: 1px solid #e5e7eb; padding: 20px 10px; }
+nav { display: flex; flex-direction: column; gap: 5px; }
+nav button { border-color: transparent; text-align: left; display: flex; justify-content: space-between; padding: 11px 12px; }
+nav button.active { color: #2563eb; background: #eff6ff; }
+nav span { color: #94a3b8; font-size: 12px; }
+#config-path { padding: 16px 10px; font-size: 11px; line-height: 1.7; color: #94a3b8; overflow-wrap: anywhere; }
+main { width: 100%; min-width: 0; max-width: 1180px; padding: 28px; }
+.editor { background: white; border: 1px solid #e5e7eb; border-radius: 9px; padding: 22px; margin-bottom: 18px; }
+.section-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 20px; }
+h2 { color: #1e293b; font-size: 15px; font-weight: 600; margin: 0 0 8px; }
+p { line-height: 1.7; margin: 0; }
+#section-help { color: #64748b; max-width: 680px; font-size: 12px; white-space: pre-line; }
+.config-row { display: flex; gap: 8px; align-items: flex-start; padding: 8px 0; border-top: 1px solid #f1f5f9; }
+.config-row input { padding: 8px 10px; color: #334155; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; min-width: 0; font-family: ui-monospace, Consolas, monospace; line-height: 1.5; }
+.config-row input { flex: 1; }
+.config-row .remove { border-color: transparent; color: #94a3b8; padding: 8px; }
+.config-row .remove:hover { color: #dc2626; background: #fef2f2; }
+#empty { color: #94a3b8; padding: 22px 0; }
+#notice { padding: 10px 14px; margin-bottom: 16px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; color: #1d4ed8; overflow-wrap: anywhere; }
+#notice.error { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
+.footer { text-align: center; color: #94a3b8; font-size: 11px; }
+@media (max-width: 760px) {
+  header { padding: 12px; gap: 10px; }
+  .actions { width: 100%; gap: 5px; flex-wrap: wrap; }
+  .actions button { flex: 1; }
+  .app-body { flex-direction: column; }
+  .sidebar { width: auto; border-right: 0; border-bottom: 1px solid #e5e7eb; padding: 8px; }
+  nav { flex-direction: row; overflow: auto; }
+  nav button { padding: 8px; gap: 7px; }
+  #config-path { display: none; }
+  main { padding: 12px; }
+  .editor { padding: 14px; }
+  .config-row { flex-wrap: wrap; }
+}

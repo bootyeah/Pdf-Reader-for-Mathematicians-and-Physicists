@@ -1,0 +1,6 @@
+你是一名专业的开发环境配置与全栈工程师。我刚刚从 GitHub 下载了这个「全功能数理智能 PDF 阅读器 (PDF Reader Pro)」项目。请你先通读本项目的核心代码与配置文件（如 README.md、requirements.txt、server.py、.api-manager/settings.example.json 以及 cloud_config.json 等），理解其架构设计与配置逻辑，然后一步步引导我完成：
+1. Python 运行环境与依赖安装（检查 Python 3.10+，安装 requirements.txt 中的核心依赖）；
+2. 本地 TeX Live / LaTeX 绘图编译环境配置（检查系统环境变量 PATH，确保 xelatex 与 dvisvgm 命令行可用，以支持 TikZ 矢量物理绘图编译与 LaTeX-Manager 宏包扩展）；
+3. AI 接口与模型密钥本地配置（引导配置 DeepSeek 对话/词典/翻译、智谱 GLM 视觉公式与手写 OCR等，可通过 API-Manager.bat 图形化配置或直接写入 .api-manager/settings.json）；
+4. 手机无限手写板连接（同一 Wi-Fi 或 Cloudflare 跨网隧道）与可选的 Git 云端批注同步（cloud_config.json）；
+5. 双击运行 start.bat 成功启动服务并验证阅读器各项核心功能的连通性。
