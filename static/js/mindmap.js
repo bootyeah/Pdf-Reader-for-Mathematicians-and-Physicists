@@ -5471,6 +5471,8 @@
         if (els.viewport) {
             let isRightMouseDown = false;
             let rightPanMoved = false;
+            // 抓手手势的点击拦截保留到下次按下，覆盖 mouseup 后的 click / dblclick。
+            let suppressPanClick = false;
 
             // overflow:hidden 的视口仍可能被 focus()/选字悄悄滚动，导致平移坐标错位；始终归零
             els.viewport.addEventListener('scroll', () => {
@@ -5482,6 +5484,7 @@
 
             // 在导图面板外点击时释放导图键盘焦点，避免 Delete/Enter 等误作用于导图节点
             window.addEventListener('mousedown', (e) => {
+                suppressPanClick = false;
                 const panel = getEls().panel;
                 if (!panel || panel.contains(e.target)) return;
                 if (e.target.closest && (e.target.closest('#mm-context-menu') || e.target.closest('#mm-popover-dialog'))) return;
@@ -5582,6 +5585,7 @@
                 if (isMiddle || (isLeft && (!isOverCard && !isOverButton || isSpaceDown))) {
                     isPanning = true;
                     didPanMove = false;
+                    suppressPanClick = isSpaceDown;
                     startPanX = e.clientX;
                     startPanY = e.clientY;
                     panStartX = panX;
@@ -5691,7 +5695,7 @@
             });
 
             els.viewport.addEventListener('click', (e) => {
-                if (didPanMove || rightPanMoved) {
+                if (suppressPanClick || didPanMove || rightPanMoved) {
                     e.stopPropagation();
                     e.preventDefault();
                     didPanMove = false;
@@ -5717,6 +5721,13 @@
                     document.querySelectorAll('.mm-card-wrapper.is-selected-wrapper').forEach(w => w.classList.remove('is-selected-wrapper'));
                     highlightConnections(null);
                     updateSelectionTools();
+                }
+            }, { capture: true });
+
+            els.viewport.addEventListener('dblclick', (e) => {
+                if (suppressPanClick) {
+                    e.stopPropagation();
+                    e.preventDefault();
                 }
             }, { capture: true });
 
