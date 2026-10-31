@@ -6,6 +6,20 @@
 
         els.saveStatusBtn.addEventListener('click', performSave);
 
+        const spaceSaveToggle = document.getElementById('space-save-toggle');
+        spaceSaveToggle?.addEventListener('click', (e) => {
+            const enabled = spaceSaveToggle.getAttribute('aria-pressed') !== 'true';
+            spaceSaveToggle.setAttribute('aria-pressed', String(enabled));
+            spaceSaveToggle.title = enabled
+                ? '空格：保存（有未保存修改时）+ 抓手；点击关闭空格保存'
+                : '空格：仅抓手；点击启用空格保存';
+            if (e.detail > 0) spaceSaveToggle.blur();
+        });
+        spaceSaveToggle?.addEventListener('keydown', (e) => {
+            // 保留按钮自身的空格激活，避免同时触发阅读器的抓手/保存。
+            if (e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar') e.stopPropagation();
+        });
+
         const _readerShutdownChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('reader_shutdown_bus') : null;
 
         let _readerClosingToken = '';
@@ -481,8 +495,8 @@
                     state.handDrag.isSpaceDown = true;
                     els.container.style.cursor = 'grab'; // 变成抓手图标
                     
-                    // 智能拦截：仅在状态为“未保存”时触发保存，避免频繁无意义写入导致卡顿
-                    if (state.unsavedChanges) {
+                    // 仅在开启空格保存且有未保存修改时保存；抓手始终可用。
+                    if (spaceSaveToggle?.getAttribute('aria-pressed') !== 'false' && state.unsavedChanges) {
                         performSave();
                     }
                 }

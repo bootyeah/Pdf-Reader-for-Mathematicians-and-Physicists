@@ -252,18 +252,25 @@
                     </div>
                 </div>
 
-                <div class="relative group" id="save-dropdown-wrapper">
-                    <button id="save-status-btn" class="btn-saved border w-10 h-10 rounded-lg flex items-center justify-center transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed relative z-10" title="保存">
-                        <i id="save-icon" class="ph ph-floppy-disk text-[22px] group-hover:scale-110 transition-transform"></i> 
+                <div class="relative flex flex-col items-center">
+                    <!-- 悬在保存按钮上方，与快捷文件夹按钮同高，不占横向空间。 -->
+                    <button type="button" id="space-save-toggle" class="space-save-toggle absolute bottom-full mb-[2px] left-1/2 -translate-x-1/2 w-6 h-[15px] p-0 rounded border flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500" aria-label="空格保存" aria-pressed="true" title="空格：保存（有未保存修改时）+ 抓手；点击关闭空格保存">
+                        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8v8h16V8"/></svg>
                     </button>
-                    <!-- 下拉菜单：极简纯图标 -->
-                    <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-white border border-gray-200 shadow-xl rounded-xl p-1.5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 flex justify-center w-auto">
-                        <button id="cloud-sync-btn" class="hidden flex items-center justify-center w-8 h-8 rounded hover:bg-blue-50 text-gray-600 hover:text-blue-600 transition-colors" title="立即把批注同步到云端">
-                            <i class="ph ph-cloud-arrow-up text-[20px]"></i>
+
+                    <div class="relative group" id="save-dropdown-wrapper">
+                        <button id="save-status-btn" class="btn-saved border w-10 h-10 rounded-lg flex items-center justify-center transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed relative z-10" title="保存">
+                            <i id="save-icon" class="ph ph-floppy-disk text-[22px] group-hover:scale-110 transition-transform"></i>
                         </button>
-                        <button id="close-app-btn" class="flex items-center justify-center w-8 h-8 rounded hover:bg-red-50 text-gray-600 hover:text-red-600 transition-colors" title="关闭页面并退出后台引擎">
-                            <i class="ph ph-power text-[20px]"></i>
-                        </button>
+                        <!-- 下拉菜单：极简纯图标 -->
+                        <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-white border border-gray-200 shadow-xl rounded-xl p-1.5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 flex justify-center w-auto">
+                            <button id="cloud-sync-btn" class="hidden flex items-center justify-center w-8 h-8 rounded hover:bg-blue-50 text-gray-600 hover:text-blue-600 transition-colors" title="立即把批注同步到云端">
+                                <i class="ph ph-cloud-arrow-up text-[20px]"></i>
+                            </button>
+                            <button id="close-app-btn" class="flex items-center justify-center w-8 h-8 rounded hover:bg-red-50 text-gray-600 hover:text-red-600 transition-colors" title="关闭页面并退出后台引擎">
+                                <i class="ph ph-power text-[20px]"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
