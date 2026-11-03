@@ -3065,10 +3065,10 @@
                 return;
             }
 
-            // 2. Tab 键：优先由共用的 QuantumSnippetEngine 执行 LaTeX 占位符跳转（如 \dfrac{$0}{$1}）
+            // 2. Tab 键：优先由共用的 QuantumSnippetEngine 执行 LaTeX 手动展开或占位符跳转（如 \dfrac{$0}{$1}）
             if (e.key === 'Tab') {
-                if (snippetEngine && snippetEngine.hasActiveTabStops()) {
-                    // 放行交给 QuantumSnippetEngine 的 keydown 监听器处理，光标跳入下一占位符，不退出编辑、不新建子节点
+                if (e.defaultPrevented || (snippetEngine && snippetEngine.hasActiveTabStops())) {
+                    // 已被 QuantumSnippetEngine 拦截（执行了 Tab 展开或跳入下一/末尾占位符），不退出编辑、不新建子节点
                     return;
                 }
                 // 无激活占位符时：保存当前内容并快速新建子节点（导图经典分级输入流程）

@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="/static/lib/katex/katex.min.css">
   <script src="/static/lib/katex/katex.min.js"></script>
   <script src="/static/lib/katex/contrib/auto-render.min.js"></script>
+  <script src="/static/lib/katex/contrib/mhchem.min.js"></script>
 
   <link rel="stylesheet" href="/manager.css">
   <script src="/manager.js" defer></script>
@@ -277,7 +278,15 @@
           <div class="options-checkbox-group">
             <label class="checkbox-pill">
               <input type="checkbox" id="opt-m" value="m">
-              <span><strong>m</strong> 数学模式 (公式内触发)</span>
+              <span><strong>m</strong> 数学模式 (所有公式内触发)</span>
+            </label>
+            <label class="checkbox-pill">
+              <input type="checkbox" id="opt-M" value="M">
+              <span><strong>M</strong> 块级公式 (仅 $$...$$ 内触发)</span>
+            </label>
+            <label class="checkbox-pill">
+              <input type="checkbox" id="opt-n" value="n">
+              <span><strong>n</strong> 行内公式 (仅 $...$ 内触发)</span>
             </label>
             <label class="checkbox-pill">
               <input type="checkbox" id="opt-t" value="t">

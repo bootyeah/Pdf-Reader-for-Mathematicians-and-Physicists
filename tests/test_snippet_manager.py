@@ -21,6 +21,30 @@ class TestSnippetStorage(unittest.TestCase):
         self.assertEqual(storage.categorize_snippet("beg", "\\begin{$0}\\end{$0}", "mA"), "env")
         self.assertEqual(storage.categorize_snippet("fr", "\\dfrac{$0}{$1}", "mA"), "calculus")
         self.assertEqual(storage.categorize_snippet("([A-Za-z])(\\d)", "[[0]]_{[[1]]}", "rmA"), "regex")
+        self.assertEqual(storage.categorize_snippet("subset", "\\subset", "mAw"), "logic_relation")
+        self.assertEqual(storage.categorize_snippet("foo", "\\foo", "MA"), "math_symbol")
+        self.assertEqual(storage.categorize_snippet("qux", "\\qux", "nA"), "math_symbol")
+
+    def test_optimized_snippets_integrity(self):
+        doc = storage.load_data()
+        by_trig_opts = {(s["trigger"], s["options"]): s for s in doc["snippets"] if s["enabled"]}
+        triggers = {s["trigger"] for s in doc["snippets"]}
+
+        # Removed Obsidian-only / broken / conflicting triggers
+        for removed in ("box", "sts", "simm", "mathc", "([^\\\\])int"):
+            self.assertNotIn(removed, triggers)
+
+        # Core rules & fixes
+        self.assertIn(("int", "mAw"), by_trig_opts)
+        self.assertEqual(by_trig_opts[("int", "mAw")]["replacement"], "\\int $0 \\,\\mathrm{d}${1:x} $2")
+        self.assertEqual(by_trig_opts[("subset", "mAw")]["replacement"], "\\subset")
+        self.assertEqual(by_trig_opts[("supset", "mAw")]["replacement"], "\\supset")
+        self.assertEqual(by_trig_opts[("red", "mAw")]["replacement"], "\\textcolor{${0:red}}{$1}$2")
+        self.assertIn("{${0:c}}", by_trig_opts[("array", "mAw")]["replacement"])
+
+        # Option B rescue rules for dd / ii / xinvs
+        for rescue_trig in ("\\xi nvs", "\\,\\mathrm{d}ot", "\\,\\mathrm{d}t", "\\mathrm{i}nt", "\\mathrm{i}int"):
+            self.assertIn(rescue_trig, triggers)
 
     def test_format_snippet_js(self):
         snip = {

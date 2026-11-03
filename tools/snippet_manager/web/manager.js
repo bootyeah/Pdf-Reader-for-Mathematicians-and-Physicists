@@ -128,33 +128,81 @@ class SandboxQuantumEngine {
         this.textarea = textarea;
         this.getSnippetsFn = getSnippetsFn;
         this.activeTabStops = [];
-        this.currentTabStopIndex = -1;
+        this.totalStopsForCurrent = 0;
         this.lastValLength = textarea.value.length;
+        this.isExpanding = false;
         this.onTabStopsChange = options.onTabStopsChange || null;
 
         this.GREEK = "alpha|beta|gamma|Gamma|delta|Delta|epsilon|varepsilon|zeta|eta|theta|vartheta|Theta|iota|kappa|lambda|Lambda|mu|nu|xi|Xi|pi|Pi|rho|varrho|sigma|Sigma|tau|upsilon|Upsilon|phi|varphi|Phi|chi|psi|Psi|omega|Omega";
-        this.SYMBOL = "infty|sum|prod|lim|pm|mp|nabla|times|cdot|propto|equiv|neq|geq|leq|gg|ll|sim|simeq|leftrightarrow|longleftrightarrow|to|mapsto|implies|impliedby|cap|cup|notin|setminus|subseteq|supseteq|emptyset|exists";
+        this.SYMBOL = "infty|sum|prod|lim|nabla|times|cdot|propto|equiv|neq|geq|leq|gg|ll|sim|simeq|leftrightarrow|longleftrightarrow|to|mapsto|implies|impliedby|cap|cup|notin|setminus|subseteq|supseteq|emptyset|exists";
+        this.MORE_SYMBOLS = "leq|geq|neq|gg|ll|equiv|sim|propto|rightarrow|leftarrow|Rightarrow|Leftarrow|leftrightarrow|to|mapsto|cap|cup|in|int|iint|iiint|oint|inf|notin|subset|supset|subseteq|supseteq|emptyset|exists|forall|nabla|partial|infty|dots|cdots|vdots|ddots|perp|parallel|angle|triangle|cong|approx|times|div|pm|mp|cdot|circ|ast|star|oplus|otimes|ominus|odot|wedge|vee|neg|implies|iff";
+        this.PROTECTED_CMD_PREFIXES = [
+            "int", "iint", "iiint", "inf", "infty", "injlim", "intercal",
+            "subseteq", "subseteqq", "subsetneq", "subsetneqq",
+            "supseteq", "supseteqq", "supsetneq", "supsetneqq",
+            "simeq", "approxeq",
+            "limits", "limsup", "liminf",
+            "cdots", "cdotp", "dotsb", "dotsc", "dotsi", "dotsm", "dotso",
+            "leqq", "leqslant", "geqq", "geqslant",
+            "lll", "llbracket", "llcorner", "llless", "ggg", "gggtr",
+            "pmod", "pmb", "top",
+            "circeq", "circlearrowleft", "circlearrowright", "circledast", "circledcirc", "circleddash", "circledR", "circledS",
+            "triangleleft", "trianglelefteq", "triangleq", "triangleright", "trianglerighteq", "triangledown",
+            "leftarrowtail", "rightarrowtail", "leftrightarrows"
+        ];
+        this.NON_MATH_ENVS = new Set(['tikzpicture', 'circuitikz', 'forest', 'smartdiagram', 'document', 'itemize', 'enumerate']);
+        this.TEXT_LIKE_CMDS = new Set([
+            'text', 'textbf', 'textit', 'textrm', 'textsf', 'texttt',
+            'mbox', 'hbox', 'mathrm', 'operatorname', 'color', 'textcolor',
+            'ce', 'pu', 'label', 'ref', 'eqref', 'tag'
+        ]);
+        this.RE_ODD_BACKSLASH_CMD = /(?:^|[^\\])(?:\\\\)*\\[A-Za-z]+$/;
+        this.RE_ODD_TRAILING_BACKSLASH = /(?:^|[^\\])(?:\\\\)*\\$/;
+        this.RE_BEGIN_END_ARG = /\\(?:begin|end)\{[A-Za-z]*$/;
+        this.RE_DELIMITER_MODIFIER = /\\(?:left|right|[bB]igg?)\s*\\?$/;
 
         this.bindEvents();
     }
 
     getSnippets() {
         const rawSnippets = this.getSnippetsFn().filter(s => s.enabled);
-        return rawSnippets.map(snip => {
-            const item = { ...snip };
-            if ((item.options.includes('r') || item.is_regex) && typeof item.trigger === 'string') {
-                let tStr = item.trigger
+        const compiled = rawSnippets.map((snip, idx) => {
+            const item = { ...snip, _order: idx };
+            const opts = String(item.options || '');
+            const isRegex = opts.includes('r') || item.is_regex;
+            item._isRegex = isRegex;
+            if (isRegex && typeof item.trigger === 'string') {
+                const rawSource = item.trigger;
+                const expanded = rawSource
                     .replace(/\$\{GREEK\}/g, this.GREEK)
                     .replace(/\$\{SYMBOL\}/g, this.SYMBOL)
+                    .replace(/\$\{MORE_SYMBOLS\}/g, this.MORE_SYMBOLS)
                     .replace(/\$\{VISUAL\}/g, "");
                 try {
-                    item.compiledRegex = new RegExp(tStr);
+                    const anchored = expanded.endsWith('$') ? expanded : expanded + '$';
+                    item.compiledRegex = new RegExp(anchored);
                 } catch (_) {
                     item.compiledRegex = null;
                 }
+                item._expectsBackslash = expanded.startsWith('\\\\') || expanded.startsWith('\\(') || expanded.startsWith('\\');
+                item._isAutoSpace = rawSource.includes('${MORE_SYMBOLS})([A-Za-z])');
+            } else {
+                const trigStr = String(item.trigger || '');
+                item._expectsBackslash = trigStr.startsWith('\\');
+                item._isAutoSpace = false;
             }
             return item;
         });
+
+        compiled.sort((a, b) => {
+            const prioDiff = (b.priority || 0) - (a.priority || 0);
+            if (prioDiff !== 0) return prioDiff;
+            const lenA = a._isRegex ? 0 : String(a.trigger || '').length;
+            const lenB = b._isRegex ? 0 : String(b.trigger || '').length;
+            if (lenB !== lenA) return lenB - lenA;
+            return (a._order || 0) - (b._order || 0);
+        });
+        return compiled;
     }
 
     hasActiveTabStops() {
@@ -163,43 +211,267 @@ class SandboxQuantumEngine {
 
     notifyTabStops() {
         if (this.onTabStopsChange) {
-            this.onTabStopsChange(this.activeTabStops, this.currentTabStopIndex);
+            const currentIndex = this.totalStopsForCurrent > 0
+                ? Math.max(0, this.totalStopsForCurrent - this.activeTabStops.length)
+                : 0;
+            const displayArr = this.activeTabStops.length > 0
+                ? new Array(this.totalStopsForCurrent)
+                : [];
+            this.onTabStopsChange(displayArr, currentIndex);
         }
     }
 
     clearTabStops() {
         this.activeTabStops = [];
-        this.currentTabStopIndex = -1;
+        this.totalStopsForCurrent = 0;
         this.notifyTabStops();
     }
 
-    isMathMode(textBefore) {
+    getContextMode(textBefore) {
         const contextRadio = document.querySelector('input[name="sandbox-context"]:checked');
-        if (contextRadio && contextRadio.value === 'math') {
-            return true;
+        const forcedMath = contextRadio && contextRadio.value === 'math';
+        const stack = [forcedMath ? { type: 'display-math', env: 'sandbox' } : { type: 'text' }];
+
+        let i = 0;
+        const n = textBefore.length;
+        const isAlpha = (ch) => (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+
+        while (i < n) {
+            const ch = textBefore[i];
+            const top = stack[stack.length - 1];
+
+            if (ch === '\\') {
+                if (i + 1 < n && !isAlpha(textBefore[i + 1])) {
+                    i += 2;
+                    continue;
+                }
+                let j = i + 1;
+                while (j < n && isAlpha(textBefore[j])) j++;
+                const cmd = textBefore.slice(i + 1, j);
+                let k = j;
+                while (k < n && (textBefore[k] === ' ' || textBefore[k] === '\t')) k++;
+
+                if ((cmd === 'begin' || cmd === 'end') && k < n && textBefore[k] === '{') {
+                    const close = textBefore.indexOf('}', k + 1);
+                    if (close !== -1) {
+                        const envName = textBefore.slice(k + 1, close).trim();
+                        if (cmd === 'begin') {
+                            const envType = this.NON_MATH_ENVS.has(envName) ? 'text-env' : 'display-math';
+                            stack.push({ type: envType, env: envName });
+                        } else {
+                            for (let idx = stack.length - 1; idx > 0; idx--) {
+                                if (stack[idx].env === envName) {
+                                    stack.length = idx;
+                                    break;
+                                }
+                            }
+                        }
+                        i = close + 1;
+                        continue;
+                    }
+                }
+
+                if ((top.type === 'inline-math' || top.type === 'display-math') && this.TEXT_LIKE_CMDS.has(cmd) && k < n && textBefore[k] === '{') {
+                    stack.push({ type: 'math-text', cmd, braceDepth: 1 });
+                    i = k + 1;
+                    continue;
+                }
+
+                i = j;
+                continue;
+            }
+
+            if (top.type === 'math-text') {
+                if (ch === '{') {
+                    top.braceDepth++;
+                } else if (ch === '}') {
+                    top.braceDepth--;
+                    if (top.braceDepth <= 0) stack.pop();
+                } else if (ch === '$') {
+                    stack.push({ type: 'inline-math' });
+                }
+                i++;
+                continue;
+            }
+
+            if (ch === '$') {
+                if (i + 1 < n && textBefore[i + 1] === '$') {
+                    if (top.type === 'display-math' && !top.env) {
+                        stack.pop();
+                    } else {
+                        stack.push({ type: 'display-math', env: null });
+                    }
+                    i += 2;
+                } else {
+                    if (top.type === 'inline-math') {
+                        stack.pop();
+                    } else {
+                        stack.push({ type: 'inline-math' });
+                    }
+                    i++;
+                }
+                continue;
+            }
+
+            i++;
         }
-        const clean = textBefore.replace(/\\\$/g, '');
-        const displayMathCount = (clean.match(/\$\$/g) || []).length;
-        if (displayMathCount % 2 === 1) return true;
-        const inlineMathCount = (clean.replace(/\$\$/g, '').match(/\$/g) || []).length;
-        if (inlineMathCount % 2 === 1) return true;
-        const begins = (clean.match(/\\begin\{[^}]+\}/g) || []).length;
-        const ends = (clean.match(/\\end\{[^}]+\}/g) || []).length;
-        if (begins > ends) return true;
-        return false;
+
+        const finalTop = stack[stack.length - 1];
+        const inDisplayMath = finalTop.type === 'display-math';
+        const inInlineMath = finalTop.type === 'inline-math';
+        return {
+            inMath: inDisplayMath || inInlineMath,
+            inDisplayMath,
+            inInlineMath,
+            inTextCommand: finalTop.type === 'math-text'
+        };
+    }
+
+    isMathMode(textBefore) {
+        return this.getContextMode(textBefore).inMath;
+    }
+
+    findMatchingSnippet(textBefore, manualTab = false) {
+        const ctx = this.getContextMode(textBefore);
+        if (ctx.inTextCommand) return null;
+        if (this.RE_BEGIN_END_ARG.test(textBefore)) return null;
+        const inBackslashCmd = this.RE_ODD_BACKSLASH_CMD.test(textBefore);
+
+        const snippets = this.getSnippets();
+        for (const snip of snippets) {
+            const opts = String(snip.options || '');
+            const isAuto = opts.includes('A');
+            if (manualTab ? isAuto : !isAuto) continue;
+
+            if (opts.includes('M') && !ctx.inDisplayMath) continue;
+            if (opts.includes('n') && !ctx.inInlineMath) continue;
+            if (opts.includes('m') && !ctx.inMath) continue;
+            if (opts.includes('t') && ctx.inMath) continue;
+            if (inBackslashCmd && !snip._expectsBackslash) continue;
+
+            if (snip._isRegex) {
+                const regex = snip.compiledRegex;
+                if (!regex) continue;
+                const matchResult = textBefore.match(regex);
+                if (!matchResult) continue;
+                if (snip._isAutoSpace) {
+                    const candidate = (matchResult[1] || '') + (matchResult[2] || '');
+                    if (this.PROTECTED_CMD_PREFIXES.some(cmd => cmd.startsWith(candidate))) continue;
+                }
+                return { snip, matchResult, matchLength: matchResult[0].length };
+            } else {
+                const trig = String(snip.trigger || '');
+                if (!trig || !textBefore.endsWith(trig)) continue;
+                const prefix = textBefore.slice(0, -trig.length);
+                if (!snip._expectsBackslash && this.RE_ODD_TRAILING_BACKSLASH.test(prefix)) continue;
+                if ((trig === '(' || trig === '[' || trig === '{') && this.RE_DELIMITER_MODIFIER.test(prefix)) continue;
+                if (opts.includes('w')) {
+                    const charBefore = prefix.slice(-1);
+                    if (charBefore && /\w/.test(charBefore)) continue;
+                }
+                return { snip, matchResult: [trig], matchLength: trig.length };
+            }
+        }
+        return null;
+    }
+
+    shiftRangesAfter(threshold, delta, skipRange = null) {
+        if (delta === 0) return;
+        for (const group of this.activeTabStops) {
+            for (const r of group.ranges) {
+                if (r === skipRange) continue;
+                if (r.start >= threshold) {
+                    r.start += delta;
+                    r.end += delta;
+                }
+            }
+        }
+    }
+
+    syncMirrorsForActiveGroup() {
+        if (this.activeTabStops.length === 0) return;
+        const group = this.activeTabStops[0];
+        if (!group || group.ranges.length <= 1) return;
+        const primary = group.ranges[0];
+        const newText = this.textarea.value.slice(primary.start, primary.end);
+        const selStart = this.textarea.selectionStart;
+        const selEnd = this.textarea.selectionEnd;
+
+        for (let mIdx = 1; mIdx < group.ranges.length; mIdx++) {
+            const mirror = group.ranges[mIdx];
+            const curMirrorText = this.textarea.value.slice(mirror.start, mirror.end);
+            if (curMirrorText === newText) continue;
+            const oldEnd = mirror.end;
+            const mirrorDelta = newText.length - (mirror.end - mirror.start);
+            this.textarea.setRangeText(newText, mirror.start, mirror.end);
+            mirror.end = mirror.start + newText.length;
+            this.shiftRangesAfter(oldEnd, mirrorDelta, mirror);
+        }
+
+        this.textarea.setSelectionRange(selStart, selEnd);
+        this.lastValLength = this.textarea.value.length;
     }
 
     bindEvents() {
         this.textarea.addEventListener('keydown', (e) => {
-            if (e.key === 'Tab' && this.hasActiveTabStops()) {
-                e.preventDefault();
-                this.currentTabStopIndex++;
-                if (this.currentTabStopIndex >= this.activeTabStops.length) {
-                    this.clearTabStops();
-                } else {
-                    const ts = this.activeTabStops[this.currentTabStopIndex];
-                    this.textarea.setSelectionRange(ts.start, ts.end);
-                    this.notifyTabStops();
+            if (e.isComposing || e.keyCode === 229) return;
+            if ((e.key === ')' || e.key === ']' || e.key === '}') && !e.ctrlKey && !e.altKey && !e.metaKey) {
+                if (this.hasActiveTabStops() && this.textarea.selectionStart === this.textarea.selectionEnd) {
+                    const cursorPos = this.textarea.selectionStart;
+                    if (this.textarea.value[cursorPos] === e.key && this.activeTabStops.length >= 2) {
+                        const curG = this.activeTabStops[0];
+                        const nextG = this.activeTabStops[1];
+                        if (
+                            curG.ranges.length === 1 &&
+                            curG.ranges[0].end === cursorPos &&
+                            nextG.ranges.length === 1 &&
+                            nextG.ranges[0].start === cursorPos + 1 &&
+                            nextG.ranges[0].end === cursorPos + 1
+                        ) {
+                            e.preventDefault();
+                            this.textarea.setSelectionRange(cursorPos + 1, cursorPos + 1);
+                            this.activeTabStops.shift();
+                            if (this.activeTabStops.length === 1) {
+                                this.clearTabStops();
+                            } else {
+                                this.notifyTabStops();
+                            }
+                            updateSandboxKaTeX();
+                            return;
+                        }
+                    }
+                }
+            }
+            if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+                if (this.textarea.selectionStart === this.textarea.selectionEnd) {
+                    const cursorPos = this.textarea.selectionStart;
+                    const textBefore = this.textarea.value.slice(0, cursorPos);
+                    const manualHit = this.findMatchingSnippet(textBefore, true);
+                    if (
+                        manualHit &&
+                        (!this.hasActiveTabStops() || (cursorPos - manualHit.matchLength >= this.activeTabStops[0].ranges[0].start))
+                    ) {
+                        e.preventDefault();
+                        this.executeSnippet(manualHit.snip, manualHit.matchResult, manualHit.matchLength, cursorPos);
+                        updateSandboxKaTeX();
+                        return;
+                    }
+                }
+                if (this.hasActiveTabStops()) {
+                    e.preventDefault();
+                    this.activeTabStops.shift();
+                    if (this.activeTabStops.length > 0) {
+                        const nextGroup = this.activeTabStops[0];
+                        const r = nextGroup.ranges[0];
+                        this.textarea.setSelectionRange(r.start, r.end);
+                        if (this.activeTabStops.length === 1 && nextGroup.ranges.length === 1 && r.start === r.end) {
+                            this.clearTabStops();
+                        } else {
+                            this.notifyTabStops();
+                        }
+                    } else {
+                        this.clearTabStops();
+                    }
                 }
             } else if (e.key === 'Escape' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                 this.clearTabStops();
@@ -207,63 +479,47 @@ class SandboxQuantumEngine {
         });
 
         this.textarea.addEventListener('input', (e) => {
-            const currentVal = this.textarea.value;
+            if (this.isExpanding) return;
+
+            let currentVal = this.textarea.value;
             const delta = currentVal.length - this.lastValLength;
             this.lastValLength = currentVal.length;
+            let cursorPos = this.textarea.selectionStart;
 
-            if (this.activeTabStops.length > 0 && delta !== 0) {
-                for (let i = this.currentTabStopIndex + 1; i < this.activeTabStops.length; i++) {
-                    this.activeTabStops[i].start += delta;
-                    this.activeTabStops[i].end += delta;
+            if (this.activeTabStops.length > 0 && (delta !== 0 || e.inputType)) {
+                const primary = this.activeTabStops[0].ranges[0];
+                const oldPrimaryEnd = primary.end;
+                const newPrimaryEnd = primary.end + delta;
+                if (newPrimaryEnd >= primary.start && cursorPos >= primary.start && cursorPos <= newPrimaryEnd) {
+                    if (delta !== 0) {
+                        primary.end = newPrimaryEnd;
+                        this.shiftRangesAfter(oldPrimaryEnd, delta, primary);
+                    }
+                    if (this.activeTabStops[0].ranges.length > 1) {
+                        this.isExpanding = true;
+                        try {
+                            this.syncMirrorsForActiveGroup();
+                        } finally {
+                            this.isExpanding = false;
+                        }
+                        currentVal = this.textarea.value;
+                        cursorPos = this.textarea.selectionStart;
+                    }
+                    this.notifyTabStops();
+                } else if (delta !== 0) {
+                    this.clearTabStops();
                 }
-                this.notifyTabStops();
             }
 
-            if (e.inputType !== 'insertText' && e.inputType !== 'insertCompositionText') {
+            if (e.isComposing || (e.inputType !== 'insertText' && e.inputType !== 'insertCompositionText')) {
                 updateSandboxKaTeX();
                 return;
             }
 
-            const cursorPos = this.textarea.selectionStart;
             const textBefore = currentVal.slice(0, cursorPos);
-            const inMath = this.isMathMode(textBefore);
-
-            const snippets = this.getSnippets();
-            // Sort by priority desc
-            snippets.sort((a, b) => (b.priority || 0) - (a.priority || 0));
-
-            for (const snip of snippets) {
-                const reqMath = snip.options.includes('m');
-                const reqText = snip.options.includes('t');
-                if (reqMath && !inMath) continue;
-                if (reqText && inMath) continue;
-
-                const isRegex = snip.options.includes('r') || snip.is_regex;
-                let matchResult = null;
-                let matchLength = 0;
-
-                if (isRegex) {
-                    const regex = snip.compiledRegex;
-                    if (!regex) continue;
-                    const finalRegexStr = regex.source.endsWith('$') ? regex.source : regex.source + '$';
-                    const testReg = new RegExp(finalRegexStr, regex.flags);
-                    matchResult = textBefore.match(testReg);
-                    if (matchResult) matchLength = matchResult[0].length;
-                } else {
-                    if (textBefore.endsWith(snip.trigger)) {
-                        if (snip.options.includes('w')) {
-                            const charBefore = textBefore.slice(0, -snip.trigger.length).slice(-1);
-                            if (charBefore && /\w/.test(charBefore)) continue;
-                        }
-                        matchResult = [snip.trigger];
-                        matchLength = snip.trigger.length;
-                    }
-                }
-
-                if (matchResult) {
-                    this.executeSnippet(snip, matchResult, matchLength, cursorPos);
-                    break;
-                }
+            const hit = this.findMatchingSnippet(textBefore, false);
+            if (hit) {
+                this.executeSnippet(hit.snip, hit.matchResult, hit.matchLength, cursorPos);
             }
 
             updateSandboxKaTeX();
@@ -285,11 +541,11 @@ class SandboxQuantumEngine {
             } catch (_) {
                 replacement = snip.replacement;
             }
-        } else if (snip.options.includes('r') || snip.is_regex) {
-            replacement = replacement.replace(/\[\[(\d+)\]\]/g, (_, g1) => match[parseInt(g1) + 1] || '');
+        } else if (snip._isRegex) {
+            replacement = replacement.replace(/\[\[(\d+)\]\]/g, (_, g1) => match[parseInt(g1, 10) + 1] || '');
         }
 
-        let tabStops = [];
+        const groupsMap = new Map();
         let finalStr = "";
         let currentIndex = 0;
 
@@ -303,15 +559,16 @@ class SandboxQuantumEngine {
                 id = 1;
             } else {
                 const isBrace = m[2] !== undefined;
-                id = parseInt(isBrace ? m[2] : m[1]);
+                id = parseInt(isBrace ? m[2] : m[1], 10);
                 defVal = isBrace ? m[3] : '';
             }
 
-            tabStops.push({
-                id: id,
+            if (!groupsMap.has(id)) {
+                groupsMap.set(id, { id, ranges: [] });
+            }
+            groupsMap.get(id).ranges.push({
                 start: finalStr.length,
-                end: finalStr.length + defVal.length,
-                defVal: defVal
+                end: finalStr.length + defVal.length
             });
 
             finalStr += defVal;
@@ -319,38 +576,73 @@ class SandboxQuantumEngine {
         }
         finalStr += replacement.slice(currentIndex);
 
-        const uniqueTabStops = [];
-        const seenIds = new Set();
-        tabStops.forEach(ts => {
-            if (!seenIds.has(ts.id)) {
-                seenIds.add(ts.id);
-                uniqueTabStops.push(ts);
+        let newGroups = Array.from(groupsMap.values()).sort((a, b) => a.id - b.id);
+        if (
+            newGroups.length === 1 &&
+            newGroups[0].ranges.length === 1 &&
+            newGroups[0].ranges[0].start === finalStr.length &&
+            newGroups[0].ranges[0].end === finalStr.length
+        ) {
+            newGroups = [];
+        } else if (newGroups.length > 0) {
+            const lastG = newGroups[newGroups.length - 1];
+            const lastR = lastG.ranges[0];
+            if (lastG.ranges.length > 1 || lastR.end < finalStr.length || lastR.start !== lastR.end) {
+                newGroups.push({
+                    id: lastG.id + 1,
+                    ranges: [{ start: finalStr.length, end: finalStr.length }]
+                });
             }
-        });
-        uniqueTabStops.sort((a, b) => a.id - b.id);
-        tabStops = uniqueTabStops;
-
-        const startPos = cursorPos - matchLength;
-        this.textarea.setSelectionRange(startPos, cursorPos);
-
-        if (!document.execCommand('insertText', false, finalStr)) {
-            this.textarea.setRangeText(finalStr, startPos, cursorPos, 'end');
         }
 
-        this.lastValLength = this.textarea.value.length;
+        const startPos = cursorPos - matchLength;
+        const snipDelta = finalStr.length - matchLength;
 
-        tabStops.forEach(ts => {
-            ts.start += startPos;
-            ts.end += startPos;
-        });
+        this.isExpanding = true;
+        try {
+            this.textarea.setSelectionRange(startPos, cursorPos);
 
-        if (tabStops.length > 0) {
-            this.activeTabStops = tabStops;
-            this.currentTabStopIndex = 0;
-            const ts = this.activeTabStops[0];
-            this.textarea.setSelectionRange(ts.start, ts.end);
-        } else {
-            this.clearTabStops();
+            if (!document.execCommand('insertText', false, finalStr)) {
+                this.textarea.setRangeText(finalStr, startPos, cursorPos, 'end');
+            }
+
+            this.lastValLength = this.textarea.value.length;
+
+            newGroups.forEach(g => {
+                g.ranges.forEach(r => {
+                    r.start += startPos;
+                    r.end += startPos;
+                });
+            });
+
+            if (this.activeTabStops.length > 0) {
+                const outerPrimary = this.activeTabStops[0].ranges[0];
+                if (startPos >= outerPrimary.start && cursorPos <= outerPrimary.end) {
+                    const oldOuterEnd = outerPrimary.end;
+                    outerPrimary.end += snipDelta;
+                    this.shiftRangesAfter(oldOuterEnd, snipDelta, outerPrimary);
+                    if (this.activeTabStops[0].ranges.length > 1) {
+                        this.syncMirrorsForActiveGroup();
+                    }
+                    if (newGroups.length > 0) {
+                        this.activeTabStops = [...newGroups, ...this.activeTabStops.slice(1)];
+                        this.totalStopsForCurrent = this.activeTabStops.length;
+                    }
+                } else {
+                    this.activeTabStops = newGroups;
+                    this.totalStopsForCurrent = newGroups.length;
+                }
+            } else {
+                this.activeTabStops = newGroups;
+                this.totalStopsForCurrent = newGroups.length;
+            }
+
+            if (newGroups.length > 0) {
+                const firstRange = this.activeTabStops[0].ranges[0];
+                this.textarea.setSelectionRange(firstRange.start, firstRange.end);
+            }
+        } finally {
+            this.isExpanding = false;
         }
         this.notifyTabStops();
     }
@@ -384,17 +676,33 @@ function updateSandboxKaTeX() {
     }
 
     try {
-        let mathText = val;
-        // Strip outer $ if present
-        if (mathText.startsWith('$$') && mathText.endsWith('$$') && mathText.length >= 4) {
-            mathText = mathText.slice(2, -2).trim();
-        } else if (mathText.startsWith('$') && mathText.endsWith('$') && mathText.length >= 2) {
-            mathText = mathText.slice(1, -1).trim();
-        }
+        const contextRadio = document.querySelector('input[name="sandbox-context"]:checked');
+        const isTextContext = contextRadio && contextRadio.value === 'text';
 
-        if (window.katex) {
+        const isSingleDisplay = val.startsWith('$$') && val.endsWith('$$') && val.length >= 4 && !val.slice(2, -2).includes('$$');
+        const isSingleInline = !isSingleDisplay && val.startsWith('$') && val.endsWith('$') && val.length >= 2 && !val.slice(1, -1).includes('$');
+
+        if (isTextContext && !isSingleDisplay && !isSingleInline && window.renderMathInElement) {
+            preview.textContent = val;
+            window.renderMathInElement(preview, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false }
+                ],
+                throwOnError: false
+            });
+        } else if (window.katex) {
+            let mathText = val;
+            let displayMode = true;
+            if (isSingleDisplay) {
+                mathText = val.slice(2, -2).trim();
+                displayMode = true;
+            } else if (isSingleInline) {
+                mathText = val.slice(1, -1).trim();
+                displayMode = false;
+            }
             katex.render(mathText, preview, {
-                displayMode: true,
+                displayMode,
                 throwOnError: false
             });
         } else {
@@ -482,7 +790,7 @@ function getFilteredSnippets() {
 
     // 2. Mode / Status Filter
     if (activeFilter === 'opt-m') {
-        list = list.filter(s => s.options && s.options.includes('m'));
+        list = list.filter(s => s.options && (s.options.includes('m') || s.options.includes('M') || s.options.includes('n')));
     } else if (activeFilter === 'opt-t') {
         list = list.filter(s => s.options && s.options.includes('t'));
     } else if (activeFilter === 'opt-A') {
@@ -545,9 +853,15 @@ function renderSnippetsList() {
 
         // Tags
         const tags = [];
-        if (snip.options.includes('m')) tags.push('<span class="opt-tag opt-math" title="数学模式">Math</span>');
+        if (snip.options.includes('m')) tags.push('<span class="opt-tag opt-math" title="所有数学模式">Math</span>');
+        if (snip.options.includes('M')) tags.push('<span class="opt-tag opt-math" title="仅块级数学 $$...$$">BlockMath</span>');
+        if (snip.options.includes('n')) tags.push('<span class="opt-tag opt-math" title="仅行内数学 $...$">InlineMath</span>');
         if (snip.options.includes('t')) tags.push('<span class="opt-tag opt-text" title="正文模式">Text</span>');
-        if (snip.options.includes('A')) tags.push('<span class="opt-tag opt-auto" title="自动展开">Auto</span>');
+        if (snip.options.includes('A')) {
+            tags.push('<span class="opt-tag opt-auto" title="自动展开">Auto</span>');
+        } else {
+            tags.push('<span class="opt-tag" title="按 Tab 键展开">Tab</span>');
+        }
         if (isRegex) tags.push('<span class="opt-tag opt-regex" title="正则表达式">Regex</span>');
         if (snip.options.includes('w')) tags.push('<span class="opt-tag" title="单词边界">Word</span>');
         if (snip.priority) tags.push(`<span class="opt-tag" title="优先级">Prio: ${snip.priority}</span>`);
@@ -622,6 +936,8 @@ function openEditModal(snippet = null) {
 
         const opts = snippet.options || '';
         $('opt-m').checked = opts.includes('m');
+        if ($('opt-M')) $('opt-M').checked = opts.includes('M');
+        if ($('opt-n')) $('opt-n').checked = opts.includes('n');
         $('opt-t').checked = opts.includes('t');
         $('opt-A').checked = opts.includes('A');
         $('opt-r').checked = snippet.is_regex || opts.includes('r');
@@ -632,6 +948,8 @@ function openEditModal(snippet = null) {
         $('edit-priority').value = 0;
         $('edit-category').value = activeCategory !== 'all' ? activeCategory : 'math_symbol';
         $('opt-m').checked = true;
+        if ($('opt-M')) $('opt-M').checked = false;
+        if ($('opt-n')) $('opt-n').checked = false;
         $('opt-A').checked = true;
     }
 
@@ -648,6 +966,8 @@ function checkConflict() {
     const trig = $('edit-trigger').value.trim();
     const curId = $('edit-id').value;
     const isM = $('opt-m').checked;
+    const isBlockM = $('opt-M') ? $('opt-M').checked : false;
+    const isInlineN = $('opt-n') ? $('opt-n').checked : false;
     const isT = $('opt-t').checked;
     const alertEl = $('conflict-alert');
 
@@ -657,13 +977,17 @@ function checkConflict() {
     }
 
     const conflict = doc.snippets.find(s => {
-        if (s.id === curId) return false;
+        if (s.id === curId || !s.enabled) return false;
         if (s.trigger !== trig) return false;
         const hasM = s.options.includes('m');
+        const hasBlockM = s.options.includes('M');
+        const hasInlineN = s.options.includes('n');
         const hasT = s.options.includes('t');
-        if (isM && hasM) return true;
+        if (isM && (hasM || hasBlockM || hasInlineN)) return true;
+        if (isBlockM && (hasM || hasBlockM)) return true;
+        if (isInlineN && (hasM || hasInlineN)) return true;
         if (isT && hasT) return true;
-        if (!isM && !isT && !hasM && !hasT) return true;
+        if (!isM && !isBlockM && !isInlineN && !isT && !hasM && !hasBlockM && !hasInlineN && !hasT) return true;
         return false;
     });
 
@@ -686,6 +1010,8 @@ function saveSnippetFromForm(e) {
 
     let options = '';
     if ($('opt-m').checked) options += 'm';
+    if ($('opt-M') && $('opt-M').checked) options += 'M';
+    if ($('opt-n') && $('opt-n').checked) options += 'n';
     if ($('opt-t').checked) options += 't';
     if ($('opt-A').checked) options += 'A';
     if ($('opt-r').checked) options += 'r';
@@ -916,6 +1242,8 @@ function bindEvents() {
     // 冲突检查
     $('edit-trigger').addEventListener('input', checkConflict);
     $('opt-m').addEventListener('change', checkConflict);
+    if ($('opt-M')) $('opt-M').addEventListener('change', checkConflict);
+    if ($('opt-n')) $('opt-n').addEventListener('change', checkConflict);
     $('opt-t').addEventListener('change', checkConflict);
 
     // 复制路径
@@ -944,10 +1272,25 @@ function bindEvents() {
     // 沙盒示例 Chips
     document.querySelectorAll('.sample-chip').forEach(chip => {
         chip.onclick = () => {
+            const sample = chip.dataset.sample || '';
+            const needTextMode = (sample === 'mk' || sample === 'dm');
+            const targetRadio = document.querySelector(`input[name="sandbox-context"][value="${needTextMode ? 'text' : 'math'}"]`);
+            if (targetRadio && !targetRadio.checked) {
+                targetRadio.checked = true;
+            }
             const input = $('sandbox-input');
-            input.value = chip.dataset.sample;
+            if (sandboxEngine) {
+                sandboxEngine.clearTabStops();
+                sandboxEngine.lastValLength = 0;
+            }
+            input.value = sample;
             input.focus();
-            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.setSelectionRange(sample.length, sample.length);
+            input.dispatchEvent(new InputEvent('input', {
+                bubbles: true,
+                inputType: 'insertText',
+                data: sample
+            }));
         };
     });
 

@@ -213,13 +213,13 @@ def categorize_snippet(trigger: str, replacement: str, options: str) -> str:
         return "sub_sup"
     if any(k in trigger for k in ("fr", "sq", "lim", "sum", "prod", "int", "dint", "oint", "iint", "iiint", "par", "ddt", "dd")):
         return "calculus"
-    if any(k in trigger for k in ("+=", "-+", "+-", "!=", ">=", "<=", ">>", "<<", "->", "=>", "=<", "<->", "<-->", "!>", "and", "orr", "inn", "ni", "sub=", "sup=")):
+    if any(k in trigger for k in ("+=", "-+", "+-", "!=", ">=", "<=", ">>", "<<", "->", "=>", "=<", "<->", "<-->", "!>", "and", "orr", "inn", "ni", "sub=", "sup=", "subset", "supset")):
         return "logic_relation"
-    if any(k in trigger for k in ("text", "red", "mathc", "box", "bf", "rm")):
+    if any(k in trigger for k in ("text", "red", "bf", "rm")):
         return "text_style"
-    if any(k in replacement for k in ("\\mathbb", "\\mathcal")):
+    if any(k in replacement for k in ("\\mathbb", "\\mathcal", "\\mathscr")):
         return "sets_symbols"
-    if "m" in options:
+    if any(k in options for k in ("m", "M", "n")):
         return "math_symbol"
     return "general"
 
