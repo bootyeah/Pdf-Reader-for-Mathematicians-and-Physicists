@@ -25,6 +25,7 @@
     const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
     const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
     const HEADER_HEIGHT = 72;          // 顶栏高度（与 LOCALPdfReader.html 的 h-[72px] 一致）
+    function getHeaderHeight() { const h = document.querySelector('header'); return h ? h.offsetHeight : HEADER_HEIGHT; }
 
     // TikZ：公共渲染层由 render.js 暴露（动态获取，确保脚本加载时序稳健）
     function getTikz() { return window.TikzRender || null; }
@@ -896,11 +897,12 @@
         if (data.width) panel.style.width = data.width;
         if (data.height) panel.style.height = data.height;
         if (data.left && data.top) {
+            const headerH = getHeaderHeight();
             const w = parseInt(data.width, 10) || 430;
             const maxLeft = Math.max(0, window.innerWidth - w - 4);
             const maxTop = Math.max(0, window.innerHeight - 60);
             panel.style.left = Math.min(Math.max(4, parseInt(data.left, 10) || 0), maxLeft) + 'px';
-            panel.style.top = Math.min(Math.max(HEADER_HEIGHT, parseInt(data.top, 10) || HEADER_HEIGHT), maxTop) + 'px';
+            panel.style.top = Math.min(Math.max(headerH, parseInt(data.top, 10) || headerH), maxTop) + 'px';
         }
         apiRevision = data.apiRevision || '';
         if (data.model && !MODELS.some(function (m) { return m.id === data.model; })) {
@@ -1130,7 +1132,7 @@
         window.addEventListener('resize', function () {
             if (!panelVisible) return;
             const maxLeft = Math.max(0, window.innerWidth - 120);
-            const maxTop = Math.max(HEADER_HEIGHT, window.innerHeight - 80);
+            const maxTop = Math.max(getHeaderHeight(), window.innerHeight - 80);
             if (panel.offsetLeft > maxLeft) panel.style.left = maxLeft + 'px';
             if (panel.offsetTop > maxTop) panel.style.top = maxTop + 'px';
         });
@@ -1624,13 +1626,14 @@
 
         // 首次打开：贴在鲸鱼按钮正下方（左对齐按钮，越界时回收进屏幕）
         if (!panel.style.left || !panel.style.top) {
+            const headerH = getHeaderHeight();
             const rect = toolbarBtn ? toolbarBtn.getBoundingClientRect() : null;
             const w = panel.offsetWidth || 430;
             const h = panel.offsetHeight || 540;
             let left = rect ? rect.left - 8 : 80;
-            let top = (rect ? rect.bottom : HEADER_HEIGHT) + 8;
+            let top = (rect ? rect.bottom : headerH) + 8;
             left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
-            top = Math.max(HEADER_HEIGHT, Math.min(top, Math.max(HEADER_HEIGHT, window.innerHeight - h - 8)));
+            top = Math.max(headerH, Math.min(top, Math.max(headerH, window.innerHeight - h - 8)));
             panel.style.left = Math.round(left) + 'px';
             panel.style.top = Math.round(top) + 'px';
         }

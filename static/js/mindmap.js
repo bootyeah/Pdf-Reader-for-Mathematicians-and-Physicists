@@ -2394,10 +2394,7 @@
             <div class="mm-pop-header">
                 <div class="mm-pop-title-wrap">
                     <i class="ph ph-tag text-blue-500 text-base"></i>
-                    <div>
-                        <h4 class="mm-pop-title">数学理论角色</h4>
-                        <p class="mm-pop-subtitle">标记该节点在推演论证中的角色定位</p>
-                    </div>
+                    <h4 class="mm-pop-title">数学理论角色</h4>
                 </div>
                 <button type="button" id="mm-pop-close" class="mm-pop-close-btn" title="关闭"><i class="ph ph-x"></i></button>
             </div>
@@ -2411,7 +2408,6 @@
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 8px; border-top: 1px solid #f1f5f9;">
                     <button type="button" id="mm-tag-clear" style="padding: 3px 8px; border-radius: 6px; border: none; background: transparent; color: #ef4444; font-size: 11px; cursor: pointer;">清除角色</button>
-                    <span style="font-size: 10px; color: #94a3b8; font-family: monospace;">Math Logic</span>
                 </div>
             </div>
         `;

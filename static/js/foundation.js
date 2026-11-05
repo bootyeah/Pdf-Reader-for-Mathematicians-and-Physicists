@@ -155,6 +155,7 @@
             pageOffset: 0,           // 物理页码与逻辑页码的偏移量
             outlineMap: [],          // 解析后的有序目录地图，用于二分定位。
             currentPhysicalPage: 1,  // 记录当前屏幕中心的物理页
+            toolbarCollapsed: false, // 顶部工具栏是否折叠为细条
             cloudSync: { phase: 'idle', text: '', detail: '' }  // 云端批注库状态镜像（实现见 cloud-sync.js）
         };
 
@@ -171,6 +172,8 @@
             toolBtns: document.querySelectorAll('.tool-btn'),
             colorBtns: document.querySelectorAll('.color-btn'),
             customColorInput: document.getElementById('custom-color-input'),
+            customColorWrapper: document.getElementById('custom-color-wrapper'),
+            toggleToolbarBtn: document.getElementById('toggle-toolbar-btn'),
             noteModal: document.getElementById('note-modal'),
             noteInput: document.getElementById('note-input'),
             notePreview: document.getElementById('note-preview'),

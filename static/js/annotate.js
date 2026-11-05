@@ -984,7 +984,15 @@
                 if (btn.dataset.color === color) btn.classList.add('selected');
                 else btn.classList.remove('selected');
             });
-            if (![...els.colorBtns].some(b => b.dataset.color === color)) els.customColorInput.value = color;
+            if (![...els.colorBtns].some(b => b.dataset.color === color)) {
+                els.customColorInput.value = color;
+                if (els.customColorWrapper) {
+                    els.customColorWrapper.style.setProperty('--custom-color', color);
+                    els.customColorWrapper.classList.add('selected');
+                }
+            } else if (els.customColorWrapper) {
+                els.customColorWrapper.classList.remove('selected');
+            }
             // 图章工具激活时，让工具栏主按钮图标实时预览所选颜色
             if (state.currentTool && MARKER_CONFIG[state.currentTool]) {
                 updateToolButtons();
@@ -995,6 +1003,10 @@
         els.customColorInput.addEventListener('input', (e) => {
             els.colorBtns.forEach(btn => btn.classList.remove('selected'));
             state.currentColor = e.target.value;
+            if (els.customColorWrapper) {
+                els.customColorWrapper.style.setProperty('--custom-color', e.target.value);
+                els.customColorWrapper.classList.add('selected');
+            }
             // 自定义取色时同样实时刷新图章按钮预览
             if (state.currentTool && MARKER_CONFIG[state.currentTool]) {
                 updateToolButtons();
@@ -1192,4 +1204,21 @@
         }
 
         function changeZoom(delta) { updateZoom(state.scale + delta); }
+
+        if (els.toggleToolbarBtn) {
+            els.toggleToolbarBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                state.toolbarCollapsed = !state.toolbarCollapsed;
+                document.body.classList.toggle('toolbar-collapsed', state.toolbarCollapsed);
+                const icon = els.toggleToolbarBtn.querySelector('i');
+                if (icon) {
+                    icon.className = state.toolbarCollapsed ? 'ph ph-caret-down text-[14px]' : 'ph ph-caret-up text-[14px]';
+                }
+                const label = state.toolbarCollapsed ? '展开工具栏' : '隐藏工具栏';
+                els.toggleToolbarBtn.title = label;
+                els.toggleToolbarBtn.setAttribute('aria-label', label);
+                els.toggleToolbarBtn.setAttribute('aria-expanded', String(!state.toolbarCollapsed));
+                window.dispatchEvent(new Event('resize'));
+            });
+        }
 

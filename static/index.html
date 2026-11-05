@@ -48,8 +48,8 @@
             ① #page-hud 的 top-[84px]（= 72 + 12，保持 12px 间距）
             ② js/video.js 的 HEADER_HEIGHT（悬浮播放器的 top 下限）
             （#outline-trigger-btn / #outline-panel 用的是 top-full，会自动跟随） -->
-    <header class="bg-white border-b border-gray-300 shadow-sm z-50 flex items-center justify-between px-7 pt-3 pb-1 shrink-0 h-[72px] relative">
-        <div class="flex items-center space-x-3 min-w-0 flex-1 mr-6">
+    <header id="main-toolbar" class="bg-white border-b border-gray-300 shadow-sm z-50 flex items-center justify-between pl-7 pr-8 pt-3 pb-1 shrink-0 h-[72px] relative">
+        <div id="toolbar-left-group" class="flex items-center space-x-3 min-w-0 flex-1 mr-6">
             <button id="toggle-sidebar" class="p-2 hover:bg-gray-100 rounded-lg text-gray-600 focus:outline-none transition-colors" title="切换侧边栏">
                 <i class="ph ph-sidebar-simple text-[22px]"></i>
             </button>
@@ -70,7 +70,7 @@
             <button id="search-close" class="p-1 hover:bg-gray-100 rounded text-gray-600 ml-1"><i class="ph ph-x text-lg"></i></button>
         </div>
 
-        <div class="flex items-center space-x-3.5 shrink-0">
+        <div id="toolbar-right-group" class="flex items-center space-x-3.5 shrink-0">
             <!-- 🤖 DeepSeek 对话：独立气泡，紧挨「搜索」左侧、位于红色 PDF 标志右侧。
                  刻意不做进下面那个 view 控制条里 —— 它自己是一个独立的胶囊，
                  与右侧视图控制组之间只用 space-x-3.5 留出间距，两者互不相连。
@@ -87,7 +87,7 @@
             </button>
 
             <!-- 视图控制 -->
-            <div class="hidden md:flex items-center space-x-1.5 bg-gray-50 rounded-xl p-1.5 border border-gray-200">
+            <div id="toolbar-view-group" class="hidden md:flex items-center space-x-1.5 bg-gray-50 rounded-xl p-1.5 border border-gray-200">
                 <button id="toggle-search-btn" class="p-1.5 hover:bg-white hover:shadow-sm rounded-lg text-gray-600 transition" title="搜索 (Ctrl+F)">
                     <i class="ph ph-magnifying-glass text-[20px]"></i>
                 </button>
@@ -148,7 +148,7 @@
             </div>
 
             <!-- 标注工具 -->
-            <div class="flex items-center space-x-2 bg-gray-50 p-1.5 rounded-xl border border-gray-200">
+            <div id="toolbar-anno-group" class="flex items-center space-x-2 bg-gray-50 p-1.5 rounded-xl border border-gray-200">
                 <div class="flex space-x-1.5" id="tool-group">
                     <button data-tool="highlight" class="tool-btn flex items-center justify-center w-10 h-10 rounded-lg hover:bg-white hover:text-yellow-600 hover:shadow-sm text-gray-500 transition-all border border-transparent" title="高亮">
                         <i class="ph ph-highlighter text-[22px]"></i>
@@ -204,7 +204,7 @@
                     </div>
                 </div>
                 
-                <div class="h-6 w-px bg-gray-300"></div>
+                <div class="toolbar-anno-divider h-6 w-px bg-gray-300"></div>
 
                 <div class="flex items-center space-x-2 px-1" id="color-group">
                     <button class="w-[22px] h-[22px] rounded-full bg-[#fde047] color-btn selected transition-transform" data-color="#fde047" title="黄色"></button>
@@ -213,15 +213,15 @@
                     <button class="w-[22px] h-[22px] rounded-full bg-[#60a5fa] color-btn transition-transform" data-color="#60a5fa" title="蓝色"></button>
                     <button class="w-[22px] h-[22px] rounded-full bg-[#000000] border border-gray-300 color-btn transition-transform" data-color="#000000" title="黑色"></button>
                     
-                    <div class="relative w-7 h-7 ml-1 overflow-hidden rounded-full border-2 border-gray-300 cursor-pointer shadow-sm hover:ring-2 hover:ring-gray-300 transition-all" title="自定义">
+                    <div id="custom-color-wrapper" style="--custom-color: #fde047;" class="relative w-7 h-7 ml-1 overflow-hidden rounded-full border-2 border-gray-300 cursor-pointer shadow-sm hover:ring-2 hover:ring-gray-300 transition-all" title="自定义">
                         <input type="color" id="custom-color-input" class="absolute -top-2 -left-2 w-10 h-10 cursor-pointer p-0 border-0" value="#fde047">
                     </div>
                 </div>
             </div>
 
-            <div class="h-7 w-px bg-gray-300 mx-1.5"></div>
+            <div id="toolbar-file-divider" class="h-7 w-px bg-gray-300 mx-1.5"></div>
 
-            <div class="flex space-x-2 items-center">
+            <div id="toolbar-file-group" class="flex space-x-2 items-center">
                 <!-- 快捷文件夹双按钮：绝对定位挂在「打开」按钮上方的 header 留白里
                      （bottom-full + 2px 间距），因此这一列的高度 == 打开按钮自身 40px，
                      与右侧保存按钮严格居中对齐。两条禁忌：
@@ -290,6 +290,9 @@
             <!-- 目录列表容器 -->
             <div id="outline-content" class="flex-1 overflow-y-auto p-3 text-[16px] text-gray-700 pb-4 custom-scrollbar"></div>
         </div>
+        <button type="button" id="toggle-toolbar-btn" class="absolute right-1.5 top-1/2 -translate-y-1/2 w-5 h-7 rounded-md flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors z-30 cursor-pointer" title="隐藏工具栏" aria-label="隐藏工具栏" aria-expanded="true">
+            <i class="ph ph-caret-up text-[14px]"></i>
+        </button>
     </header>
 
 

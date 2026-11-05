@@ -81,6 +81,7 @@
     // 顶部工具栏高度（与 LOCALPdfReader.html 里 header 的 h-[72px] 保持一致）：
     // 悬浮播放器与其它浮层的 top 下限，避免被顶栏压住
     const HEADER_HEIGHT = 72;
+    function getHeaderHeight() { const h = document.querySelector('header'); return h ? h.offsetHeight : HEADER_HEIGHT; }
 
     // 倍速边界（以 0.1 为步进的十分位整数表示，避免浮点误差累积）
     const RATE_MIN_TENTHS = 5;    // 0.5x
@@ -540,7 +541,7 @@
             const maxLeft = Math.max(0, window.innerWidth - (panel.offsetWidth || 320));
             const maxTop = Math.max(0, window.innerHeight - 48);
             if (curLeft > maxLeft) panel.style.left = Math.max(8, maxLeft) + 'px';
-            if (curTop > maxTop) panel.style.top = Math.max(HEADER_HEIGHT, maxTop) + 'px';
+            if (curTop > maxTop) panel.style.top = Math.max(getHeaderHeight(), maxTop) + 'px';
         });
 
         if (toolbarBtn) toolbarBtn.addEventListener('click', function () { togglePanel(); });
@@ -851,10 +852,11 @@
             if (s.width) panel.style.width = s.width;
             if (s.height) panel.style.height = s.height;
             if (s.left && s.top) {
+                const headerH = getHeaderHeight();
                 const maxLeft = Math.max(0, window.innerWidth - (parseInt(s.width, 10) || 320));
                 const maxTop = Math.max(0, window.innerHeight - 48);
                 panel.style.left = Math.min(Math.max(8, parseInt(s.left, 10) || 0), maxLeft) + 'px';
-                panel.style.top = Math.min(Math.max(HEADER_HEIGHT, parseInt(s.top, 10) || HEADER_HEIGHT), maxTop) + 'px';
+                panel.style.top = Math.min(Math.max(headerH, parseInt(s.top, 10) || headerH), maxTop) + 'px';
             }
             if (s.isCollapsed) {
                 isCollapsed = true;
@@ -1408,7 +1410,7 @@
                 const w = panel.offsetWidth || 560;
                 const h = panel.offsetHeight || 380;
                 panel.style.left = Math.max(8, Math.round((window.innerWidth - w) / 2)) + 'px';
-                panel.style.top = Math.max(HEADER_HEIGHT, Math.round((window.innerHeight - h) / 2)) + 'px';
+                panel.style.top = Math.max(getHeaderHeight(), Math.round((window.innerHeight - h) / 2)) + 'px';
             }
         }
         updateHint();

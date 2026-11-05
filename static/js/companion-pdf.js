@@ -31,6 +31,7 @@
     const MIN_W = 340;
     const MIN_H = 240;
     const HEADER_HEIGHT = 72; // 与主界面顶栏保持安全间距
+    function getHeaderHeight() { const h = document.querySelector('header'); return h ? h.offsetHeight : HEADER_HEIGHT; }
 
     // 内部 DOM 引用
     let panel = null;
@@ -368,7 +369,7 @@
         const initW = Math.max(1, finite(saved.w, Math.min(620, window.innerWidth - 32)));
         const initH = Math.max(40, finite(saved.h, Math.min(500, window.innerHeight - 32)));
         const initX = finite(saved.x, Math.max(16, window.innerWidth - initW - 24));
-        const initY = finite(saved.y, HEADER_HEIGHT + 16);
+        const initY = finite(saved.y, getHeaderHeight() + 16);
 
         expandedHeight = Math.max(MIN_H, initH);
         panel.style.width = initW + 'px';
@@ -1670,11 +1671,12 @@
     }
 
     function layoutDocked(width) {
+        const headerH = getHeaderHeight();
         const maxWidth = Math.max(1, window.innerWidth - 16);
         const dockWidth = Math.min(maxWidth, Math.max(Math.min(MIN_W, maxWidth), width));
-        const height = Math.max(40, window.innerHeight - HEADER_HEIGHT - 14);
+        const height = Math.max(40, window.innerHeight - headerH - 14);
         panel.style.left = (window.innerWidth - dockWidth - 8) + 'px';
-        panel.style.top = (HEADER_HEIGHT + 6) + 'px';
+        panel.style.top = (headerH + 6) + 'px';
         panel.style.width = dockWidth + 'px';
         panel.style.height = (isCollapsed ? 40 : height) + 'px';
         expandedHeight = height;
