@@ -417,7 +417,7 @@ def handle_pick_file(handler):
         if folder and os.path.isfile(folder):
             folder = os.path.dirname(folder)
         if not folder or not os.path.isdir(folder):
-            folder = os.getcwd()
+            folder = None
 
         if not dialog_lock.acquire(blocking=False):
             handler._json_response(409, {'ok': False, 'error': '已有一个选择窗口正在打开，请先完成它'})

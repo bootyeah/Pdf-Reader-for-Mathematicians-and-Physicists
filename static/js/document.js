@@ -216,7 +216,7 @@
             if (isDirty) {
                 els.saveStatusBtn.classList.remove('btn-saved'); els.saveStatusBtn.classList.add('btn-unsaved');
                 els.saveIcon.className = 'ph ph-floppy-disk text-2xl animate-pulse'; 
-                els.saveStatusBtn.title = state.fileHandle ? "点击覆盖保存到原文件" : "点击保存更改到本地";
+                els.saveStatusBtn.title = (state.localFilePath || state.fileHandle) ? "点击覆盖保存到原文件" : "点击保存更改到本地";
             } else {
                 els.saveStatusBtn.classList.remove('btn-unsaved'); els.saveStatusBtn.classList.add('btn-saved');
                 els.saveIcon.className = 'ph ph-check-circle text-2xl'; 
@@ -497,40 +497,49 @@
             }
         }
 
-        async function triggerFileSelect(newWindow = false) {
-            // 注意：这里不再清空 state.localFilePath —— 取消选择时当前文档并没有换，
-            // 原位保存目标必须继续指向它；真正换文档时由 processSelectedFile 重新绑定
-            if (window.showOpenFilePicker) {
-                // ⚠️ 顺序铁律：必须先 showOpenFilePicker，最后才 window.open。
-                //    window.open() 会「消耗」掉本次用户手势（transient activation），
-                //    若在它之后再调用 showOpenFilePicker，后者会直接抛
-                //    SecurityError: Must be handling a user gesture to show a file picker，
-                //    连 file input 兜底也会因为同样原因打不开。
-                //    （新标签页因此只能在选完文件之后开，可能被弹窗拦截 —— 已做 null 兜底提示）
-                try {
-                    const [handle] = await window.showOpenFilePicker({
-                        types: [{ description: 'PDF Files', accept: { 'application/pdf': ['.pdf'] } }],
-                        multiple: false
-                    });
-                    const file = await handle.getFile();
-                    processSelectedFile(file, handle, newWindow, null);
-                } catch (err) {
-                    if (err.name !== 'AbortError') { 
-                        console.error(err); 
-                        // 只有退回 <input> 这条路才需要中转标志（change 事件里拿不到 newWindow 参数）
-                        isOpeningInNewWindow = newWindow;
-                        els.fileInput.click();
-                    } 
-                }
-            } else {
-                isOpeningInNewWindow = newWindow;
-                els.fileInput.click(); 
-            }
+        const LAST_OPEN_FOLDER_KEY = 'pdf_reader_last_open_folder';
+        function extractParentFolder(pathStr) {
+            if (!pathStr) return '';
+            const cleaned = String(pathStr).replace(/[\\\/]+$/, '');
+            const idx = Math.max(cleaned.lastIndexOf('\\'), cleaned.lastIndexOf('/'));
+            if (idx < 0) return '';
+            const parent = cleaned.slice(0, idx);
+            return /^[A-Za-z]:$/.test(parent) ? parent + '\\' : parent;
         }
 
-        // 事件绑定：主按钮覆盖当前，下拉图标开新窗口
-        els.openBtn.addEventListener('click', () => triggerFileSelect(false));
-        if (els.openNewBtn) els.openNewBtn.addEventListener('click', (e) => { e.stopPropagation(); triggerFileSelect(true); });
+        function loadLastOpenFolder() {
+            try {
+                const saved = localStorage.getItem(LAST_OPEN_FOLDER_KEY);
+                if (saved) return saved;
+            } catch (_) {}
+            return extractParentFolder(state.localFilePath || '');
+        }
+
+        function saveLastOpenFolder(filePath) {
+            const folder = extractParentFolder(filePath);
+            if (!folder) return;
+            try {
+                localStorage.setItem(LAST_OPEN_FOLDER_KEY, folder);
+            } catch (_) {}
+        }
+
+        async function triggerFileSelect(newWindow = false) {
+            // 统一采用与顶部快捷双按钮相同的后台系统文件选择与原位保存通道（不退全屏、保存无需授权确认）
+            await pickAndOpenFileFromFolder(loadLastOpenFolder(), newWindow, { rememberFolder: true });
+        }
+
+        // 事件绑定：主按钮覆盖当前（支持 Ctrl/Cmd + 点击在新标签页打开），下拉图标在新标签页打开
+        els.openBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            triggerFileSelect(!!(e.ctrlKey || e.metaKey));
+        });
+        if (els.openNewBtn) {
+            els.openNewBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                triggerFileSelect(true);
+            });
+        }
 
         // =========================================================================
         // 📁 顶部快捷教材文件夹双按钮 (Quick Folder Shortcuts)
@@ -611,15 +620,15 @@
         let quickFolderBusy = false; // 防连点：原生选择窗口没关闭前，忽略重复点击
 
         // 🚀 核心：直接在目标文件夹中打开系统文件选择对话框，直接选取文件并加载
-        // openInNewTab：Ctrl/Cmd + 点击 —— 选完文件后开一个新标签页，由它自己按路径读取
-        async function pickAndOpenFileFromFolder(folderPath, openInNewTab = false) {
+        // openInNewTab：Ctrl/Cmd + 点击 或 下拉菜单「新页打开」—— 选完文件后开一个新标签页，由它自己按路径读取
+        async function pickAndOpenFileFromFolder(folderPath, openInNewTab = false, options = {}) {
             if (quickFolderBusy) return;
             quickFolderBusy = true;
             try {
                 const resp = await fetch('/api/pick-file', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ folder: folderPath })
+                    body: JSON.stringify({ folder: folderPath || '' })
                 });
                 const data = await resp.json();
                 if (data.cancelled) {
@@ -629,14 +638,18 @@
                     alert(`选择文件失败：${data.error || '未知错误'}`);
                     return;
                 }
-                if (!/\.pdf$/i.test(data.name || '')) {
-                    alert(`快捷入口只支持打开 PDF 文件：\n${data.name || data.path}`);
+                const selectedName = data.name || data.path.split(/[\\/]/).pop() || 'document.pdf';
+                if (!/\.pdf$/i.test(selectedName)) {
+                    alert(`只支持打开 PDF 文件：\n${selectedName || data.path}`);
                     return;
                 }
+                if (options.rememberFolder) {
+                    saveLastOpenFolder(data.path);
+                }
 
-                // 🚀 Ctrl+点击：新标签页自己按 URL 里的路径去读这份文件。
-                //    观感与下拉里的「新页打开」一致：选完文件才开页，开出来就在前台并且已经在加载；
-                //    也不需要在当前窗口先下载一遍（省一份内存、少一次拷贝）。
+                // 🚀 新标签页打开：新标签页自己按 URL 里的路径去读这份文件。
+                //    选完文件才开页，开出来就在前台并且已经在加载；
+                //    也不需要在当前窗口先下载一遍（省一份内存、少一次拷贝），且同样支持原位静默保存。
                 if (openInNewTab) {
                     const target = freshReaderWindowUrl();            // 每次新开都绕过升级前的旧页面缓存
                     target.searchParams.set('open', data.path);       // 路径由 URLSearchParams 负责编码
@@ -653,7 +666,7 @@
                     const proceed = confirm(
                         `当前文档「${state.fileName || '未命名'}」还有未保存到 PDF 的批注改动。\n\n` +
                         `继续打开新文件不会删除本地缓存，但要重新打开这份文档才能继续编辑它。\n\n` +
-                        `确定要打开「${data.name}」吗？`
+                        `确定要打开「${selectedName}」吗？`
                     );
                     if (!proceed) return;
                 }
@@ -663,7 +676,7 @@
                     throw new Error(`读取文件失败 (HTTP ${fileResp.status})`);
                 }
                 const blob = await fileResp.blob();
-                const file = new File([blob], data.name, { type: 'application/pdf' });
+                const file = new File([blob], selectedName, { type: 'application/pdf' });
 
                 // 带上磁盘真实路径，由 processSelectedFile 把它绑定为原位静默保存目标
                 // await：PDF 真正加载完之前保持 quickFolderBusy，杜绝并发加载串味
