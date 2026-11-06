@@ -20,6 +20,8 @@ class TestToolbarCollapseAndMindmapPopover(unittest.TestCase):
         for required_id in (
             'id="main-toolbar"',
             'id="toolbar-left-group"',
+            'id="toggle-sidebar"',
+            'id="toolbar-visibility-group"',
             'id="toolbar-right-group"',
             'id="toolbar-view-group"',
             'id="toolbar-anno-group"',
@@ -32,6 +34,8 @@ class TestToolbarCollapseAndMindmapPopover(unittest.TestCase):
 
         style_css = (ROOT / "static/css/style.css").read_text(encoding="utf-8")
         self.assertIn("body.toolbar-collapsed #main-toolbar", style_css)
+        self.assertIn("body.toolbar-collapsed #toggle-sidebar::after", style_css)
+        self.assertIn("body.toolbar-collapsed #toggle-sidebar:hover::after", style_css)
         for hover_rule in (
             "body.toolbar-collapsed #deepseek-chat-btn:hover::after { background-color: #2563eb !important; }",
             'body.toolbar-collapsed .tool-btn[data-tool="highlight"]:hover::after { background-color: #ca8a04 !important; }',
@@ -70,7 +74,7 @@ class TestToolbarCollapseAndMindmapPopover(unittest.TestCase):
         test_script = r"""
 <script>
 window.addEventListener('load', () => {
-    setTimeout(() => {
+    setTimeout(async () => {
         try {
             function assert(cond, msg) {
                 if (!cond) throw new Error(msg);
@@ -113,6 +117,14 @@ window.addEventListener('load', () => {
             assert(header !== null && toggleBtn !== null, 'Header and #toggle-toolbar-btn must exist');
             assert(header.offsetHeight === 72, 'Expanded header height must be 72px, got ' + header.offsetHeight);
 
+            const sidebarBtn = document.getElementById('toggle-sidebar');
+            const sidebarEl = document.getElementById('sidebar');
+            assert(sidebarBtn !== null && sidebarEl !== null, '#toggle-sidebar and #sidebar must exist');
+            const sidebarBtnBefore = (() => {
+                const r = sidebarBtn.getBoundingClientRect();
+                return { left: r.left, width: r.width, centerX: r.left + r.width / 2 };
+            })();
+
             const targetControls = [
                 document.getElementById('deepseek-chat-btn'),
                 ...document.querySelectorAll('#tool-group .tool-btn'),
@@ -128,6 +140,7 @@ window.addEventListener('load', () => {
 
             // Collapse toolbar (disable transition temporarily for instant measurement)
             header.style.transition = 'none';
+            sidebarEl.style.transition = 'none';
             toggleBtn.click();
             void header.offsetHeight;
 
@@ -137,13 +150,57 @@ window.addEventListener('load', () => {
             assert(toggleBtn.title === '展开工具栏', 'Toggle button title should update to 展开工具栏');
 
             // Non-target groups must be hidden and collapsed vertically
-            for (const sel of ['#toolbar-left-group', '#toolbar-view-group', '.toolbar-anno-divider', '#toolbar-file-divider', '#toolbar-file-group']) {
+            for (const sel of ['#toolbar-visibility-group', '#toolbar-view-group', '.toolbar-anno-divider', '#toolbar-file-divider', '#toolbar-file-group']) {
                 const g = document.querySelector(sel);
                 assert(g !== null, 'Group must exist: ' + sel);
                 const cs = getComputedStyle(g);
                 assert(cs.visibility === 'hidden', sel + ' must be visibility:hidden when collapsed');
                 assert(g.getBoundingClientRect().height === 0, sel + ' height must be 0 when collapsed');
             }
+
+            // Leftmost sidebar button must collapse in-place into a circular dot of the exact same color as segment bars
+            const sbRect = sidebarBtn.getBoundingClientRect();
+            const sbCenterX = sbRect.left + sbRect.width / 2;
+            assert(Math.abs(sbRect.left - sidebarBtnBefore.left) <= 0.5,
+                `Sidebar button left shifted: before=${sidebarBtnBefore.left}, after=${sbRect.left}`);
+            assert(Math.abs(sbRect.width - sidebarBtnBefore.width) <= 0.5,
+                `Sidebar button width changed: before=${sidebarBtnBefore.width}, after=${sbRect.width}`);
+            assert(Math.abs(sbCenterX - sidebarBtnBefore.centerX) <= 0.5,
+                `Sidebar button centerX shifted: before=${sidebarBtnBefore.centerX}, after=${sbCenterX}`);
+            assert(sbRect.height >= 10 && sbRect.height <= 12,
+                `Collapsed hit height for #toggle-sidebar should fill thin strip, got ${sbRect.height}`);
+            assert(sbRect.right < targetControls[0].getBoundingClientRect().left,
+                '#toggle-sidebar dot must sit to the left of all segment controls');
+            assert(getComputedStyle(document.querySelector('#toggle-sidebar > i')).display === 'none',
+                'Sidebar icon should be hidden in collapsed mode');
+
+            const dotStyle = getComputedStyle(sidebarBtn, '::after');
+            const segStyle = getComputedStyle(targetControls[0], '::after');
+            assert(dotStyle.content !== 'none' && dotStyle.content !== '', '::after dot missing on #toggle-sidebar');
+            assert(dotStyle.width === '5px' && dotStyle.height === '5px',
+                `#toggle-sidebar::after should be a 5x5 round dot, got ${dotStyle.width}x${dotStyle.height}`);
+            assert(dotStyle.borderRadius === '9999px',
+                `#toggle-sidebar::after should have 9999px border-radius, got ${dotStyle.borderRadius}`);
+            assert(dotStyle.backgroundColor === segStyle.backgroundColor,
+                `Dot color (${dotStyle.backgroundColor}) must match segment color (${segStyle.backgroundColor})`);
+
+            // Eye-protection mode color parity between dot and segment bars
+            document.body.classList.add('eye-protection-mode');
+            assert(getComputedStyle(sidebarBtn, '::after').backgroundColor === getComputedStyle(targetControls[0], '::after').backgroundColor,
+                'Eye-protection dot color must match segment color');
+            document.body.classList.remove('eye-protection-mode');
+
+            // Clicking leftmost dot button while collapsed toggles annotation sidebar collapse & expand
+            assert(state.sidebarOpen === true && sidebarEl.offsetWidth === 256,
+                'Sidebar should start expanded (256px), got ' + sidebarEl.offsetWidth);
+            sidebarBtn.click();
+            await new Promise(r => setTimeout(r, 40));
+            assert(state.sidebarOpen === false && sidebarEl.classList.contains('w-0') && sidebarEl.offsetWidth <= 1,
+                '1st click on collapsed dot button must collapse sidebar, got width=' + sidebarEl.offsetWidth);
+            sidebarBtn.click();
+            await new Promise(r => setTimeout(r, 40));
+            assert(state.sidebarOpen === true && sidebarEl.classList.contains('w-64') && sidebarEl.offsetWidth === 256,
+                '2nd click on collapsed dot button must expand sidebar back to 256px, got ' + sidebarEl.offsetWidth);
 
             // Every retained control must stay at its exact horizontal X position (0px shift) and render ::after segment bar
             targetControls.forEach((el, idx) => {

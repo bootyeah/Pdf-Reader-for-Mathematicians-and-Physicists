@@ -6043,7 +6043,7 @@ body.eye-protection-mode .mm-shortcut-btn:hover {
 
 /* =========================================================================
    顶部工具栏折叠细条模式 (body.toolbar-collapsed)
-   折叠为 12px 细条，保留内置 AI、批注工具与颜色选择原位线段条，悬停显色、按下即用
+   折叠为 12px 细条，最左侧保留侧边栏圆点按钮，其余保留内置 AI、批注工具与颜色选择原位线段条，悬停显色、按下即用
    ========================================================================= */
 #main-toolbar {
     transition: height 0.18s ease, padding 0.18s ease;
@@ -6057,7 +6057,7 @@ body.toolbar-collapsed #main-toolbar {
 }
 
 /* 非保留控件组仅在纵向收零并隐藏，完整保留原有横向占位宽度，确保各线段条零横向偏移 */
-body.toolbar-collapsed #toolbar-left-group,
+body.toolbar-collapsed #toolbar-visibility-group,
 body.toolbar-collapsed #toolbar-view-group,
 body.toolbar-collapsed .toolbar-anno-divider,
 body.toolbar-collapsed #toolbar-file-divider,
@@ -6073,6 +6073,11 @@ body.toolbar-collapsed #toolbar-file-group {
     pointer-events: none !important;
 }
 
+body.toolbar-collapsed #toolbar-left-group {
+    min-width: 38px !important;
+}
+
+body.toolbar-collapsed #toolbar-left-group,
 body.toolbar-collapsed #toolbar-right-group,
 body.toolbar-collapsed #tool-group,
 body.toolbar-collapsed #marker-dropdown-wrapper,
@@ -6092,12 +6097,14 @@ body.toolbar-collapsed #toolbar-anno-group {
 }
 
 /* 隐藏直属图标，将原按钮就地化为无背景无边框的细条触控区 */
+body.toolbar-collapsed #toggle-sidebar > i,
 body.toolbar-collapsed #deepseek-chat-btn > svg,
 body.toolbar-collapsed .tool-btn > i,
 body.toolbar-collapsed .tool-btn > svg {
     display: none !important;
 }
 
+body.toolbar-collapsed #toggle-sidebar,
 body.toolbar-collapsed #deepseek-chat-btn,
 body.toolbar-collapsed .tool-btn,
 body.toolbar-collapsed .color-btn,
@@ -6117,6 +6124,11 @@ body.toolbar-collapsed #custom-color-wrapper:hover {
     overflow: visible !important;
 }
 
+body.toolbar-collapsed #toggle-sidebar {
+    width: 38px !important;
+    flex-shrink: 0 !important;
+}
+
 body.toolbar-collapsed #deepseek-chat-btn {
     width: 34px !important;
 }
@@ -6129,6 +6141,21 @@ body.toolbar-collapsed #custom-color-input {
     height: 100% !important;
     opacity: 0 !important;
     z-index: 2 !important;
+}
+
+/* 侧边栏按钮折叠圆点：位于折叠细条最左侧原位，常态颜色与线段条一致 */
+body.toolbar-collapsed #toggle-sidebar::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 5px;
+    height: 5px;
+    transform: translate(-50%, -50%);
+    border-radius: 9999px;
+    background-color: #cbd5e1;
+    transition: background-color 0.14s ease, width 0.14s ease, height 0.14s ease;
+    pointer-events: none;
 }
 
 /* 线段条本体：常态素雅浅灰，激活态略深单色，鼠标悬停时显出对应功能原悬停色 */
@@ -6171,11 +6198,13 @@ body.toolbar-collapsed #custom-color-wrapper.selected::after {
     background-color: #94a3b8;
 }
 
-/* 护眼模式兼容：屏蔽 header button:hover 的块级米色底，仅让线段条显色 */
+/* 护眼模式兼容：屏蔽 header button:hover 的块级米色底，仅让圆点与线段条显色 */
+body.eye-protection-mode.toolbar-collapsed #toggle-sidebar:hover,
 body.eye-protection-mode.toolbar-collapsed #deepseek-chat-btn:hover,
 body.eye-protection-mode.toolbar-collapsed .tool-btn:hover {
     background-color: transparent !important;
 }
+body.eye-protection-mode.toolbar-collapsed #toggle-sidebar::after,
 body.eye-protection-mode.toolbar-collapsed #deepseek-chat-btn::after,
 body.eye-protection-mode.toolbar-collapsed .tool-btn::after,
 body.eye-protection-mode.toolbar-collapsed .color-btn::after,
@@ -6190,6 +6219,12 @@ body.eye-protection-mode.toolbar-collapsed #custom-color-wrapper.selected::after
 }
 
 /* 悬停显色（严格对齐各按钮当前悬停色） */
+body.toolbar-collapsed #toggle-sidebar:hover::after {
+    width: 6px;
+    height: 6px;
+    background-color: #4b5563 !important;
+}
+
 body.toolbar-collapsed #deepseek-chat-btn:hover::after,
 body.toolbar-collapsed .tool-btn:hover::after,
 body.toolbar-collapsed #marker-dropdown-wrapper:hover #active-marker-btn::after,
