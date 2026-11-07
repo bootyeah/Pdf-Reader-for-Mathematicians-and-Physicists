@@ -460,6 +460,7 @@
 
         hideBubble();
         showPanel();
+        window.FloatingWindowLayers?.bringToFront(panel);
         // 是单词还是短语由模型判断（框选常夹带空白，代码猜不可靠）：
         // 查询期间先用中性的「词典查询」，等结果回来再按 kind 换成单词/短语标题
         applyTitle(mode === 'sentence' ? 'sentence' : null);

@@ -154,7 +154,7 @@
     // ---------- 窗口置顶与焦点提升 ----------
     function bringToFront() {
         if (!panel) return;
-        panel.style.zIndex = '2060';
+        window.FloatingWindowLayers?.bringToFront(panel);
         panel.classList.add('cp-focused');
     }
 

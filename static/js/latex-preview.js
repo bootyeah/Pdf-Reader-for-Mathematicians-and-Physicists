@@ -17,6 +17,8 @@
         viewport.append(body, cursor);
         panel.append(viewport);
         document.body.appendChild(panel);
+        // 预览与所依附的小窗（如文本编辑框）保持同一层级、一起置顶。
+        window.FloatingWindowLayers?.attach(panel, anchor);
 
         // 浏览预览时保持输入焦点，避免导图的 blur 保存和批注的外部点击保存。
         panel.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); });

@@ -437,7 +437,7 @@
 
         .dict-panel {
             position: fixed;
-            z-index: 99998;
+            z-index: 2045; /* 小窗层级见 window-layers.js */
             display: none;
             /* 进场动画 */
             animation: dictFadeIn 0.16s ease-out;
@@ -556,7 +556,7 @@
         .video-panel {
             container-type: inline-size;
             position: fixed;
-            z-index: 99990;
+            z-index: 2043; /* 小窗层级见 window-layers.js */
             width: 560px;
             height: 380px;
             display: flex;
@@ -881,7 +881,7 @@
            ========================================================================= */
         .ds-chat-panel {
             position: fixed;
-            z-index: 99995;              /* 高于视频播放器、低于词典气泡 */
+            z-index: 2044;               /* 小窗层级见 window-layers.js（点击哪个小窗就置顶），始终低于词典气泡 */
             width: 430px;
             height: 540px;
             min-width: 300px;
@@ -1603,7 +1603,7 @@ body.eye-protection-mode #formula-code { background: #fafbf6; border-color: #d8d
 /* 独立手写草稿窗口 (现代化极简视觉设计，与整体阅读器美术风格统一) */
 #handwriting-whiteboard {
     position: fixed;
-    z-index: 2050;
+    z-index: 2042; /* 小窗层级见 window-layers.js */
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
@@ -2763,7 +2763,7 @@ body.eye-protection-mode #handwriting-whiteboard.wb-pure-mode #whiteboard-pure:h
    ========================================================================= */
 .companion-pdf-panel {
     position: fixed;
-    z-index: 2040;
+    z-index: 2041; /* 小窗层级见 window-layers.js */
     display: flex;
     flex-direction: column;
     box-sizing: border-box;

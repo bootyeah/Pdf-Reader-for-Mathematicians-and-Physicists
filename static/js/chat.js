@@ -1623,6 +1623,7 @@
         if (panelVisible) return;
         panel.style.display = 'flex';
         panelVisible = true;
+        window.FloatingWindowLayers?.bringToFront(panel);
 
         // 首次打开：贴在鲸鱼按钮正下方（左对齐按钮，越界时回收进屏幕）
         if (!panel.style.left || !panel.style.top) {

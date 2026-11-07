@@ -548,7 +548,7 @@
         window.addEventListener('resize', () => { if (!panel.hidden) { clamp(); draw(); } });
     }
     window.HandwritingWhiteboard = {
-        show() { ensure(); panel.hidden = false; clamp(); draw(); phone.start(); },
+        show() { ensure(); panel.hidden = false; window.FloatingWindowLayers?.bringToFront(panel); clamp(); draw(); phone.start(); },
         hide,
         setPureMode(enabled) { ensure(); setPureMode(enabled); },
         isPureMode() { return !!pureMode; }

@@ -31,6 +31,7 @@
                 els.noteInput.value = anno.note || '';
             }
             els.noteModal.classList.remove('hidden');
+            window.FloatingWindowLayers?.bringToFront(els.noteModal);
             
             const sizeControls = document.getElementById('text-size-controls');
             const snippetBtn = document.getElementById('save-snippet-btn'); 

@@ -1403,6 +1403,7 @@
         if (!panelVisible) {
             panel.style.display = 'flex';
             panelVisible = true;
+            window.FloatingWindowLayers?.bringToFront(panel);
             syncToolbarButton(true);
 
             // 首次显示时定位到屏幕中央（若无历史记录）
