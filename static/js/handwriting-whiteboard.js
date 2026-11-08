@@ -174,12 +174,12 @@
     function ensure() {
         if (panel) return;
         panel = document.createElement('section'); panel.id = 'handwriting-whiteboard'; panel.hidden = true;
-        panel.setAttribute('aria-label', '手写草稿白板');
+        panel.setAttribute('aria-label', '手写白板');
         panel.innerHTML = `
           <div id="whiteboard-header">
             <div class="wb-header-brand">
               <div class="wb-brand-icon"><i class="ph ph-chalkboard-simple"></i></div>
-              <strong>手写草稿白板</strong>
+              <strong>手写白板</strong>
               <button type="button" id="whiteboard-shortcut-btn" class="window-shortcut-btn wb-shortcut-btn" title="折叠为标题栏 (快捷键: V)" aria-label="折叠白板 (V)">
                 <span class="ws-action">折叠</span>
                 <kbd class="ws-key">V</kbd>

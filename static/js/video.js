@@ -131,7 +131,7 @@
             '<div class="video-panel-header" id="video-panel-header">' +
                 '<div class="video-panel-brand">' +
                     '<i class="ph ph-video-camera text-zinc-400 text-[15px]"></i>' +
-                    '<strong class="video-panel-title" id="video-panel-title" title="视频伴读">视频伴读</strong>' +
+                    '<strong class="video-panel-title" id="video-panel-title" title="视频">视频</strong>' +
                     '<button type="button" class="window-shortcut-btn video-shortcut-btn" id="video-header-shortcut-btn" title="折叠播放器 (快捷键: Shift)" aria-label="折叠视频窗口 (Shift)">' +
                         '<span class="ws-action">折叠</span>' +
                         '<kbd class="ws-key">Shift</kbd>' +
