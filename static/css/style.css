@@ -159,12 +159,59 @@
             cursor: pointer;
             pointer-events: auto; /* 链接本体可点击 */
         }
+
+        /* 为微小角标（如注脚 ¹）略微扩充无形热区，不改变元素自身几何尺寸 */
+        .link-layer a::before {
+            content: '';
+            position: absolute;
+            inset: -2px -3px;
+        }
         
         /* 鼠标悬停链接时给予微弱反馈 */
         .link-layer a:hover {
             background-color: rgba(59, 130, 246, 0.1); 
             box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3);
             border-radius: 2px;
+        }
+
+        /* --- 内部链接/注脚悬浮预览浮窗（极简无文字纯图预览） --- */
+        .pdf-link-preview-popover {
+            position: fixed;
+            z-index: 9999;
+            background: #ffffff;
+            border: 1px solid rgba(15, 23, 42, 0.14);
+            border-radius: 8px;
+            box-shadow: 0 12px 32px -6px rgba(15, 23, 42, 0.22), 0 4px 12px -2px rgba(15, 23, 42, 0.1);
+            padding: 6px;
+            pointer-events: auto;
+            cursor: pointer;
+            max-width: min(860px, calc(100vw - 24px));
+            max-height: min(390px, calc(100vh - 32px));
+            overflow: hidden;
+            opacity: 0;
+            transform: translateY(3px) scale(0.985);
+            transition: opacity 0.12s ease-out, transform 0.12s ease-out;
+        }
+
+        .pdf-link-preview-popover.is-visible {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+
+        .pdf-link-preview-popover canvas {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            border-radius: 4px;
+        }
+
+        body.eye-protection-mode .pdf-link-preview-popover {
+            background-color: #F4EFE6 !important;
+            border-color: #DFD6C5 !important;
+        }
+
+        body.eye-protection-mode .pdf-link-preview-popover canvas {
+            mix-blend-mode: multiply;
         }
 
         .annotation-layer {

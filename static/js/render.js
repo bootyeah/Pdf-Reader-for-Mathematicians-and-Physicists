@@ -1,5 +1,450 @@
 // PDF 位图调度在 pdf-renderer.js；这里保留链接跳转、批注与公式渲染。
-        async function navigateToDestination(dest) {
+// PDF 位图调度在 pdf-renderer.js；这里保留链接跳转、悬浮预览、批注与公式渲染。
+        const SUPERSCRIPT_CHAR_MAP = {
+            '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4',
+            '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
+            'ᵃ': 'a', 'ᵇ': 'b', 'ᶜ': 'c', 'ᵈ': 'd', 'ᵉ': 'e',
+            'ᶠ': 'f', 'ᵍ': 'g', 'ʰ': 'h', 'ⁱ': 'i', 'ʲ': 'j',
+            'ᵏ': 'k', 'ˡ': 'l', 'ᵐ': 'm', 'ⁿ': 'n', 'ᵒ': 'o',
+            'ᵖ': 'p', 'ʳ': 'r', 'ˢ': 's', 'ᵗ': 't', 'ᵘ': 'u',
+            'ᵛ': 'v', 'ʷ': 'w', 'ˣ': 'x', 'ʸ': 'y', 'ᶻ': 'z',
+            '∗': '*'
+        };
+
+        function normalizeFootnoteChars(str) {
+            return String(str || '').replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ∗]/g, ch => SUPERSCRIPT_CHAR_MAP[ch] || ch);
+        }
+
+        async function extractPageTextLines(pdfDoc, pageNum, page, baseViewport) {
+            try {
+                const content = await getPdfTextContent(pdfDoc, pageNum, page);
+                if (!content || !Array.isArray(content.items) || !content.items.length) return [];
+                const runs = [];
+                for (const item of content.items) {
+                    const str = String(item.str || '');
+                    if (!str.trim() || !Array.isArray(item.transform)) continue;
+                    const [a, b, c, d, e, f] = item.transform;
+                    const fontH = Math.max(7, Math.min(32, Math.abs(item.height) || Math.hypot(c, d) || Math.hypot(a, b) || 10));
+                    const [x0, yBase] = baseViewport.convertToViewportPoint(e, f);
+                    const [x1] = baseViewport.convertToViewportPoint(e + (item.width || 0), f);
+                    const left = Math.min(x0, x1);
+                    const right = Math.max(x0, x1, left + fontH * 0.4);
+                    runs.push({
+                        str,
+                        left,
+                        right,
+                        yBase,
+                        top: yBase - fontH * 0.88,
+                        bottom: yBase + fontH * 0.28,
+                        fontH
+                    });
+                }
+                if (!runs.length) return [];
+                runs.sort((p, q) => p.yBase - q.yBase || p.left - q.left);
+                const lines = [];
+                for (const run of runs) {
+                    const last = lines[lines.length - 1];
+                    if (last && Math.abs(run.yBase - last.yBase) <= Math.max(4, Math.min(last.fontH, run.fontH) * 0.48)) {
+                        last.items.push(run);
+                        last.left = Math.min(last.left, run.left);
+                        last.right = Math.max(last.right, run.right);
+                        last.top = Math.min(last.top, run.top);
+                        last.bottom = Math.max(last.bottom, run.bottom);
+                        last.fontH = Math.max(last.fontH, run.fontH);
+                    } else {
+                        lines.push({
+                            items: [run],
+                            left: run.left,
+                            right: run.right,
+                            top: run.top,
+                            bottom: run.bottom,
+                            yBase: run.yBase,
+                            fontH: run.fontH
+                        });
+                    }
+                }
+                for (const line of lines) {
+                    line.items.sort((p, q) => p.left - q.left);
+                    line.text = line.items.map(r => r.str).join('');
+                }
+                return lines;
+            } catch (_) {
+                return [];
+            }
+        }
+
+        async function extractSourceLinkMarker(pdfDoc, sourceInfo) {
+            if (!sourceInfo || !Array.isArray(sourceInfo.rect) || sourceInfo.rect.length < 4) return '';
+            try {
+                const page = await pdfDoc.getPage(sourceInfo.pageNum);
+                const content = await getPdfTextContent(pdfDoc, sourceInfo.pageNum, page);
+                if (!content || !Array.isArray(content.items)) return '';
+                const [rx1, ry1, rx2, ry2] = sourceInfo.rect;
+                const minX = Math.min(rx1, rx2) - 3;
+                const maxX = Math.max(rx1, rx2) + 3;
+                const minY = Math.min(ry1, ry2) - 3;
+                const maxY = Math.max(ry1, ry2) + 3;
+                const hits = [];
+                for (const item of content.items) {
+                    const str = String(item.str || '').trim();
+                    if (!str || !Array.isArray(item.transform)) continue;
+                    const [, , c, d, e, f] = item.transform;
+                    const h = Math.abs(item.height) || Math.hypot(c, d) || 8;
+                    const w = Math.abs(item.width) || (str.length * h * 0.5);
+                    if (e + w >= minX && e <= maxX && f + h >= minY && f - h * 0.3 <= maxY) {
+                        hits.push({ str, e });
+                    }
+                }
+                hits.sort((a, b) => a.e - b.e);
+                const joined = normalizeFootnoteChars(hits.map(h => h.str).join('').trim());
+                if (!joined) return '';
+                const m = /(\[\d+\]|\(\d+\)|\d+|[*†‡§¶]+|[a-zA-Z])\s*$/.exec(joined);
+                const token = m ? m[1] : joined;
+                return token.replace(/^[\[(]+|[\]).,:;]+$/g, '').trim();
+            } catch (_) {
+                return '';
+            }
+        }
+
+        function isLikelyPageFooterLine(line, pageHeight) {
+            if (line.yBase < pageHeight * 0.86) return false;
+            const t = line.text.trim();
+            return t.length > 0 && t.length <= 10 && /^[-–—\s\dIivVxX]+$/.test(t);
+        }
+
+        async function inferFootnotePosition(pdfDoc, sourceInfo, targetPageNum, targetPage, baseViewport) {
+            const lines = await extractPageTextLines(pdfDoc, targetPageNum, targetPage, baseViewport);
+            if (!lines.length) return null;
+            const marker = await extractSourceLinkMarker(pdfDoc, sourceInfo);
+            let sourceVy = null;
+            if (sourceInfo && sourceInfo.pageNum === targetPageNum && Array.isArray(sourceInfo.rect)) {
+                const [, vy1] = baseViewport.convertToViewportPoint(sourceInfo.rect[0], sourceInfo.rect[1]);
+                const [, vy2] = baseViewport.convertToViewportPoint(sourceInfo.rect[2], sourceInfo.rect[3]);
+                sourceVy = Math.min(vy1, vy2);
+            }
+            const lowerLines = lines.filter(line => {
+                if (line.yBase < baseViewport.height * 0.42) return false;
+                if (sourceVy !== null && Math.abs(line.yBase - sourceVy) < 10) return false;
+                if (isLikelyPageFooterLine(line, baseViewport.height)) return false;
+                return true;
+            });
+            if (marker) {
+                const escaped = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const startRe = new RegExp(`^[\\[\\(\\s]*${escaped}(?:[\\]\\)\\.\\s]|$|(?!\\d))`);
+                for (const line of lowerLines) {
+                    const normLine = normalizeFootnoteChars(line.text.trim());
+                    const firstItemNorm = normalizeFootnoteChars(line.items[0]?.str?.trim() || '').replace(/^[\[(]+|[\]).]+$/g, '');
+                    if (firstItemNorm === marker || startRe.test(normLine)) {
+                        return { vx: line.left, vy: line.top };
+                    }
+                }
+            }
+            // 同页跳转且原 dest 缺少精确 Y 时，自动定位到页面底部的注脚段落起始行
+            if (sourceInfo && sourceInfo.pageNum === targetPageNum) {
+                const bottomCandidates = lowerLines.filter(l => l.yBase >= baseViewport.height * 0.62);
+                if (bottomCandidates.length) {
+                    let best = bottomCandidates[0];
+                    for (let i = 1; i < bottomCandidates.length; i++) {
+                        const gap = bottomCandidates[i].top - bottomCandidates[i - 1].bottom;
+                        if (gap >= 10) {
+                            best = bottomCandidates[i];
+                            break;
+                        }
+                    }
+                    return { vx: best.left, vy: best.top };
+                }
+            }
+            return null;
+        }
+
+        async function resolvePdfDestinationDetails(pdfDoc, dest, sourceInfo = null) {
+            const explicitDest = typeof dest === 'string' ? await pdfDoc.getDestination(dest) : dest;
+            if (!Array.isArray(explicitDest) || !explicitDest.length) return null;
+            const ref = explicitDest[0];
+            const pageIndex = Number.isInteger(ref) ? ref : (ref && typeof ref === 'object' ? await pdfDoc.getPageIndex(ref) : null);
+            if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= pdfDoc.numPages) return null;
+            const pageNum = pageIndex + 1;
+            const page = await pdfDoc.getPage(pageNum);
+            const baseViewport = page.getViewport({ scale: 1 });
+
+            const zoomType = explicitDest[1]?.name || explicitDest[1];
+            let rawLeft = null, rawTop = null;
+            if (zoomType === 'XYZ') {
+                if (typeof explicitDest[2] === 'number' && Number.isFinite(explicitDest[2])) rawLeft = explicitDest[2];
+                if (typeof explicitDest[3] === 'number' && Number.isFinite(explicitDest[3])) rawTop = explicitDest[3];
+            } else if (zoomType === 'FitH' || zoomType === 'FitBH') {
+                if (typeof explicitDest[2] === 'number' && Number.isFinite(explicitDest[2])) rawTop = explicitDest[2];
+            } else if (zoomType === 'FitR') {
+                if (typeof explicitDest[2] === 'number' && Number.isFinite(explicitDest[2])) rawLeft = explicitDest[2];
+                if (typeof explicitDest[5] === 'number' && Number.isFinite(explicitDest[5])) rawTop = explicitDest[5];
+            } else if (zoomType === 'FitV' || zoomType === 'FitBV') {
+                if (typeof explicitDest[2] === 'number' && Number.isFinite(explicitDest[2])) rawLeft = explicitDest[2];
+            }
+
+            let vx = null, vy = null;
+            if (rawLeft !== null || rawTop !== null) {
+                const pt = baseViewport.convertToViewportPoint(rawLeft ?? 0, rawTop ?? 0);
+                if (rawLeft !== null) vx = pt[0];
+                if (rawTop !== null) vy = pt[1];
+            }
+
+            let isExactY = vy !== null && vy > 24 && vy < baseViewport.height - 4;
+            if (!isExactY && sourceInfo) {
+                const inferred = await inferFootnotePosition(pdfDoc, sourceInfo, pageNum, page, baseViewport);
+                if (inferred) {
+                    vx = inferred.vx;
+                    vy = inferred.vy;
+                    isExactY = true;
+                }
+            }
+
+            return { pageIndex, pageNum, page, baseViewport, vx, vy, isExactY };
+        }
+
+        async function computeDestinationCropBox(pdfDoc, details) {
+            const { pageNum, page, baseViewport, vx, vy, isExactY } = details;
+            const lines = await extractPageTextLines(pdfDoc, pageNum, page, baseViewport);
+
+            let cropX = baseViewport.width * 0.06;
+            let cropW = baseViewport.width * 0.88;
+            if (lines.length) {
+                const bodyLines = lines.filter(l => !isLikelyPageFooterLine(l, baseViewport.height));
+                const refLines = bodyLines.length ? bodyLines : lines;
+                const minX = Math.min(...refLines.map(l => l.left));
+                const maxX = Math.max(...refLines.map(l => l.right));
+                if (vx !== null && vx > baseViewport.width * 0.46 && vx < maxX - 40) {
+                    cropX = Math.max(0, vx - 14);
+                    cropW = Math.min(baseViewport.width - cropX, Math.max(180, maxX - cropX + 14));
+                } else {
+                    cropX = Math.max(0, minX - 14);
+                    const rightEdge = Math.min(baseViewport.width, maxX + 14);
+                    cropW = Math.max(200, rightEdge - cropX);
+                }
+            }
+
+            const targetY = isExactY && Number.isFinite(vy) ? vy : 28;
+            let startIdx = -1;
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].bottom >= targetY - 6 && lines[i].top <= targetY + 28) {
+                    startIdx = i;
+                    break;
+                }
+            }
+
+            let cropY;
+            let cropBottom;
+            const minCropH = 38;
+            const maxCropH = 142;
+
+            if (startIdx !== -1) {
+                const startLine = lines[startIdx];
+                cropY = Math.max(0, Math.min(targetY, startLine.top) - 10);
+                let endBottom = startLine.bottom;
+                let prevLine = startLine;
+                for (let i = startIdx + 1; i < lines.length; i++) {
+                    const line = lines[i];
+                    if (line.bottom - cropY > maxCropH) break;
+                    const gap = line.top - prevLine.bottom;
+                    if (isLikelyPageFooterLine(line, baseViewport.height) && gap > 8) break;
+                    if (gap > 18 && endBottom - startLine.top >= 12) break;
+                    endBottom = line.bottom;
+                    prevLine = line;
+                }
+                cropBottom = Math.min(baseViewport.height, Math.max(cropY + minCropH, endBottom + 10));
+            } else {
+                cropY = Math.max(0, targetY - 14);
+                cropBottom = Math.min(baseViewport.height, cropY + 96);
+            }
+
+            if (cropBottom - cropY < minCropH) {
+                cropBottom = Math.min(baseViewport.height, cropY + minCropH);
+                cropY = Math.max(0, cropBottom - minCropH);
+            }
+            const cropH = Math.max(28, cropBottom - cropY);
+            return { cropX, cropY, cropW, cropH };
+        }
+
+        // 极简悬浮预览浮窗控制（仅显示裁剪后的预览画布，无任何多余文字）
+        const LINK_PREVIEW_SHOW_DELAY = 130;
+        const LINK_PREVIEW_HIDE_DELAY = 90;
+        let linkPreviewPopover = null;
+        let linkPreviewCanvas = null;
+        let linkPreviewShowTimer = 0;
+        let linkPreviewHideTimer = 0;
+        let linkPreviewRenderToken = 0;
+        let activePreviewAnchor = null;
+
+        function ensureLinkPreviewPopover() {
+            if (linkPreviewPopover && linkPreviewPopover.isConnected) return linkPreviewPopover;
+            linkPreviewPopover = document.createElement('div');
+            linkPreviewPopover.className = 'pdf-link-preview-popover';
+            linkPreviewPopover.hidden = true;
+            linkPreviewCanvas = document.createElement('canvas');
+            linkPreviewPopover.appendChild(linkPreviewCanvas);
+            linkPreviewPopover.addEventListener('mouseenter', () => {
+                clearTimeout(linkPreviewHideTimer);
+            });
+            linkPreviewPopover.addEventListener('mouseleave', () => {
+                scheduleHideLinkPreview();
+            });
+            linkPreviewPopover.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const current = activePreviewAnchor;
+                hideLinkPreview(true);
+                if (current) navigateToDestination(current.dest, current.sourceInfo);
+            });
+            document.body.appendChild(linkPreviewPopover);
+            return linkPreviewPopover;
+        }
+
+        function hideLinkPreview(immediate = false) {
+            clearTimeout(linkPreviewShowTimer);
+            clearTimeout(linkPreviewHideTimer);
+            linkPreviewRenderToken++;
+            activePreviewAnchor = null;
+            if (!linkPreviewPopover) return;
+            linkPreviewPopover.classList.remove('is-visible');
+            if (immediate) {
+                linkPreviewPopover.hidden = true;
+            } else {
+                linkPreviewHideTimer = setTimeout(() => {
+                    if (linkPreviewPopover && !linkPreviewPopover.classList.contains('is-visible')) {
+                        linkPreviewPopover.hidden = true;
+                    }
+                }, 120);
+            }
+        }
+
+        function scheduleHideLinkPreview() {
+            clearTimeout(linkPreviewShowTimer);
+            clearTimeout(linkPreviewHideTimer);
+            linkPreviewHideTimer = setTimeout(() => hideLinkPreview(false), LINK_PREVIEW_HIDE_DELAY);
+        }
+
+        function positionLinkPreviewPopover(anchorEl, displayW, displayH) {
+            if (!linkPreviewPopover || !anchorEl || !anchorEl.isConnected) return;
+            const rect = anchorEl.getBoundingClientRect();
+            const boxW = Math.min(displayW + 14, window.innerWidth - 24);
+            const boxH = Math.min(displayH + 14, window.innerHeight - 32);
+
+            let left = rect.left + rect.width / 2 - boxW / 2;
+            left = Math.max(12, Math.min(left, window.innerWidth - boxW - 12));
+
+            const gap = 8;
+            const spaceAbove = rect.top - 12;
+            const spaceBelow = window.innerHeight - rect.bottom - 12;
+            let top;
+            if (spaceAbove >= boxH + gap || spaceAbove >= spaceBelow) {
+                top = Math.max(12, rect.top - boxH - gap);
+            } else {
+                top = Math.min(window.innerHeight - boxH - 12, rect.bottom + gap);
+            }
+
+            linkPreviewPopover.style.left = Math.round(left) + 'px';
+            linkPreviewPopover.style.top = Math.round(top) + 'px';
+        }
+
+        async function showLinkPreviewForAnchor(anchorEl, dest, sourceInfo) {
+            const pdfDoc = state.pdfDoc;
+            const loadToken = state.loadToken;
+            if (!pdfDoc || !anchorEl || !anchorEl.isConnected) return;
+            const token = ++linkPreviewRenderToken;
+            const isStale = () => token !== linkPreviewRenderToken || state.pdfDoc !== pdfDoc || state.loadToken !== loadToken || !anchorEl.isConnected;
+
+            try {
+                const details = await resolvePdfDestinationDetails(pdfDoc, dest, sourceInfo);
+                if (!details || isStale()) return;
+                const crop = await computeDestinationCropBox(pdfDoc, details);
+                if (!crop || isStale()) return;
+
+                const { pageNum, page, baseViewport } = details;
+                const { cropX, cropY, cropW, cropH } = crop;
+
+                const maxDisplayW = Math.min(840, window.innerWidth - 36);
+                const maxDisplayH = Math.min(372, window.innerHeight - 44);
+                let displayScale = Math.min(2.1, Math.max(1.72, (state.scale || 1.25) * 1.425));
+                if (cropW * displayScale > maxDisplayW) displayScale = maxDisplayW / cropW;
+                if (cropH * displayScale > maxDisplayH) displayScale = Math.min(displayScale, maxDisplayH / cropH);
+
+                const displayW = Math.max(180, Math.round(cropW * displayScale));
+                const displayH = Math.max(48, Math.round(cropH * displayScale));
+                const dpr = Math.max(window.devicePixelRatio || 1, 2);
+
+                const popover = ensureLinkPreviewPopover();
+                const canvas = linkPreviewCanvas;
+                canvas.width = Math.round(displayW * dpr);
+                canvas.height = Math.round(displayH * dpr);
+                canvas.style.width = displayW + 'px';
+                canvas.style.height = displayH + 'px';
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // 优先从当前已渲染的页面高清 Canvas 直接抠图，零延迟响应
+                const liveCanvas = document.getElementById(`canvas-${pageNum}`) ||
+                    (typeof cachedPdfPages !== 'undefined' && cachedPdfPages.get(pageNum)?.wrapper?.querySelector('canvas'));
+                const renderedScale = typeof renderedPageScales !== 'undefined' ? renderedPageScales.get(pageNum) : 0;
+
+                if (liveCanvas && liveCanvas.width > 0 && liveCanvas.height > 0 && renderedScale >= 0.85) {
+                    const sxRatio = liveCanvas.width / baseViewport.width;
+                    const syRatio = liveCanvas.height / baseViewport.height;
+                    ctx.drawImage(
+                        liveCanvas,
+                        cropX * sxRatio,
+                        cropY * syRatio,
+                        cropW * sxRatio,
+                        cropH * syRatio,
+                        0,
+                        0,
+                        canvas.width,
+                        canvas.height
+                    );
+                } else {
+                    const viewport = page.getViewport({ scale: displayScale });
+                    const renderTask = page.render({
+                        canvasContext: ctx,
+                        viewport,
+                        transform: [dpr, 0, 0, dpr, -cropX * displayScale * dpr, -cropY * displayScale * dpr]
+                    });
+                    await renderTask.promise;
+                    if (isStale()) return;
+                }
+
+                activePreviewAnchor = { anchorEl, dest, sourceInfo };
+                popover.hidden = false;
+                positionLinkPreviewPopover(anchorEl, displayW, displayH);
+                requestAnimationFrame(() => {
+                    if (!isStale() && linkPreviewPopover) {
+                        linkPreviewPopover.classList.add('is-visible');
+                    }
+                });
+            } catch (error) {
+                if (!isStale()) console.warn('PDF 链接悬浮预览失败:', error);
+            }
+        }
+
+        function bindInternalLinkPreview(element, dest, sourceInfo) {
+            element.addEventListener('mouseenter', () => {
+                clearTimeout(linkPreviewHideTimer);
+                clearTimeout(linkPreviewShowTimer);
+                linkPreviewShowTimer = setTimeout(() => {
+                    showLinkPreviewForAnchor(element, dest, sourceInfo);
+                }, LINK_PREVIEW_SHOW_DELAY);
+            });
+            element.addEventListener('mouseleave', () => {
+                scheduleHideLinkPreview();
+            });
+        }
+
+        els.container?.addEventListener('scroll', () => {
+            if (linkPreviewPopover && !linkPreviewPopover.hidden) hideLinkPreview(true);
+        }, { passive: true });
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && linkPreviewPopover && !linkPreviewPopover.hidden) hideLinkPreview(true);
+        });
+
+        async function navigateToDestination(dest, sourceInfo = null) {
             const pdfDoc = state.pdfDoc;
             const loadToken = state.loadToken;
             if (!pdfDoc) return;
@@ -12,6 +457,16 @@
 
                 recordJumpPosition();
                 scrollPdfPageIntoView(pageNum);
+                const details = await resolvePdfDestinationDetails(pdfDoc, dest, sourceInfo);
+                if (details && details.isExactY && Number.isFinite(details.vy) && !isStale()) {
+                    const pageTop = pdfPageTop(pageNum);
+                    const pageHeight = (state.pageDimensions[pageNum - 1]?.height || details.baseViewport.height) * state.scale;
+                    const pageStartScroll = els.pagesContainer.offsetTop + pageTop;
+                    const pageEndScroll = pageStartScroll + Math.max(0, pageHeight - els.container.clientHeight + 36);
+                    const targetY = pageStartScroll + details.vy * state.scale;
+                    els.container.scrollTop = Math.max(pageStartScroll, Math.min(pageEndScroll, targetY - els.container.clientHeight * 0.35));
+                    refreshPdfRenderWindow(true);
+                }
             } catch (error) {
                 if (!isStale()) console.warn('PDF 内部跳转失败:', error);
             }

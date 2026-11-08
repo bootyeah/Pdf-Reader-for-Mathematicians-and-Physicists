@@ -63,7 +63,7 @@ function releasePage(pageNum, allowCache = true) {
     clearPageTimer(pageNum);
     detachPdfPage(pageNum, allowCache);
 }
-function resetPdfRendering() {
+function resetPdfRendering() { if (typeof hideLinkPreview === 'function') hideLinkPreview(true);
     renderGeneration++;
     clearTimeout(zoomRenderTimer);
     clearTimeout(state.zoomEndTimer);
@@ -148,7 +148,7 @@ function refreshPdfRenderWindow(reclaim = false) {
     }
     refreshDetachedArrows();
 }
-function beginPdfZoom() {
+function beginPdfZoom() { if (typeof hideLinkPreview === 'function') hideLinkPreview(true);
     renderGeneration++;
     zoomRenderNotBefore = performance.now() + 100;
     for (const pageNum of [...renderTimers.keys()]) clearPageTimer(pageNum);
@@ -286,8 +286,8 @@ async function renderNativeLinks(page, pageNum, viewport, isCurrent) {
         element.style.height = Math.abs(viewRect[1] - viewRect[3]) + 'px';
         if (url) { element.href = url; element.target = '_blank'; element.title = `打开链接: ${url}`; }
         else if (dest) {
-            element.href = '#'; element.title = '跳转到内部页面';
-            element.onclick = e => { e.preventDefault(); navigateToDestination(dest); };
+            element.href = '#'; const sourceInfo = { pageNum, rect }; if (typeof bindInternalLinkPreview === 'function') bindInternalLinkPreview(element, dest, sourceInfo);
+            element.onclick = e => { e.preventDefault(); if (typeof hideLinkPreview === 'function') hideLinkPreview(true); navigateToDestination(dest, sourceInfo); };
         }
         fragment.appendChild(element);
     }
