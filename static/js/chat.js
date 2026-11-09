@@ -84,9 +84,13 @@
     let thinking = false;
     let apiRevision = '';
     let apiRefresh = null;
-    let modelThinking = {};        // 模型 → 'enabled' | 'disabled' | 'omit'（来自 /api/ai-config）
+    let modelThinking = {};        // 模型 → 'enabled' | 'disabled' | 'low' | 'medium' | 'high' | 'omit'（来自 /api/ai-config）
 
-    // 当前模型不接受思考参数（如 Gemini）时：按钮置灰、不发送，但保留用户对其他模型的开关偏好
+    function isThinkingModeEnabled(mode) {
+        return mode === 'enabled' || mode === 'low' || mode === 'medium' || mode === 'high';
+    }
+
+    // 当前模型设置为 omit 时：按钮置灰、不发送，但保留用户对其他模型的开关偏好
     function thinkingAllowed() {
         return modelThinking[model] !== 'omit';
     }
@@ -123,7 +127,7 @@
             buildModelMenu();
             apiRevision = cfg.revision;
             setModel(changed ? cfg.model : model);
-            if (changed) setThinking(cfg.thinking === 'enabled');
+            if (changed) setThinking(isThinkingModeEnabled(modelThinking[model] || cfg.thinking));
             syncThinkingAvailability();
         })().finally(function () { apiRefresh = null; });
         return apiRefresh;
@@ -766,6 +770,7 @@
     }
 
     function setModel(id) {
+        const prevModel = model;
         model = MODELS.some(function (m) { return m.id === id; }) ? id : MODELS[0].id;
         const m = MODELS.filter(function (x) { return x.id === model; })[0];
         if (modelLabel) modelLabel.textContent = m.label;
@@ -773,14 +778,21 @@
         modelMenu.querySelectorAll('.ds-chat-model-opt').forEach(function (btn) {
             btn.classList.toggle('active', btn.dataset.model === model);
         });
+        if (model !== prevModel && modelThinking[model] !== undefined) {
+            thinking = isThinkingModeEnabled(modelThinking[model]);
+        }
         saveState();
         syncThinkingAvailability();
     }
 
     function setThinking(on) {
         thinking = !!on;
+        const mode = modelThinking[model];
+        const levelHint = (mode === 'low' || mode === 'medium' || mode === 'high') ? ' · ' + mode.toUpperCase() : '';
         thinkingBtn.classList.toggle('active', thinking);
-        thinkingBtn.title = thinking ? '思考模式：开（回答更周密，首字更慢）' : '思考模式：关（默认，响应更快）';
+        thinkingBtn.title = thinking
+            ? '思考模式：开' + levelHint + '（回答更周密，首字更慢）'
+            : '思考模式：关（默认，响应更快）';
         saveState();
     }
 

@@ -281,7 +281,9 @@ function renderEditor() {
     // 备用模型提示微调
     $('fallback-hint').textContent = selected.startsWith('formula_')
         ? '主模型限流或拥堵时自动尝试备用模型（如智谱 1305 拥堵报错时降级重试）。'
-        : '主模型不可用时尝试备用模型；鉴权失败（401）不重试。';
+        : selected === 'chat_gemini'
+            ? '主模型（如 gemini-4-argon）不可用或限流时自动降级至备用模型（如 gemini-3.8-flash）；鉴权失败（401）不重试。'
+            : '主模型不可用时尝试备用模型；鉴权失败（401）不重试。';
 
     $('remote-models').replaceChildren();
     syncConnection();

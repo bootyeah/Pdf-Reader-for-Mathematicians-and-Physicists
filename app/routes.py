@@ -290,7 +290,7 @@ def handle_chat(handler):
 
     cfg, model = _chat_config_for(handler, req_data.get('model'))
     handler._active_chat_config = cfg
-    thinking = bool(req_data.get('thinking', cfg['thinking'] == 'enabled'))
+    thinking = bool(req_data.get('thinking', cfg['thinking'] in api_settings.THINKING_ACTIVE_MODES))
     try:
         temperature = float(req_data.get('temperature', cfg['temperature']))
         if not math.isfinite(temperature):

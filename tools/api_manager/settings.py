@@ -34,11 +34,14 @@ COMMON = dict(base_url='', api_key='', key_source='', model='', fallback_model='
               thinking='disabled', proxy='', prompt='', web_search=False)
 _LOCK = threading.RLock()
 
+THINKING_MODES = ('disabled', 'enabled', 'low', 'medium', 'high', 'omit')
+THINKING_ACTIVE_MODES = ('enabled', 'low', 'medium', 'high')
+
 # Google AI Studio 的 OpenAI 兼容端点；Key 走 Authorization: Bearer，与 DeepSeek 调用方式一致。
-# 思考参数默认不发送（DeepSeek 的 thinking 字段不属于 Gemini 协议）；代理默认跟随系统代理。
+# 针对 Gemini 深度推理模型适配优化：温度默认 1.0，超时 180s，思考模式默认 high（映射为 reasoning_effort），代理默认跟随系统代理。
 GEMINI_CHAT_DEFAULT = dict(COMMON, base_url='https://generativelanguage.googleapis.com/v1beta/openai',
-                           model='gemini-3.8-flash', fallback_model='gemini-3.5-flash',
-                           temperature=0.7, timeout=120, thinking='omit', proxy='system')
+                           model='gemini-4-argon', fallback_model='gemini-3.8-flash',
+                           temperature=1.0, timeout=180, thinking='high', proxy='system')
 # 后来新增的功能：旧 settings.json 里没有时按默认值补齐，避免整份配置因缺项被判为损坏。
 ADDED_FEATURES = {'chat_gemini': GEMINI_CHAT_DEFAULT}
 
@@ -64,6 +67,18 @@ def upgrade(doc):
     if isinstance(features, dict):
         for fid, default in ADDED_FEATURES.items():
             features.setdefault(fid, copy.deepcopy(default))
+        gemini = features.get('chat_gemini')
+        if (isinstance(gemini, dict)
+                and gemini.get('model') == 'gemini-3.8-flash'
+                and gemini.get('fallback_model') == 'gemini-3.5-flash'
+                and gemini.get('thinking') == 'omit'):
+            gemini.update(
+                model=GEMINI_CHAT_DEFAULT['model'],
+                fallback_model=GEMINI_CHAT_DEFAULT['fallback_model'],
+                temperature=GEMINI_CHAT_DEFAULT['temperature'],
+                timeout=GEMINI_CHAT_DEFAULT['timeout'],
+                thinking=GEMINI_CHAT_DEFAULT['thinking'],
+            )
     return doc
 
 
@@ -185,7 +200,7 @@ def validate(doc):
             _url(cfg['proxy'], '代理地址', optional=True)
         if not cfg['model'].strip():
             raise ConfigError(FEATURES[fid][0] + '的模型名称不能为空。')
-        if cfg['thinking'] not in ('disabled', 'enabled', 'omit'):
+        if cfg['thinking'] not in THINKING_MODES:
             raise ConfigError('思考模式无效。')
         for field, low, high in [('temperature', 0, 2), ('timeout', 1, 600), ('max_tokens', 0, 1000000)]:
             value = cfg[field]
@@ -320,12 +335,29 @@ def restore(expected_revision):
         return save_document(previous, expected_revision)
 
 
-def apply_parameters(payload, cfg):
+def is_gemini_config(cfg, model=None):
+    base = str((cfg or {}).get('base_url') or '').lower()
+    target = str(model or (cfg or {}).get('model') or '').lower()
+    return 'generativelanguage.googleapis.com' in base or target.startswith('gemini')
+
+
+def apply_parameters(payload, cfg, enable_thinking=None, model=None):
     payload['temperature'] = cfg.get('temperature', payload.get('temperature', 0.2))
     thinking = cfg.get('thinking', 'disabled')
     payload.pop('thinking', None)
+    payload.pop('reasoning_effort', None)
+    gemini = is_gemini_config(cfg, model=model or payload.get('model'))
     if thinking != 'omit':
-        payload['thinking'] = {'type': thinking}
+        active = (thinking in THINKING_ACTIVE_MODES) if enable_thinking is None else bool(enable_thinking)
+        if gemini or thinking in ('low', 'medium', 'high'):
+            if active:
+                payload['reasoning_effort'] = thinking if thinking in ('low', 'medium', 'high') else 'high'
+            elif thinking == 'disabled':
+                payload['reasoning_effort'] = 'none'
+            else:
+                payload['reasoning_effort'] = 'low'
+        else:
+            payload['thinking'] = {'type': 'enabled' if active else 'disabled'}
     if cfg.get('max_tokens', 0) > 0:
         payload['max_tokens'] = int(cfg['max_tokens'])
     return payload

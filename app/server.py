@@ -550,34 +550,47 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
     def _call_deepseek_stream(self, messages, model, stream,
                               enable_thinking=False, temperature=0.7, max_tokens=0):
         cfg = getattr(self, '_active_chat_config', None) or _api_config('chat')
-        body = {
-            'model': model or cfg['model'],
+        target_model = model or cfg['model']
+        body = api_settings.apply_parameters({
+            'model': target_model,
             'messages': messages,
             'stream': bool(stream),
             'temperature': temperature,
-        }
-        if cfg.get('thinking') != 'omit':
-            body['thinking'] = {'type': 'enabled' if enable_thinking else 'disabled'}
+        }, cfg, enable_thinking=enable_thinking, model=target_model)
+        body['temperature'] = temperature
         if max_tokens > 0:
             body['max_tokens'] = max_tokens
-        if cfg.get('web_search'):
+        else:
+            body.pop('max_tokens', None)
+        if cfg.get('web_search') and not api_settings.is_gemini_config(cfg, model=target_model):
             body['tools'] = [{'type': 'web_search'}]
 
         def request(payload):
             req = urllib.request.Request(
                 api_settings.completion_url(cfg['base_url']),
                 data=json.dumps(payload, ensure_ascii=False).encode('utf-8'),
-                headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg['api_key']},
+                headers={
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + cfg['api_key'],
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                },
                 method='POST')
             return api_settings.open_request(req, cfg)
         try:
             return request(body)
         except urllib.error.HTTPError as exc:
             fallback = cfg.get('fallback_model', '')
-            if exc.code not in (400, 404, 429, 503) or not fallback or fallback == body['model']:
+            if exc.code not in (400, 404, 429, 500, 502, 503, 504) or not fallback or fallback == body['model']:
                 raise
             exc.close()
-            return request(dict(body, model=fallback))
+            retry_body = api_settings.apply_parameters(
+                dict(body, model=fallback), cfg, enable_thinking=enable_thinking, model=fallback)
+            retry_body['temperature'] = temperature
+            if max_tokens > 0:
+                retry_body['max_tokens'] = max_tokens
+            else:
+                retry_body.pop('max_tokens', None)
+            return request(retry_body)
 
     def _chat_stream(self, messages, model, enable_thinking, temperature, max_tokens):
         try:
@@ -625,8 +638,9 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
                 frame = {}
                 if delta.get('content'):
                     frame['delta'] = delta['content']
-                if delta.get('reasoning_content'):
-                    frame['reasoning'] = delta['reasoning_content']
+                reasoning = delta.get('reasoning_content') or delta.get('reasoning') or delta.get('thought')
+                if reasoning:
+                    frame['reasoning'] = reasoning
                 if frame:
                     self._sse(frame)
                 if chunk.get('usage'):
@@ -673,7 +687,7 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
         if not content.strip():
             return {'ok': False, 'error': '模型返回了空结果'}
         return {'ok': True, 'content': content,
-                'reasoning': message.get('reasoning_content') or '',
+                'reasoning': message.get('reasoning_content') or message.get('reasoning') or message.get('thought') or '',
                 'usage': payload.get('usage') or {}}
 
     def _safe_read(self, http_error):
