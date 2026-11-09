@@ -1215,11 +1215,10 @@
 
         function changeZoom(delta) { updateZoom(state.scale + delta); }
 
-        if (els.toggleToolbarBtn) {
-            els.toggleToolbarBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                state.toolbarCollapsed = !state.toolbarCollapsed;
-                document.body.classList.toggle('toolbar-collapsed', state.toolbarCollapsed);
+        function toggleToolbarCollapsed(force) {
+            state.toolbarCollapsed = typeof force === 'boolean' ? force : !state.toolbarCollapsed;
+            document.body.classList.toggle('toolbar-collapsed', state.toolbarCollapsed);
+            if (els.toggleToolbarBtn) {
                 const icon = els.toggleToolbarBtn.querySelector('i');
                 if (icon) {
                     icon.className = state.toolbarCollapsed ? 'ph ph-caret-down text-[14px]' : 'ph ph-caret-up text-[14px]';
@@ -1228,7 +1227,32 @@
                 els.toggleToolbarBtn.title = label;
                 els.toggleToolbarBtn.setAttribute('aria-label', label);
                 els.toggleToolbarBtn.setAttribute('aria-expanded', String(!state.toolbarCollapsed));
-                window.dispatchEvent(new Event('resize'));
+            }
+            window.dispatchEvent(new Event('resize'));
+        }
+
+        if (els.toggleToolbarBtn) {
+            els.toggleToolbarBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleToolbarCollapsed();
             });
         }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.defaultPrevented || e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.keyCode === 229) return;
+            if (e.code === 'Minus' || ((e.key === '-' || e.key === '_') && e.code !== 'NumpadSubtract')) {
+                const isEditable = (el) => Boolean(
+                    el && (
+                        el.tagName === 'INPUT' ||
+                        el.tagName === 'TEXTAREA' ||
+                        el.tagName === 'SELECT' ||
+                        el.isContentEditable ||
+                        el.closest?.('[contenteditable="true"]')
+                    )
+                );
+                if (isEditable(e.target) || isEditable(document.activeElement)) return;
+                e.preventDefault();
+                toggleToolbarCollapsed();
+            }
+        });
 

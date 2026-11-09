@@ -86,6 +86,7 @@ window.addEventListener('load', () => {
             window.MindMap.toggle(true);
             const firstCard = document.querySelector('#mindmap-tree-root .mm-card');
             assert(firstCard !== null, 'Mindmap card must exist');
+            const nodeId = firstCard.dataset.id;
             firstCard.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 160, clientY: 180 }));
 
             const ctxMenu = document.getElementById('mm-context-menu');
@@ -110,7 +111,7 @@ window.addEventListener('load', () => {
             window.MindMap.toggle(false);
 
             // =================================================================
-            // 2. Collapsible Top Toolbar: geometry, segment bars & actions
+            // 2. Collapsible Top Toolbar: geometry, segment bars, hover rules & actions
             // =================================================================
             const header = document.getElementById('main-toolbar');
             const toggleBtn = document.getElementById('toggle-toolbar-btn');
@@ -272,6 +273,29 @@ window.addEventListener('load', () => {
             void header.offsetHeight;
             assert(!document.body.classList.contains('toolbar-collapsed'), 'Body should remove toolbar-collapsed when expanded');
             assert(header.offsetHeight === 72, 'Restored header height must be 72px, got ' + header.offsetHeight);
+
+            // (d) Keyboard shortcut: '-_' (Minus key right of 0) toggles toolbar collapse/expand
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: '-', code: 'Minus', bubbles: true, cancelable: true }));
+            void header.offsetHeight;
+            assert(document.body.classList.contains('toolbar-collapsed') && header.offsetHeight === 12,
+                'Pressing Minus (-) key must collapse toolbar');
+
+            // Typing '-' inside an input must NOT toggle toolbar
+            const searchInput = document.getElementById('search-input');
+            searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: '-', code: 'Minus', bubbles: true, cancelable: true }));
+            assert(document.body.classList.contains('toolbar-collapsed'),
+                'Typing Minus (-) inside an input must not toggle toolbar');
+
+            // Pressing Ctrl + '-' (zoom out) must NOT toggle toolbar
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: '-', code: 'Minus', ctrlKey: true, bubbles: true, cancelable: true }));
+            assert(document.body.classList.contains('toolbar-collapsed'),
+                'Pressing Ctrl + Minus must not toggle toolbar');
+
+            // Pressing Shift + Minus ('_') expands toolbar back
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: '_', code: 'Minus', shiftKey: true, bubbles: true, cancelable: true }));
+            void header.offsetHeight;
+            assert(!document.body.classList.contains('toolbar-collapsed') && header.offsetHeight === 72,
+                'Pressing Shift + Minus (_) key must expand toolbar back');
 
             document.title = 'TOOLBAR_AND_MINDMAP_OPT_OK';
         } catch (err) {
