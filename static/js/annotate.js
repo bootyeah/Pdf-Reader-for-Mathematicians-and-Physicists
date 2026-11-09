@@ -226,6 +226,8 @@
                 wrapper.querySelector('.annotation-layer').appendChild(svg);
                 state.drawingArrow.tempSvgLine = shape; 
                 state.drawingArrow.type = state.currentTool; 
+                state.drawingArrow.lastClientX = e.clientX;
+                state.drawingArrow.lastClientY = e.clientY;
             }
         });
 
@@ -233,6 +235,8 @@
             if (['arrow', 'brace', 'line', 'rect', 'implies', 'equivalence', 'highlight-block', 'free-parenthesis'].includes(state.currentTool) && state.drawingArrow.isDrawing) {
                 const rect = state.drawingArrow.pageWrapper.getBoundingClientRect();
                 if (state.drawingArrow.tempSvgLine) {
+                    state.drawingArrow.lastClientX = e.clientX;
+                    state.drawingArrow.lastClientY = e.clientY;
                     let currentX = e.clientX - rect.left;
                     let currentY = e.clientY - rect.top;
 
@@ -436,6 +440,11 @@
              }
         });
 
+        els.container.addEventListener('scroll', () => {
+            if (state.drawingArrow?.isDrawing && Number.isFinite(state.drawingArrow.lastClientX) && Number.isFinite(state.drawingArrow.lastClientY)) {
+                document.dispatchEvent(new MouseEvent('mousemove', { clientX: state.drawingArrow.lastClientX, clientY: state.drawingArrow.lastClientY }));
+            }
+        }, { passive: true });
         document.addEventListener('mouseup', (e) => {
             if (state.draggingBubble && state.draggingBubble.isPressed) {
                 if (state.draggingBubble.isDragging) {
@@ -561,6 +570,7 @@
                 }
                 
                 // 只有常规图形才会在这里结束生命周期
+                if (typeof queuePdfWindowRefresh === 'function') queuePdfWindowRefresh();
                 state.drawingArrow.isDrawing = false;
                 state.drawingArrow.pageWrapper = null;
                 state.drawingArrow.endX = undefined;

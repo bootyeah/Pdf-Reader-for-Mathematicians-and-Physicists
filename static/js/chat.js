@@ -58,6 +58,8 @@
     let modelBtn = null;
     let modelMenu = null;
     let modelLabel = null;
+    let fontOutBtn = null;
+    let fontInBtn = null;
     let thinkingBtn = null;
     let clearBtn = null;
     let closeBtn = null;
@@ -65,6 +67,11 @@
     let toolbarBtn = null;
 
     // ---------- 会话状态 ----------
+    const FONT_SCALE_MIN = 0.8;
+    const FONT_SCALE_MAX = 1.6;
+    const FONT_SCALE_STEP = 0.1;
+    let fontScale = 1;
+    const msgEntryMap = new WeakMap(); // wrap (.ds-msg) -> history entry {role, content}
     let history = [];              // [{role:'user'|'assistant', content:string|Array}]
     let attachments = [];          // 待发送图片 [{id, dataUrl, name}]
     let streaming = false;         // 正在生成
@@ -600,17 +607,38 @@
 
         const wrap = el.closest('.ds-msg-assistant');
         if (wrap && markdown) {
-            if (!wrap.querySelector('.ds-message-copy')) {
-                const copy = document.createElement('button');
-                copy.type = 'button';
-                copy.className = 'ds-message-copy';
-                copy.title = '复制选中的 Markdown / LaTeX；未框选时复制完整回答（含 TikZ 源码）';
-                copy.setAttribute('aria-live', 'polite');
-                copy.innerHTML = '<i class="ph ph-copy" aria-hidden="true"></i><span>复制 Markdown</span>';
-                // 放在气泡外：流式输出、TikZ 编译完成和历史恢复都不改动复制按钮。
-                wrap.appendChild(copy);
-            }
+            ensureAssistantActions(wrap);
         }
+    }
+
+    function ensureAssistantActions(wrap) {
+        if (!wrap || wrap.querySelector('.ds-message-copy')) return;
+        let actions = wrap.querySelector('.ds-msg-actions');
+        if (!actions) {
+            actions = document.createElement('div');
+            actions.className = 'ds-msg-actions';
+            wrap.appendChild(actions);
+        }
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'ds-message-copy';
+        copy.title = '复制选中的 Markdown / LaTeX；未框选时复制完整回答（含 TikZ 源码）';
+        copy.setAttribute('aria-live', 'polite');
+        copy.innerHTML = '<i class="ph ph-copy" aria-hidden="true"></i><span>复制 Markdown</span>';
+        const edit = document.createElement('button');
+        edit.type = 'button';
+        edit.className = 'ds-msg-action ds-msg-edit';
+        edit.title = '修改此条 AI 回答内容';
+        edit.innerHTML = '<i class="ph ph-pencil-simple" aria-hidden="true"></i><span>修改</span>';
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'ds-msg-action ds-msg-delete';
+        del.title = '从当前对话上下文中删除此条回答';
+        del.innerHTML = '<i class="ph ph-trash" aria-hidden="true"></i><span>删除</span>';
+        // 放在气泡外：流式输出、TikZ 编译完成和历史恢复都不改动操作按钮。
+        actions.appendChild(copy);
+        actions.appendChild(edit);
+        actions.appendChild(del);
     }
 
     // 某张图编译完（成功或失败）后回调：只重画「还挂着占位符」的那几条消息，
@@ -656,6 +684,10 @@
                     '<div class="ds-chat-model-menu" id="ds-chat-model-menu"></div>' +
                 '</div>' +
                 '<div class="ds-chat-spacer"></div>' +
+                '<div class="ds-chat-font-group" title="调节对话排版字号">' +
+                    '<button type="button" class="ds-chat-hbtn ds-chat-font-btn" id="ds-chat-font-out-btn" title="缩小字体" aria-label="缩小字体">A-</button>' +
+                    '<button type="button" class="ds-chat-hbtn ds-chat-font-btn" id="ds-chat-font-in-btn" title="放大字体" aria-label="放大字体">A+</button>' +
+                '</div>' +
                 '<button type="button" class="ds-chat-hbtn" id="ds-chat-thinking-btn" title="思考模式（更周密，但更慢）">' +
                     '<i class="ph ph-brain"></i>' +
                 '</button>' +
@@ -690,12 +722,15 @@
         modelBtn = panel.querySelector('#ds-chat-model-btn');
         modelMenu = panel.querySelector('#ds-chat-model-menu');
         modelLabel = panel.querySelector('#ds-chat-model-label');
+        fontOutBtn = panel.querySelector('#ds-chat-font-out-btn');
+        fontInBtn = panel.querySelector('#ds-chat-font-in-btn');
         thinkingBtn = panel.querySelector('#ds-chat-thinking-btn');
         clearBtn = panel.querySelector('#ds-chat-clear-btn');
         closeBtn = panel.querySelector('#ds-chat-close-btn');
         resizeHandle = panel.querySelector('#ds-chat-resize');
         toolbarBtn = document.getElementById('deepseek-chat-btn');
 
+        applyFontScale(fontScale);
         buildModelMenu();
         bindEvents();
         panel.style.display = 'none';
@@ -749,6 +784,28 @@
         saveState();
     }
 
+    function applyFontScale(scale) {
+        const num = Number(scale);
+        fontScale = Number.isFinite(num)
+            ? Math.round(Math.min(FONT_SCALE_MAX, Math.max(FONT_SCALE_MIN, num)) * 100) / 100
+            : 1;
+        if (panel) panel.style.setProperty('--ds-font-scale', String(fontScale));
+        const pct = Math.round(fontScale * 100) + '%';
+        if (fontOutBtn) {
+            fontOutBtn.disabled = fontScale <= FONT_SCALE_MIN + 0.001;
+            fontOutBtn.title = '缩小字体（当前 ' + pct + '）';
+        }
+        if (fontInBtn) {
+            fontInBtn.disabled = fontScale >= FONT_SCALE_MAX - 0.001;
+            fontInBtn.title = '放大字体（当前 ' + pct + '）';
+        }
+    }
+
+    function setFontScale(scale) {
+        applyFontScale(scale);
+        saveState();
+    }
+
     // =========================================================================
     // 三、渲染会话
     // =========================================================================
@@ -773,8 +830,7 @@
         return { wrap: wrap, bubble: bubble };
     }
 
-    function userMessageEl(text, images) {
-        const el = messageEl('user');
+    function renderUserBubble(bubble, text, images) {
         let html = '';
         (images || []).forEach(function (src) {
             html += '<img class="ds-chat-img" src="' + src + '" alt="图片">';
@@ -783,8 +839,193 @@
             // 用户原文按纯文本显示（保留换行），不做 Markdown 解析
             html += '<div class="ds-user-text">' + escapeHtml(text).replace(/\n/g, '<br>') + '</div>';
         }
-        el.bubble.innerHTML = html;
+        bubble.innerHTML = html;
+    }
+
+    function userMessageEl(text, images) {
+        const el = messageEl('user');
+        renderUserBubble(el.bubble, text, images);
+        const actions = document.createElement('div');
+        actions.className = 'ds-msg-actions';
+        actions.innerHTML =
+            '<button type="button" class="ds-msg-action ds-msg-edit" title="修改此条提问">' +
+                '<i class="ph ph-pencil-simple" aria-hidden="true"></i><span>修改</span>' +
+            '</button>' +
+            '<button type="button" class="ds-msg-action ds-msg-resend" title="以此处修改后的上下文重新向 AI 发送">' +
+                '<i class="ph ph-arrows-clockwise" aria-hidden="true"></i><span>重发</span>' +
+            '</button>' +
+            '<button type="button" class="ds-msg-action ds-msg-delete" title="从当前对话上下文中删除此条提问">' +
+                '<i class="ph ph-trash" aria-hidden="true"></i><span>删除</span>' +
+            '</button>';
+        el.wrap.appendChild(actions);
         return el;
+    }
+
+    function getEntryText(entry) {
+        if (!entry) return '';
+        if (typeof entry.content === 'string') return entry.content;
+        if (Array.isArray(entry.content)) {
+            const part = entry.content.find(function (p) { return p && p.type === 'text'; });
+            return part ? (part.text || '') : '';
+        }
+        return '';
+    }
+
+    function getEntryImages(entry) {
+        if (!entry || !Array.isArray(entry.content)) return [];
+        return entry.content
+            .filter(function (p) { return p && p.type === 'image_url' && p.image_url && p.image_url.url; })
+            .map(function (p) { return p.image_url.url; });
+    }
+
+    function setEntryText(entry, newText) {
+        if (!entry) return;
+        if (entry.role === 'user') {
+            entry.content = buildUserContent(newText, getEntryImages(entry));
+        } else {
+            entry.content = newText;
+        }
+    }
+
+    function closeMsgEditor(wrap) {
+        if (!wrap) return;
+        const box = wrap.querySelector('.ds-edit-box');
+        if (box) box.remove();
+        wrap.classList.remove('is-editing');
+    }
+
+    function openMsgEditor(wrap) {
+        if (!wrap) return;
+        if (streaming) {
+            flashHint('正在生成回答，请先停止后再修改对话历史');
+            return;
+        }
+        const entry = msgEntryMap.get(wrap);
+        if (!entry) return;
+        if (wrap.classList.contains('is-editing')) {
+            const existing = wrap.querySelector('.ds-edit-input');
+            if (existing) existing.focus();
+            return;
+        }
+        wrap.classList.add('is-editing');
+        const isUser = entry.role === 'user';
+        const box = document.createElement('div');
+        box.className = 'ds-edit-box';
+        box.innerHTML =
+            '<textarea class="ds-edit-input" rows="2"></textarea>' +
+            '<div class="ds-edit-toolbar">' +
+                '<button type="button" class="ds-edit-btn ds-edit-cancel">取消</button>' +
+                '<button type="button" class="ds-edit-btn ' + (isUser ? '' : 'ds-edit-primary ') + 'ds-edit-save" title="仅保存修改到上下文，不清空后续记录">保存修改</button>' +
+                (isUser ? '<button type="button" class="ds-edit-btn ds-edit-primary ds-edit-resend" title="保存修改并截断后续消息，立即重新发送给 AI">保存并重发</button>' : '') +
+            '</div>';
+        const bubble = wrap.querySelector('.ds-bubble');
+        wrap.insertBefore(box, bubble ? bubble.nextSibling : null);
+
+        const ta = box.querySelector('.ds-edit-input');
+        ta.value = getEntryText(entry);
+        function syncEditHeight() {
+            ta.style.height = 'auto';
+            ta.style.height = Math.min(220, Math.max(52, ta.scrollHeight)) + 'px';
+        }
+        ta.addEventListener('input', syncEditHeight);
+        ta.addEventListener('keydown', function (e) {
+            e.stopPropagation();
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                closeMsgEditor(wrap);
+                return;
+            }
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                saveMsgEdit(wrap, false);
+            }
+        });
+        syncEditHeight();
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+    }
+
+    function truncateAfterWrap(wrap) {
+        const entry = msgEntryMap.get(wrap);
+        if (entry) {
+            const idx = history.indexOf(entry);
+            if (idx !== -1) history.splice(idx + 1);
+        }
+        let next = wrap.nextElementSibling;
+        while (next) {
+            const toRemove = next;
+            next = next.nextElementSibling;
+            const c = toRemove.querySelector && toRemove.querySelector('.ds-content');
+            if (c) paintedMessages.delete(c);
+            toRemove.remove();
+        }
+    }
+
+    function saveMsgEdit(wrap, andResend) {
+        if (!wrap) return;
+        if (streaming) {
+            flashHint('正在生成回答，请先停止');
+            return;
+        }
+        const entry = msgEntryMap.get(wrap);
+        const ta = wrap.querySelector('.ds-edit-input');
+        if (!entry || !ta) return;
+        const newText = ta.value.trim();
+        const imgs = getEntryImages(entry);
+        if (!newText && !imgs.length) {
+            flashHint('内容不能为空，如需移除请点删除');
+            return;
+        }
+        setEntryText(entry, newText);
+        if (entry.role === 'user') {
+            const bubble = wrap.querySelector('.ds-bubble');
+            if (bubble) renderUserBubble(bubble, newText, imgs);
+        } else {
+            const contentEl = wrap.querySelector('.ds-content');
+            if (contentEl) paintMessageBody(contentEl, newText, {});
+        }
+        closeMsgEditor(wrap);
+        if (andResend && entry.role === 'user') {
+            truncateAfterWrap(wrap);
+            saveState();
+            requestAssistantReply(function () { resendFromUserMsg(wrap); });
+        } else {
+            saveState();
+        }
+    }
+
+    function resendFromUserMsg(wrap) {
+        if (!wrap) return;
+        if (streaming) {
+            flashHint('正在生成回答，请先停止');
+            return;
+        }
+        closeMsgEditor(wrap);
+        truncateAfterWrap(wrap);
+        saveState();
+        requestAssistantReply(function () { resendFromUserMsg(wrap); });
+    }
+
+    function deleteMsg(wrap) {
+        if (!wrap) return;
+        if (streaming) {
+            flashHint('正在生成回答，请先停止后再删除消息');
+            return;
+        }
+        const entry = msgEntryMap.get(wrap);
+        if (entry) {
+            const idx = history.indexOf(entry);
+            if (idx !== -1) history.splice(idx, 1);
+        }
+        const contentEl = wrap.querySelector('.ds-content');
+        if (contentEl) paintedMessages.delete(contentEl);
+        wrap.remove();
+        if (!history.length || !bodyEl.querySelector('.ds-msg')) {
+            history = [];
+            clearBody();
+            showWelcome();
+        }
+        saveState();
     }
 
     function scrollToBottom(force) {
@@ -880,9 +1121,10 @@
                 model: model,
                 apiRevision: apiRevision,
                 thinking: thinking,
+                fontScale: fontScale,
                 // 只存纯文本历史（图片 data URL 体积太大，绝不写进 localStorage）
                 history: history.slice(-MAX_HISTORY).map(function (m) {
-                    return { role: m.role, content: typeof m.content === 'string' ? m.content : '' };
+                    return { role: m.role, content: getEntryText(m) };
                 }).filter(function (m) { return m.content; })
             };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -904,6 +1146,7 @@
             panel.style.left = Math.min(Math.max(4, parseInt(data.left, 10) || 0), maxLeft) + 'px';
             panel.style.top = Math.min(Math.max(headerH, parseInt(data.top, 10) || headerH), maxTop) + 'px';
         }
+        if (data.fontScale) applyFontScale(data.fontScale);
         apiRevision = data.apiRevision || '';
         if (data.model && !MODELS.some(function (m) { return m.id === data.model; })) {
             MODELS.push({id: data.model, label: data.model, hint: '已保存的选择'});
@@ -915,10 +1158,14 @@
         if (Array.isArray(data.history) && data.history.length) {
             clearBody();
             data.history.forEach(function (m) {
-                history.push({ role: m.role, content: m.content });
-                if (m.role === 'user') userMessageEl(m.content, []);
-                else {
+                const entry = { role: m.role, content: m.content };
+                history.push(entry);
+                if (m.role === 'user') {
+                    const userEl = userMessageEl(m.content, []);
+                    msgEntryMap.set(userEl.wrap, entry);
+                } else {
                     const el = messageEl('assistant');
+                    msgEntryMap.set(el.wrap, entry);
                     const content = document.createElement('div');
                     content.className = 'ds-content';
                     el.bubble.appendChild(content);
@@ -946,6 +1193,14 @@
         thinkingBtn.addEventListener('click', function (e) {
             e.stopPropagation();
             setThinking(!thinking);
+        });
+        fontOutBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            setFontScale(fontScale - FONT_SCALE_STEP);
+        });
+        fontInBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            setFontScale(fontScale + FONT_SCALE_STEP);
         });
         modelBtn.addEventListener('click', function (e) {
             e.stopPropagation();
@@ -999,8 +1254,38 @@
             pickImageFile();
         });
 
-        // 回答 / 代码块复制、TikZ 源码开关、思考过程折叠（事件委托，消息是流式重建的）
+        // 回答 / 代码块复制、历史消息删改、TikZ 源码开关、思考过程折叠（事件委托，消息是流式重建的）
         bodyEl.addEventListener('click', function (e) {
+            const editBtn = e.target.closest && e.target.closest('.ds-msg-edit');
+            if (editBtn) {
+                openMsgEditor(editBtn.closest('.ds-msg'));
+                return;
+            }
+            const delBtn = e.target.closest && e.target.closest('.ds-msg-delete');
+            if (delBtn) {
+                deleteMsg(delBtn.closest('.ds-msg'));
+                return;
+            }
+            const resendBtn = e.target.closest && e.target.closest('.ds-msg-resend');
+            if (resendBtn) {
+                resendFromUserMsg(resendBtn.closest('.ds-msg'));
+                return;
+            }
+            const editSave = e.target.closest && e.target.closest('.ds-edit-save');
+            if (editSave) {
+                saveMsgEdit(editSave.closest('.ds-msg'), false);
+                return;
+            }
+            const editResend = e.target.closest && e.target.closest('.ds-edit-resend');
+            if (editResend) {
+                saveMsgEdit(editResend.closest('.ds-msg'), true);
+                return;
+            }
+            const editCancel = e.target.closest && e.target.closest('.ds-edit-cancel');
+            if (editCancel) {
+                closeMsgEditor(editCancel.closest('.ds-msg'));
+                return;
+            }
             const messageCopy = e.target.closest && e.target.closest('.ds-message-copy');
             if (messageCopy) {
                 const wrap = messageCopy.closest('.ds-msg-assistant');
@@ -1039,7 +1324,7 @@
         // 只在对话区放行原生右键菜单；PDF 区域继续使用阅读器原来的行为。
         panel.addEventListener('contextmenu', function (e) { e.stopPropagation(); });
         bodyEl.addEventListener('mousedown', function (e) {
-            if (e.target.closest('.ds-message-copy')) { e.preventDefault(); return; }
+            if (e.target.closest('.ds-message-copy, .ds-msg-action, .ds-edit-btn')) { e.preventDefault(); return; }
             if (e.button === 0) selectingBody = e.target.closest('.ds-content');
         });
         document.addEventListener('mouseup', function () {
@@ -1197,7 +1482,7 @@
                 }
                 return source ? fence(source.textContent, 'tikz') : '';
             }
-            if (node.matches('button, [hidden], .ds-code-head, .ds-chat-note, .ds-tikz-bar')) return '';
+            if (node.matches('button, [hidden], .ds-code-head, .ds-chat-note, .ds-tikz-bar, .ds-msg-actions, .ds-edit-box')) return '';
             if (node.matches('.ds-code-block')) {
                 const pre = node.querySelector('pre');
                 const lang = node.querySelector('.ds-code-lang');
@@ -1459,8 +1744,23 @@
         const userEl = userMessageEl(text, imageUrls);
         const userContent = buildUserContent(text, imageUrls);
         const userEntry = { role: 'user', content: userContent };
+        msgEntryMap.set(userEl.wrap, userEntry);
         history.push(userEntry);
         while (history.length > MAX_HISTORY + 1) history.shift();
+
+        const retryTurn = (text || (images && images.length)) ? function () {
+            if (userEl.wrap.isConnected) userEl.wrap.remove();
+            const idx = history.lastIndexOf(userEntry);
+            if (idx !== -1) history.splice(idx, 1);
+            send(text, images);
+        } : null;
+
+        return requestAssistantReply(retryTurn);
+    }
+
+    async function requestAssistantReply(retryTurn) {
+        ensureDom();
+        if (!panelVisible) showPanel();
 
         // 2. 建立助手气泡并进入流式状态
         const el = startAssistantMessage(thinking ? '正在深度思考…' : '正在思考…');
@@ -1512,20 +1812,17 @@
             } else {
                 failed = true;
                 const msg = (err && err.message) || String(err);
-                const retryTurn = (text || (images && images.length)) ? function () {
+                const retryFn = retryTurn ? function () {
                     if (el.wrap.isConnected) el.wrap.remove();
-                    if (userEl.wrap.isConnected) userEl.wrap.remove();
-                    const idx = history.lastIndexOf(userEntry);
-                    if (idx !== -1) history.splice(idx, 1);
-                    send(text, images);
+                    retryTurn();
                 } : null;
                 if (state.text) {
                     settled = true;
                     paintMessageBody(state.bodyEl, state.text, {});
-                    renderError(msg, retryTurn);
+                    renderError(msg, retryFn);
                 } else {
                     el.wrap.remove();
-                    renderError(msg, retryTurn);
+                    renderError(msg, retryFn);
                 }
             }
         } finally {
@@ -1535,7 +1832,9 @@
             // 流式结束按「最终态」再画一次：半途截断的 TikZ 会从占位符换成可折叠的源码块
             if (state.text && !settled) paintMessageBody(state.bodyEl, state.text, {});
             if (!failed && state.text) {
-                history.push({ role: 'assistant', content: state.text });
+                const assistantEntry = { role: 'assistant', content: state.text };
+                msgEntryMap.set(el.wrap, assistantEntry);
+                history.push(assistantEntry);
                 saveState();
             } else if (!failed && !state.text && el.wrap.isConnected) {
                 el.wrap.remove();      // 空回答不留空气泡

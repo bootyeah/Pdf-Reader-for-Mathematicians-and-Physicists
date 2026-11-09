@@ -1170,13 +1170,14 @@
                         const th = anno.thickness * h;
                         const lx = anno.localX * w;
                         if (!(th > 0) || !(lx > 0)) {
-                            ax = anno.end.x; ay = anno.end.y; // 兜底：旧数据缺字段时退回终点
+                            ax = arrow ? arrow.end.x / w : anno.end.x; ay = arrow ? arrow.end.y / h : anno.end.y; // 兜底：旧数据缺字段时退回终点
                         } else {
                             const yOff = (anno.lineOffset || 0) * th;
-                            const ang = Math.atan2(anno.end.y * h - anno.start.y * h, anno.end.x * w - anno.start.x * w);
+                            const sx = arrow ? arrow.start.x : anno.start.x * w, sy = arrow ? arrow.start.y : anno.start.y * h, ex = arrow ? arrow.end.x : anno.end.x * w, ey = arrow ? arrow.end.y : anno.end.y * h;
+                            const ang = Math.atan2(ey - sy, ex - sx);
                             const cosA = Math.cos(ang), sinA = Math.sin(ang);
-                            const absX = anno.start.x * w + lx * cosA - (yOff + th / 2) * sinA;
-                            const absY = anno.start.y * h + lx * sinA + (yOff + th / 2) * cosA;
+                            const absX = sx + lx * cosA - (yOff + th / 2) * sinA;
+                            const absY = sy + lx * sinA + (yOff + th / 2) * cosA;
                             ax = absX / w;
                             ay = absY / h;
                         }
@@ -1334,10 +1335,10 @@
                     }
                     else if (anno.type === 'highlight-block') {
                         const rect = document.createElementNS(svgNS, "rect");
-                        const x1 = anno.start.x * w;
-                        const y1 = anno.start.y * h;
-                        const x2 = anno.end.x * w;
-                        const y2 = anno.end.y * h;
+                        const x1 = arrow ? arrow.start.x : anno.start.x * w;
+                        const y1 = arrow ? arrow.start.y : anno.start.y * h;
+                        const x2 = arrow ? arrow.end.x : anno.end.x * w;
+                        const y2 = arrow ? arrow.end.y : anno.end.y * h;
                         
                         const dx = x2 - x1;
                         const dy = y2 - y1;
@@ -1372,10 +1373,10 @@
                         svg.appendChild(rect);
                     } else if (anno.type === 'free-parenthesis') {
                         const g = document.createElementNS(svgNS, "g");
-                        const startX = anno.start.x * w;
-                        const startY = anno.start.y * h;
-                        const endX = anno.end.x * w;
-                        const endY = anno.end.y * h;
+                        const startX = arrow ? arrow.start.x : anno.start.x * w;
+                        const startY = arrow ? arrow.start.y : anno.start.y * h;
+                        const endX = arrow ? arrow.end.x : anno.end.x * w;
+                        const endY = arrow ? arrow.end.y : anno.end.y * h;
                         
                         const angle = Math.atan2(endY - startY, endX - startX) * (180 / Math.PI);
                         const thickness = anno.thickness * h;
@@ -1443,8 +1444,8 @@
                         rightPath.addEventListener('click', (e) => { e.stopPropagation(); els.modalTitle.textContent = "括号"; openNoteModal(anno, pageNum, e.clientX, e.clientY); });
                         svg.appendChild(leftPath); svg.appendChild(rightPath);
                     } else if (anno.type === 'brace') {
-                        const x1 = anno.start.x * w, y1 = anno.start.y * h;
-                        const x2 = anno.end.x * w, y2 = anno.end.y * h;
+                        const { x: x1, y: y1 } = arrow ? arrow.start : { x: anno.start.x * w, y: anno.start.y * h };
+                        const { x: x2, y: y2 } = arrow ? arrow.end : { x: anno.end.x * w, y: anno.end.y * h };
                         const path = document.createElementNS(svgNS, "path");
                         path.setAttribute("d", getBracePath(x1, y1, x2, y2));
                         path.setAttribute("stroke", color); 
@@ -1456,8 +1457,8 @@
                         svg.appendChild(path);
                     } else if (anno.type === 'line') {
                         const line = document.createElementNS(svgNS, "line");
-                        line.setAttribute("x1", anno.start.x * w); line.setAttribute("y1", anno.start.y * h); 
-                        line.setAttribute("x2", anno.end.x * w); line.setAttribute("y2", anno.end.y * h); 
+                        line.setAttribute("x1", arrow ? arrow.start.x : anno.start.x * w); line.setAttribute("y1", arrow ? arrow.start.y : anno.start.y * h); 
+                        line.setAttribute("x2", arrow ? arrow.end.x : anno.end.x * w); line.setAttribute("y2", arrow ? arrow.end.y : anno.end.y * h); 
                         line.setAttribute("stroke", color); 
                         line.setAttribute("stroke-width", strokeWidth);
                         line.setAttribute("class", "vector-path");
@@ -1465,8 +1466,8 @@
                         line.addEventListener('click', (e) => { e.stopPropagation(); els.modalTitle.textContent = "直线"; openNoteModal(anno, pageNum, e.clientX, e.clientY); });
                         svg.appendChild(line);
                     } else if (anno.type === 'rect') {
-                        const x1 = anno.start.x * w, y1 = anno.start.y * h;
-                        const x2 = anno.end.x * w, y2 = anno.end.y * h;
+                        const { x: x1, y: y1 } = arrow ? arrow.start : { x: anno.start.x * w, y: anno.start.y * h };
+                        const { x: x2, y: y2 } = arrow ? arrow.end : { x: anno.end.x * w, y: anno.end.y * h };
                         const minX = Math.min(x1, x2), minY = Math.min(y1, y2);
                         const rw = Math.abs(x1 - x2), rh = Math.abs(y1 - y2);
 

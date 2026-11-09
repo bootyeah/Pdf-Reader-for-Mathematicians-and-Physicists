@@ -222,7 +222,7 @@
             /* 👇 修复：使用手术刀级裁剪！
                允许上方、下方、左方溢出 1000% (足够跨越十页不断裂)，
                但严格把右侧的溢出裁剪为 0 (完美隐藏未展开的草稿本) */
-            clip-path: inset(-1000% 0 -1000% -1000%);
+            clip-path: inset(var(--arrow-clip-top, -100000px) 0 var(--arrow-clip-bottom, -100000px) -100000px);
         }
 
         body.show-sidecars .annotation-layer {
@@ -1050,6 +1050,29 @@
         .ds-chat-hbtn-close:hover { background: #fee2e2; color: #dc2626; }
         .ds-chat-hbtn:disabled { opacity: 0.4; cursor: default; }
 
+        .ds-chat-font-group {
+            display: inline-flex;
+            align-items: center;
+            gap: 1px;
+            padding: 1px;
+            border: 1px solid #e2e8f0;
+            border-radius: 7px;
+            background: #f1f5f9;
+            flex: none;
+        }
+        .ds-chat-font-btn {
+            width: auto;
+            min-width: 24px;
+            height: 22px;
+            padding: 0 5px;
+            border-radius: 5px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            color: #475569;
+        }
+        .ds-chat-font-btn:hover:not(:disabled) { background: #fff; color: #1d4ed8; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06); }
+
         /* ---------- 消息区 ---------- */
         .ds-chat-body {
             flex: 1 1 auto;
@@ -1067,7 +1090,7 @@
         .ds-msg-assistant { align-items: flex-start; }
         .ds-bubble {
             max-width: 90%;
-            font-size: 13px;
+            font-size: calc(13px * var(--ds-font-scale, 1));
             line-height: 1.75;
             color: #1f2937;
             word-break: break-word;
@@ -1083,12 +1106,24 @@
         .ds-msg-assistant .ds-bubble { max-width: 100%; width: 100%; padding: 0 2px; }
         .ds-user-text { white-space: pre-wrap; }
 
-        .ds-message-copy {
+        .ds-msg.is-editing > .ds-bubble,
+        .ds-msg.is-editing > .ds-msg-actions { display: none; }
+
+        .ds-msg-actions {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            margin-top: 4px;
+            flex-wrap: wrap;
+        }
+        .ds-msg-user .ds-msg-actions { justify-content: flex-end; margin-top: 3px; }
+
+        .ds-message-copy,
+        .ds-msg-action {
             display: inline-flex;
             align-items: center;
-            gap: 5px;
-            margin-top: 6px;
-            padding: 4px 7px;
+            gap: 4px;
+            padding: 3px 6px;
             border: none;
             border-radius: 6px;
             background: transparent;
@@ -1096,18 +1131,75 @@
             font: inherit;
             font-size: 11.5px;
             cursor: pointer;
+            transition: background 0.14s, color 0.14s, opacity 0.14s;
         }
-        .ds-message-copy:hover { background: #eef2f7; color: #334155; }
-        .ds-message-copy:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
-        .ds-message-copy:disabled { cursor: default; }
+        .ds-msg-action { color: #94a3b8; opacity: 0.78; }
+        .ds-msg:hover .ds-msg-action { opacity: 1; }
+        .ds-message-copy:hover,
+        .ds-msg-action:hover { background: #eef2f7; color: #334155; opacity: 1; }
+        .ds-msg-delete:hover { background: #fef2f2; color: #dc2626; }
+        .ds-message-copy:focus-visible,
+        .ds-msg-action:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
+        .ds-message-copy:disabled,
+        .ds-msg-action:disabled { cursor: default; opacity: 0.45; }
+
+        .ds-edit-box {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 8px;
+            background: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+        }
+        .ds-edit-input {
+            width: 100%;
+            min-height: 52px;
+            max-height: 220px;
+            padding: 6px 8px;
+            font-family: inherit;
+            font-size: calc(13px * var(--ds-font-scale, 1));
+            line-height: 1.6;
+            color: #1f2937;
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 7px;
+            resize: vertical;
+        }
+        .ds-edit-input:focus { border-color: #93c5fd; box-shadow: 0 0 0 2px rgba(147, 197, 253, 0.25); }
+        .ds-edit-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 6px;
+        }
+        .ds-edit-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            height: 24px;
+            padding: 0 9px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            background: #fff;
+            color: #475569;
+            font-size: 11.5px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.14s;
+        }
+        .ds-edit-btn:hover { background: #f1f5f9; color: #1e293b; border-color: #cbd5e1; }
+        .ds-edit-primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+        .ds-edit-primary:hover { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
 
         /* 空会话开场：只留图标与名字（副标题、示例胶囊已按要求移除） */
         .ds-chat-welcome { text-align: center; padding: 26px 10px 10px; color: #94a3b8; }
         .ds-chat-welcome-icon { color: #bfdbfe; display: flex; justify-content: center; margin-bottom: 10px; }
-        .ds-chat-welcome-title { font-size: 14px; font-weight: 700; color: #475569; }
+        .ds-chat-welcome-title { font-size: calc(14px * var(--ds-font-scale, 1)); font-weight: 700; color: #475569; }
 
-        .ds-chat-loading { display: flex; align-items: center; gap: 8px; color: #64748b; font-size: 12.5px; padding: 3px 2px; }
-        .ds-chat-note { color: #94a3b8; font-size: 12px; padding: 3px 2px; }
+        .ds-chat-loading { display: flex; align-items: center; gap: 8px; color: #64748b; font-size: calc(12.5px * var(--ds-font-scale, 1)); padding: 3px 2px; }
+        .ds-chat-note { color: #94a3b8; font-size: calc(12px * var(--ds-font-scale, 1)); padding: 3px 2px; }
         .ds-chat-retry {
             margin-top: 8px;
             display: inline-flex;
@@ -1128,9 +1220,9 @@
         .ds-bubble p:first-child { margin-top: 0; }
         .ds-bubble p:last-child { margin-bottom: 0; }
         .ds-bubble .ds-h { font-weight: 700; color: #0f172a; margin: 0.75em 0 0.35em; line-height: 1.4; }
-        .ds-bubble h3.ds-h { font-size: 14.5px; }
-        .ds-bubble h4.ds-h { font-size: 13.5px; }
-        .ds-bubble h5.ds-h, .ds-bubble h6.ds-h { font-size: 13px; color: #334155; }
+        .ds-bubble h3.ds-h { font-size: calc(14.5px * var(--ds-font-scale, 1)); }
+        .ds-bubble h4.ds-h { font-size: calc(13.5px * var(--ds-font-scale, 1)); }
+        .ds-bubble h5.ds-h, .ds-bubble h6.ds-h { font-size: calc(13px * var(--ds-font-scale, 1)); color: #334155; }
         .ds-bubble ul, .ds-bubble ol { margin: 0.35em 0; padding-left: 1.35em; }
         .ds-bubble ul { list-style: disc; }
         .ds-bubble ol { list-style: decimal; }
@@ -1151,7 +1243,7 @@
         .ds-bubble .ds-quote p { margin: 0.15em 0; }
         .ds-code-inline {
             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-            font-size: 12px;
+            font-size: calc(12px * var(--ds-font-scale, 1));
             background: #f1f5f9;
             border: 1px solid #e8edf3;
             border-radius: 4px;
@@ -1193,7 +1285,7 @@
         .ds-code-block pre { margin: 0; padding: 8px 10px; overflow-x: auto; }
         .ds-code-block code {
             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-            font-size: 12px;
+            font-size: calc(12px * var(--ds-font-scale, 1));
             line-height: 1.6;
             color: #334155;
             white-space: pre;
@@ -1290,14 +1382,14 @@
         .ds-tikz-source[hidden] { display: none; }
         .ds-tikz-source code {
             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-            font-size: 12px;
+            font-size: calc(12px * var(--ds-font-scale, 1));
             line-height: 1.6;
             color: #334155;
             white-space: pre;
         }
 
         .ds-table-wrap { overflow-x: auto; margin: 0.5em 0; }
-        .ds-table { border-collapse: collapse; font-size: 12.5px; width: 100%; }
+        .ds-table { border-collapse: collapse; font-size: calc(12.5px * var(--ds-font-scale, 1)); width: 100%; }
         .ds-table th, .ds-table td { border: 1px solid #e8edf3; padding: 4px 8px; text-align: left; }
         .ds-table th { background: #f8fafc; font-weight: 600; color: #334155; }
         .ds-chat-img { max-width: 100%; max-height: 200px; border-radius: 8px; border: 1px solid #e5e7eb; display: block; margin: 0 0 5px; }
@@ -1315,14 +1407,14 @@
             align-items: center;
             gap: 5px;
             padding: 4px 8px;
-            font-size: 11.5px;
+            font-size: calc(11.5px * var(--ds-font-scale, 1));
             font-weight: 600;
             color: #7c6bb0;
             cursor: pointer;
             user-select: none;
             background: #f5f3ff;
         }
-        .ds-reasoning-body { padding: 6px 9px 8px; font-size: 12px; color: #6b7280; line-height: 1.7; max-height: 190px; overflow-y: auto; }
+        .ds-reasoning-body { padding: 6px 9px 8px; font-size: calc(12px * var(--ds-font-scale, 1)); color: #6b7280; line-height: 1.7; max-height: 190px; overflow-y: auto; }
         .ds-reasoning.collapsed .ds-reasoning-body { display: none; }
         .ds-reasoning-caret { margin-left: auto; font-size: 11px; transition: transform 0.2s; }
         .ds-reasoning.collapsed .ds-reasoning-caret { transform: rotate(-90deg); }
@@ -1389,7 +1481,7 @@
             min-width: 0;
             max-height: 120px;
             padding: 7px 10px;
-            font-size: 13px;
+            font-size: calc(13px * var(--ds-font-scale, 1));
             line-height: 1.6;
             color: #1f2937;
             background: #f8fafc;
@@ -1479,6 +1571,13 @@
         body.eye-protection-mode .ds-tikz { background: #FBF9F5 !important; border-color: #E6E2D6 !important; }
         body.eye-protection-mode .ds-reasoning { background: #F6F2E9 !important; border-left-color: #DCD3BF !important; }
         body.eye-protection-mode .ds-reasoning-head { background: #F0EBE1 !important; color: #6D5F43 !important; }
+        body.eye-protection-mode .ds-chat-font-group { background: #ECE5D8 !important; border-color: #DFD7C6 !important; }
+        body.eye-protection-mode .ds-chat-font-btn:hover:not(:disabled) { background: #FAF7F2 !important; color: #1d4ed8 !important; }
+        body.eye-protection-mode .ds-edit-box { background: #F4EFE6 !important; border-color: #DFD7C6 !important; }
+        body.eye-protection-mode .ds-edit-input { background: #FAF7F2 !important; border-color: #E6E2D6 !important; color: #3F3A33 !important; }
+        body.eye-protection-mode .ds-edit-btn:not(.ds-edit-primary) { background: #FAF7F2 !important; border-color: #E6E2D6 !important; color: #57534E !important; }
+        body.eye-protection-mode .ds-message-copy:hover,
+        body.eye-protection-mode .ds-msg-action:not(.ds-msg-delete):hover { background: #EFE9DD !important; }
 
         /* 侧栏折叠过渡微动效 */
         aside#sidebar {
@@ -1554,7 +1653,7 @@
 .pdf-virtual-pages .link-layer { transform-origin: 0 0; }
 
 .pdf-virtual-pages .annotation-layer { width: var(--annotation-page-width); height: var(--annotation-page-height); right: auto; bottom: auto; transform-origin: 0 0; }
-.cross-page-arrow-layer { clip-path: inset(var(--arrow-clip-top) 0 var(--arrow-clip-bottom) -1000%); }
+.cross-page-arrow-layer { clip-path: inset(var(--arrow-clip-top, -100000px) 0 var(--arrow-clip-bottom, -100000px) -100000px); }
 body.show-sidecars .pdf-virtual-pages .annotation-layer { width: calc(var(--annotation-page-width) * 2); }
 
 .pdf-search-header { position: sticky; top: 0; height: 40px; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; background: white; z-index: 10; font-size: 12px; color: #2563eb; }

@@ -8,16 +8,17 @@ let cachedPdfBytes = 0;
 let pdfHeightIndex = new Float64Array(0);
 let pdfWindowFrame = 0;
 let pdfWindowWidth = 0;
-// 起点页离开窗口后，只为仍经过阅读区域的跨页箭头保留轻量 SVG。
+// 起点页离开窗口后，只为仍经过阅读区域的跨页批注保留轻量 SVG（保留窗口为当前视口前后各 5 页）。
+const CROSS_PAGE_RETAIN_PAGES = 5;
 const crossPageArrows = new Map();
 const detachedArrowLayers = new Map();
 
 function isArrowAnnotation(anno) {
-    return ['arrow', 'implies', 'equivalence'].includes(anno.type) && anno.start && anno.end;
+    return ['arrow', 'implies', 'equivalence', 'line', 'brace', 'rect', 'highlight-block', 'free-parenthesis'].includes(anno?.type) && Boolean(anno.start && anno.end);
 }
 function isCrossPageArrow(anno, pageNum) {
     return isArrowAnnotation(anno) && [anno.start, anno.end].some(point =>
-        point.y < 0 || point.y > 1 || (point.pageAnchor && point.pageAnchor.pageNum !== pageNum));
+        point.y < 0 || point.y > 1 || (point.pageAnchor && (point.pageAnchor.pageNum !== pageNum || point.pageAnchor.gapRatio > 0)));
 }
 function pdfPageLeft(pageNum, scale = state.scale) {
     return Math.max(0, (pdfWindowWidth - state.pageDimensions[pageNum - 1].width * scale) / 2);
@@ -101,9 +102,17 @@ function removeDetachedArrowLayer(pageNum) {
     detachedArrowLayers.delete(pageNum);
 }
 function refreshDetachedArrows() {
-    if (!state.pdfDoc) return;
-    const viewTop = els.container.scrollTop - els.pagesContainer.offsetTop - PDF_PRELOAD_MARGIN;
-    const viewBottom = viewTop + els.container.clientHeight + 2 * PDF_PRELOAD_MARGIN;
+    if (!state.pdfDoc || !state.pageDimensions.length) return;
+    const rawViewTop = Math.max(0, els.container.scrollTop - els.pagesContainer.offsetTop);
+    const rawViewBottom = rawViewTop + els.container.clientHeight;
+    const firstViewPage = pdfPageAtOffset(rawViewTop);
+    const lastViewPage = pdfPageAtOffset(Math.max(rawViewTop, rawViewBottom));
+    const minRetainPage = Math.max(1, firstViewPage - CROSS_PAGE_RETAIN_PAGES);
+    const maxRetainPage = Math.min(state.pageDimensions.length, lastViewPage + CROSS_PAGE_RETAIN_PAGES);
+    const viewTop = Math.min(rawViewTop - PDF_PRELOAD_MARGIN, pdfPageTop(minRetainPage));
+    const viewBottom = Math.max(rawViewBottom + PDF_PRELOAD_MARGIN, pdfPageTop(maxRetainPage + 1));
+
+
     const retained = new Set();
     for (const [pageNum, arrows] of crossPageArrows) {
         if (pageWrappers.has(pageNum)) continue;
@@ -111,9 +120,17 @@ function refreshDetachedArrows() {
         if (!dim) continue;
         const top = pdfPageTop(pageNum), w = dim.width * state.scale, h = dim.height * state.scale;
         const padding = 12 * state.scale;
-        const visible = arrows.map(anno => ({ anno, ...arrowGeometry(anno, pageNum, w, h) })).filter(({ start, end }) =>
-            top + Math.max(start.y, end.y) + padding >= viewTop &&
-            top + Math.min(start.y, end.y) - padding <= viewBottom);
+        const visible = arrows.map(anno => ({ anno, ...arrowGeometry(anno, pageNum, w, h) })).filter(({ anno, start, end }) => {
+            const startPage = anno.start?.pageAnchor?.pageNum || pageNum;
+            const endPage = anno.end?.pageAnchor?.pageNum || pageNum;
+            const annoMinPage = Math.min(pageNum, startPage, endPage);
+            const annoMaxPage = Math.max(pageNum, startPage, endPage);
+            return (annoMaxPage >= minRetainPage && annoMinPage <= maxRetainPage) || (
+                top + Math.max(start.y, end.y) + padding >= viewTop &&
+                top + Math.min(start.y, end.y) - padding <= viewBottom);
+        });
+
+
         if (!visible.length) continue;
         retained.add(pageNum);
         let entry = detachedArrowLayers.get(pageNum);

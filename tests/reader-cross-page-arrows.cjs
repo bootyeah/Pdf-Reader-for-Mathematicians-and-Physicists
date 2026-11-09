@@ -116,8 +116,9 @@ const { PDFDocument, PDFName, PDFHexString } = require('../static/lib/pdf-lib.mi
             }, [1, 12]);
         });
         await jump(8);
-        assert.equal(await page.locator('.cross-page-arrow-layer .vector-svg').count(), 3);
-        assert.equal(await page.locator('[stroke="#111111"], .text-annotation[data-id="ordinary-text"]').count(), 0);
+        assert.equal(await page.locator('.cross-page-arrow-layer .vector-svg').count(), 4);
+        assert.equal((await linePoint('.cross-page-arrow-layer line[stroke="#111111"]')).hit, true);
+        assert.equal(await page.locator('.text-annotation[data-id="ordinary-text"]').count(), 0);
         assert.equal(await page.locator('#page-wrapper-1, #page-wrapper-12, #canvas-1, #canvas-12').count(), 0);
         assert((await page.locator('.page-wrapper').count()) < 8);
         assert.equal((await linePoint('.cross-page-arrow-layer line[stroke="#aa1100"]')).hit, true);
@@ -146,6 +147,8 @@ const { PDFDocument, PDFName, PDFHexString } = require('../static/lib/pdf-lib.mi
         await jump(1);
         assert.equal(await page.locator('.cross-page-arrow-layer[data-page-num="1"]').count(), 0);
         assert.equal(await page.locator('#annotation-layer-1 line[stroke="#aa1100"]').count(), 1);
+        await jump(21);
+        assert.equal(await page.locator('.cross-page-arrow-layer[data-page-num="1"]').count(), 1);
         await jump(25);
         assert.equal(await page.locator('.cross-page-arrow-layer').count(), 0);
         pass('Visibility toggle, source-page remounting and leaving the arrow range do not leave duplicates or stale layers');
