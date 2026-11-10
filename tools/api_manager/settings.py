@@ -34,8 +34,8 @@ COMMON = dict(base_url='', api_key='', key_source='', model='', fallback_model='
               thinking='disabled', proxy='', prompt='', web_search=False)
 _LOCK = threading.RLock()
 
-THINKING_MODES = ('disabled', 'enabled', 'low', 'medium', 'high', 'omit')
-THINKING_ACTIVE_MODES = ('enabled', 'low', 'medium', 'high')
+THINKING_MODES = ('disabled', 'enabled', 'low', 'medium', 'high', 'max', 'omit')
+THINKING_ACTIVE_MODES = ('enabled', 'low', 'medium', 'high', 'max')
 
 # Google AI Studio 的 OpenAI 兼容端点；Key 走 Authorization: Bearer，与 DeepSeek 调用方式一致。
 # 针对 Gemini 深度推理模型适配优化：温度默认 1.0，超时 180s，思考模式默认 high（映射为 reasoning_effort），代理默认跟随系统代理。
@@ -44,6 +44,36 @@ GEMINI_CHAT_DEFAULT = dict(COMMON, base_url='https://generativelanguage.googleap
                            temperature=1.0, timeout=180, thinking='high', proxy='system')
 # 后来新增的功能：旧 settings.json 里没有时按默认值补齐，避免整份配置因缺项被判为损坏。
 ADDED_FEATURES = {'chat_gemini': GEMINI_CHAT_DEFAULT}
+
+
+def detect_model_family(model=None, base_url=None):
+    """根据模型名称和接口地址智能识别模型系列，便于针对性适配思考参数协议。"""
+    m = str(model or '').lower().strip()
+    u = str(base_url or '').lower().strip()
+    if 'kimi' in m or 'moonshot' in m:
+        return 'kimi'
+    if 'glm' in m or 'zhipu' in m:
+        return 'glm'
+    if 'deepseek' in m:
+        return 'deepseek'
+    if 'gemini' in m:
+        return 'gemini'
+    if 'qwen' in m or 'qwq' in m:
+        return 'qwen'
+    if 'minimax' in m or 'mimo' in m:
+        return 'minimax'
+    if m.startswith(('o1', 'o3', 'gpt-5')):
+        return 'openai_reasoning'
+    if 'generativelanguage.googleapis.com' in u or 'google' in u:
+        return 'gemini'
+    if 'bigmodel.cn' in u:
+        return 'glm'
+    return 'general'
+
+
+def is_gemini_config(cfg, model=None):
+    return detect_model_family(model=model or (cfg or {}).get('model'),
+                               base_url=(cfg or {}).get('base_url')) == 'gemini'
 
 
 class ConfigError(ValueError):
@@ -152,7 +182,36 @@ def legacy_document():
 def default_prompts():
     """返回各项功能的默认内置提示词，供管理页面一键重置使用。"""
     doc = legacy_document()
-    return {fid: cfg.get('prompt', '') for fid, cfg in doc['features'].items()}
+    prompts = {fid: cfg.get('prompt', '') for fid, cfg in doc['features'].items()}
+    if not prompts.get('chat_gemini'):
+        prompts['chat_gemini'] = prompts.get('chat', '')
+    if not prompts.get('formula_handwriting'):
+        prompts['formula_handwriting'] = prompts.get('formula_image', '')
+    if not prompts.get('formula_alt'):
+        prompts['formula_alt'] = prompts.get('formula_image', '')
+    return prompts
+
+
+def effective_prompt(doc, fid):
+    """获取指定功能的真实生效系统提示词（含继承共用关系解析）。"""
+    if not isinstance(doc, dict) or not isinstance(doc.get('features'), dict):
+        return ''
+    features = doc['features']
+    cfg = features.get(fid)
+    if not isinstance(cfg, dict):
+        return ''
+    own_prompt = str(cfg.get('prompt') or '').strip()
+    if own_prompt:
+        return own_prompt
+
+    defaults = default_prompts()
+    if fid == 'chat_gemini':
+        chat_cfg = features.get('chat') or {}
+        return str(chat_cfg.get('prompt') or '').strip() or defaults.get('chat', '')
+    elif fid in ('formula_handwriting', 'formula_alt'):
+        img_cfg = features.get('formula_image') or {}
+        return str(img_cfg.get('prompt') or '').strip() or defaults.get('formula_image', '')
+    return defaults.get(fid, '')
 
 
 def completion_url(base):
@@ -298,6 +357,18 @@ def public_document(doc):
         cfg['has_own_key'] = bool(own)
         cfg['has_key'] = bool(api_key_for(doc, fid))
         cfg['resolved_key'] = api_key_for(doc, fid)
+
+        # 真实生效的提示词与共用来源标记
+        cfg['effective_prompt'] = effective_prompt(doc, fid)
+        if not str(cfg.get('prompt') or '').strip():
+            if fid == 'chat_gemini':
+                cfg['prompt_source'] = 'chat'
+            elif fid in ('formula_handwriting', 'formula_alt'):
+                cfg['prompt_source'] = 'formula_image'
+            else:
+                cfg['prompt_source'] = ''
+        else:
+            cfg['prompt_source'] = ''
     return result
 
 
@@ -311,6 +382,8 @@ def merge_public(incoming, current):
         cfg.pop('has_key', None)
         cfg.pop('has_own_key', None)
         cfg.pop('resolved_key', None)
+        cfg.pop('effective_prompt', None)
+        cfg.pop('prompt_source', None)
         # Omitted keys mean keep; an explicit empty string clears the stored key.
         cfg.setdefault('api_key', current['features'][fid]['api_key'])
         for key in ('base_url', 'api_key', 'key_source', 'model', 'fallback_model', 'proxy'):
@@ -335,29 +408,38 @@ def restore(expected_revision):
         return save_document(previous, expected_revision)
 
 
-def is_gemini_config(cfg, model=None):
-    base = str((cfg or {}).get('base_url') or '').lower()
-    target = str(model or (cfg or {}).get('model') or '').lower()
-    return 'generativelanguage.googleapis.com' in base or target.startswith('gemini')
-
-
 def apply_parameters(payload, cfg, enable_thinking=None, model=None):
     payload['temperature'] = cfg.get('temperature', payload.get('temperature', 0.2))
     thinking = cfg.get('thinking', 'disabled')
     payload.pop('thinking', None)
     payload.pop('reasoning_effort', None)
-    gemini = is_gemini_config(cfg, model=model or payload.get('model'))
+    payload.pop('chat_template_kwargs', None)
+
+    target_model = model or payload.get('model') or (cfg or {}).get('model')
+    base_url = (cfg or {}).get('base_url')
+    family = detect_model_family(model=target_model, base_url=base_url)
+
     if thinking != 'omit':
         active = (thinking in THINKING_ACTIVE_MODES) if enable_thinking is None else bool(enable_thinking)
-        if gemini or thinking in ('low', 'medium', 'high'):
+        if family in ('gemini', 'openai_reasoning'):
             if active:
                 payload['reasoning_effort'] = thinking if thinking in ('low', 'medium', 'high') else 'high'
-            elif thinking == 'disabled':
-                payload['reasoning_effort'] = 'none'
             else:
-                payload['reasoning_effort'] = 'low'
+                payload['reasoning_effort'] = 'none'
         else:
-            payload['thinking'] = {'type': 'enabled' if active else 'disabled'}
+            # Kimi / GLM / DeepSeek / Qwen / 通用接口
+            if active:
+                payload['thinking'] = {'type': 'enabled'}
+                if thinking in ('low', 'medium', 'high', 'max'):
+                    payload['reasoning_effort'] = thinking
+                if family in ('kimi', 'glm', 'qwen'):
+                    payload['chat_template_kwargs'] = {'enable_thinking': True}
+            else:
+                payload['thinking'] = {'type': 'disabled'}
+                payload['reasoning_effort'] = 'none'
+                if family in ('kimi', 'glm', 'qwen', 'deepseek'):
+                    payload['chat_template_kwargs'] = {'enable_thinking': False, 'thinking': False}
+
     if cfg.get('max_tokens', 0) > 0:
         payload['max_tokens'] = int(cfg['max_tokens'])
     return payload

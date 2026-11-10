@@ -87,7 +87,7 @@
     let modelThinking = {};        // 模型 → 'enabled' | 'disabled' | 'low' | 'medium' | 'high' | 'omit'（来自 /api/ai-config）
 
     function isThinkingModeEnabled(mode) {
-        return mode === 'enabled' || mode === 'low' || mode === 'medium' || mode === 'high';
+        return mode === 'enabled' || mode === 'low' || mode === 'medium' || mode === 'high' || mode === 'max';
     }
 
     // 当前模型设置为 omit 时：按钮置灰、不发送，但保留用户对其他模型的开关偏好
@@ -788,7 +788,7 @@
     function setThinking(on) {
         thinking = !!on;
         const mode = modelThinking[model];
-        const levelHint = (mode === 'low' || mode === 'medium' || mode === 'high') ? ' · ' + mode.toUpperCase() : '';
+        const levelHint = (mode === 'low' || mode === 'medium' || mode === 'high' || mode === 'max') ? ' · ' + mode.toUpperCase() : '';
         thinkingBtn.classList.toggle('active', thinking);
         thinkingBtn.title = thinking
             ? '思考模式：开' + levelHint + '（回答更周密，首字更慢）'

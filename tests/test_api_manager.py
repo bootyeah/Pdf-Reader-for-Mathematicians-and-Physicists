@@ -254,6 +254,64 @@ class ManagerTests(unittest.TestCase):
         entry['server'].app._recognize_worker(doc)
         self.assertEqual(Upstream.calls[-1]['body']['model'], 'alt-after-save')
 
+    def test_thinking_mode_adaptation_for_kimi_glm_gemini_and_deepseek(self):
+        # 1. Kimi 模型：设置 low/high/max 时，thinking.type 必须是合法的 enabled，同时附加对应 reasoning_effort
+        p = settings.apply_parameters({'model': 'Kimi-K3.1-Pro'}, {'thinking': 'low'})
+        self.assertEqual(p['thinking']['type'], 'enabled')
+        self.assertEqual(p['reasoning_effort'], 'low')
+        self.assertEqual(p['chat_template_kwargs'], {'enable_thinking': True})
+
+        p_max = settings.apply_parameters({'model': 'Kimi-K3.1-Pro'}, {'thinking': 'max'})
+        self.assertEqual(p_max['thinking']['type'], 'enabled')
+        self.assertEqual(p_max['reasoning_effort'], 'max')
+
+        # 2. Kimi 模型：设置 disabled 时，彻底关闭思考
+        p_off = settings.apply_parameters({'model': 'Kimi-K3.1-Pro'}, {'thinking': 'disabled'})
+        self.assertEqual(p_off['thinking']['type'], 'disabled')
+        self.assertEqual(p_off['reasoning_effort'], 'none')
+        self.assertEqual(p_off['chat_template_kwargs'], {'enable_thinking': False, 'thinking': False})
+
+        # 3. Gemini 模型：只发送 reasoning_effort，不发送 thinking 字典，max 映射为 high
+        p_gemini = settings.apply_parameters({'model': 'gemini-4-argon'}, {'thinking': 'high'})
+        self.assertEqual(p_gemini['reasoning_effort'], 'high')
+        self.assertNotIn('thinking', p_gemini)
+
+        p_gemini_max = settings.apply_parameters({'model': 'gemini-4-argon'}, {'thinking': 'max'})
+        self.assertEqual(p_gemini_max['reasoning_effort'], 'high')
+
+        # 4. GLM 模型：分级思考平滑适配 (包含 max)
+        p_glm = settings.apply_parameters({'model': 'GLM-5.3-Flash'}, {'thinking': 'medium'})
+        self.assertEqual(p_glm['thinking']['type'], 'enabled')
+        self.assertEqual(p_glm['reasoning_effort'], 'medium')
+
+        p_glm_max = settings.apply_parameters({'model': 'GLM-5.3-Flash'}, {'thinking': 'max'})
+        self.assertEqual(p_glm_max['reasoning_effort'], 'max')
+
+        # 5. omit 模式：不发送任何思考参数
+        p_omit = settings.apply_parameters({'model': 'Kimi-K3.1-Pro'}, {'thinking': 'omit'})
+        self.assertNotIn('thinking', p_omit)
+        self.assertNotIn('reasoning_effort', p_omit)
+        self.assertNotIn('chat_template_kwargs', p_omit)
+
+    def test_shared_prompts_displayed_and_effective(self):
+        self.update('chat', prompt='Master Assistant Prompt')
+        self.update('chat_gemini', prompt='')
+        self.update('formula_handwriting', prompt='')
+        self.update('formula_alt', prompt='')
+
+        status, data = self.request('/api/config', manager=True)
+        self.assertEqual(status, 200)
+        feats = data['document']['features']
+
+        # chat_gemini 留空时共用 chat 的生效提示词
+        self.assertEqual(feats['chat_gemini']['effective_prompt'], 'Master Assistant Prompt')
+        self.assertEqual(feats['chat_gemini']['prompt_source'], 'chat')
+
+        # formula_handwriting 与 formula_alt 留空时共用 formula_image 的生效提示词
+        self.assertTrue(bool(feats['formula_handwriting']['effective_prompt']))
+        self.assertEqual(feats['formula_handwriting']['prompt_source'], 'formula_image')
+        self.assertEqual(feats['formula_alt']['prompt_source'], 'formula_image')
+
 
 if __name__ == '__main__':
     if '--serve-fixture' in sys.argv:

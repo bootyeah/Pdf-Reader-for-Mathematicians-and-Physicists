@@ -703,19 +703,15 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
 
     def _call_deepseek(self, messages, use_search=False, model=None, disable_thinking=None):
         cfg = getattr(self, '_active_translate_config', None) or _api_config('dictionary')
-        if disable_thinking is None:
-            disable_thinking = cfg['thinking'] != 'omit'
+        target_model = model or cfg['model']
         body = {
-            "model": model or cfg['model'],
+            "model": target_model,
             "messages": messages,
-            "temperature": cfg['temperature'],
             "stream": False,
         }
-        if disable_thinking:
-            body["thinking"] = {"type": cfg['thinking']}
-        if cfg.get('max_tokens', 0):
-            body['max_tokens'] = int(cfg['max_tokens'])
-        if use_search:
+        enable = None if (disable_thinking is None or disable_thinking) else False
+        body = api_settings.apply_parameters(body, cfg, enable_thinking=enable, model=target_model)
+        if use_search and not api_settings.is_gemini_config(cfg, model=target_model):
             body["tools"] = [{"type": "web_search"}]
 
         url = api_settings.completion_url(cfg['base_url'])

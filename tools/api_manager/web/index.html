@@ -224,14 +224,17 @@
 
             <div class="form-row form-row-2 pt-border">
               <div class="form-group">
-                <label for="thinking" class="form-label">思考参数 (Thinking)</label>
+                <label for="thinking" class="form-label">
+                  思考参数 (Thinking) <span class="label-hint" id="thinking-hint">自动适配当前模型协议</span>
+                </label>
                 <select id="thinking" name="thinking" class="form-select">
                   <option value="disabled">关闭思考 (更快，日常推荐)</option>
-                  <option value="enabled">开启思考 (深度推理)</option>
-                  <option value="high">深度思考 · High (Gemini 默认推荐)</option>
-                  <option value="medium">均衡思考 · Medium (Gemini)</option>
-                  <option value="low">轻量思考 · Low (Gemini)</option>
-                  <option value="omit">不发送 (兼容第三方中转)</option>
+                  <option value="enabled">开启思考 · 标准 (推荐用于通用推理)</option>
+                  <option value="low">轻量思考 · Low (快速推理，低延迟)</option>
+                  <option value="medium">均衡思考 · Medium (平衡深度与速度)</option>
+                  <option value="high">深度思考 · High (复杂推理，长链推导)</option>
+                  <option value="max">极致思考 · Max (天花板最高等级，极长思考链)</option>
+                  <option value="omit">不发送参数 (兼容第三方中转 / 纯文本模型)</option>
                 </select>
               </div>
               <div class="form-group">
@@ -262,8 +265,11 @@
         <details class="card prompt-card" open>
           <summary class="prompt-summary">
             <div class="card-header-title">
-              <h2>系统提示词 (System Prompt)</h2>
-              <span class="card-header-desc">AI 角色设定、输出规范与 LaTeX 规则</span>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <h2>系统提示词 (System Prompt)</h2>
+                <span id="prompt-source-tag" class="tag tag-provider" hidden>共用提示词</span>
+              </div>
+              <span class="card-header-desc" id="prompt-desc">AI 角色设定、输出规范与 LaTeX 规则</span>
             </div>
             <button type="button" id="reset-prompt" class="btn btn-secondary btn-xs" title="一键重置为内置的标准提示词">
               恢复默认提示词
@@ -271,6 +277,14 @@
           </summary>
 
           <div class="card-body prompt-body">
+            <div id="shared-prompt-hint" class="shared-key-pill" style="margin-bottom: 10px;" hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="pill-icon">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+              </svg>
+              <span id="shared-prompt-text">当前共用其他功能的系统提示词（已完整显示，直接编辑即保存为专属提示词）</span>
+            </div>
             <textarea id="prompt" name="prompt" rows="8" spellcheck="false" class="form-textarea prompt-textarea font-mono" aria-label="系统提示词"></textarea>
           </div>
         </details>

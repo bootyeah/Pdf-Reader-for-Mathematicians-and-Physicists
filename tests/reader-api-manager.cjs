@@ -34,11 +34,11 @@ const root = path.resolve(__dirname, '..');
         page.on('pageerror', error => errors.push(error.message));
         await page.goto(info.manager);
         await page.waitForFunction(() => document.getElementById('model').value === 'model-chat');
-        assert.equal(await page.locator('nav button').count(), 6);
+        assert.equal(await page.locator('nav button').count(), 7);
         assert.equal(await page.inputValue('#api_key'), 'test-key-chat');
         assert.equal(await page.locator('#api_key').getAttribute('type'), 'text');
         assert.equal(await page.locator('#key-status').textContent(), 'Key 已配置');
-        console.log('PASS six features and existing keys displayed in plaintext');
+        console.log('PASS seven features and existing keys displayed in plaintext');
         // Chained sharing must follow draft edits, even when intermediate features own other keys.
         await page.click('nav button[data-feature="translation"]');
         await page.selectOption('#key_source', 'chat');
@@ -87,6 +87,19 @@ const root = path.resolve(__dirname, '..');
         await page.click('#fetch-models');
         await page.waitForFunction(() => document.querySelectorAll('#remote-models option').length === 2);
         console.log('PASS actual test request and model discovery');
+
+        // 验证系统提示词完整展示（共用项不为空白）与思考参数丝滑适配
+        await page.click('nav button[data-feature="chat_gemini"]');
+        assert.notEqual(await page.inputValue('#prompt'), '');
+        assert.equal(await page.locator('#shared-prompt-hint').isVisible(), true);
+        await page.fill('#model', 'Kimi-K3.1-Pro');
+        assert.equal((await page.textContent('#thinking-hint')).includes('Kimi'), true);
+        await page.selectOption('#thinking', 'low');
+        await page.click('nav button[data-feature="formula_handwriting"]');
+        assert.notEqual(await page.inputValue('#prompt'), '');
+        assert.equal(await page.locator('#shared-prompt-hint').isVisible(), true);
+        await page.click('nav button[data-feature="chat"]');
+
         await page.fill('#model', 'custom-ui-model');
         await page.fill('#api_key', 'browser-test-key');
         await page.selectOption('#thinking', 'enabled');

@@ -561,6 +561,24 @@ button, input, select, textarea {
   border-color: #a5f3fc;
 }
 
+.tag-provider.kimi {
+  background: #f0fdf4;
+  color: #15803d;
+  border-color: #bbf7d0;
+}
+
+.tag-provider.qwen {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #fed7aa;
+}
+
+.tag-provider.minimax {
+  background: #fdf2f8;
+  color: #be185d;
+  border-color: #fbcfe8;
+}
+
 .tag-status {
   background: var(--success-light);
   color: var(--success);

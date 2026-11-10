@@ -195,6 +195,102 @@ function updateStatus() {
     }
 }
 
+function detectProviderClass(model, fid) {
+    const m = (model || '').toLowerCase().trim();
+    if (m.includes('gemini')) return 'gemini';
+    if (m.includes('kimi') || m.includes('moonshot')) return 'kimi';
+    if (m.includes('glm') || m.includes('zhipu')) return 'glm';
+    if (m.includes('deepseek')) return 'deepseek';
+    if (m.includes('qwen') || m.includes('qwq')) return 'qwen';
+    if (m.includes('minimax') || m.includes('mimo')) return 'minimax';
+    if (fid === 'chat_gemini') return 'gemini';
+    return fid && fid.startsWith('formula_') && fid !== 'formula_alt' ? 'glm' : 'deepseek';
+}
+
+const THINKING_OPTIONS_BY_PROVIDER = {
+    kimi: [
+        { value: 'disabled', label: '关闭思考 (0 Token 消耗)' },
+        { value: 'low', label: '快速思考 · Low' },
+        { value: 'high', label: '深度思考 · High' },
+        { value: 'max', label: '极致思考 · Max (天花板最高等级)' },
+        { value: 'omit', label: '不发送思考参数 (遵循默认)' }
+    ],
+    glm: [
+        { value: 'disabled', label: '关闭思考 (0 Token 消耗)' },
+        { value: 'low', label: '轻量思考 · Low' },
+        { value: 'medium', label: '均衡思考 · Medium' },
+        { value: 'high', label: '深度思考 · High' },
+        { value: 'max', label: '极致思考 · Max (最高等级)' },
+        { value: 'omit', label: '不发送思考参数 (遵循默认)' }
+    ],
+    gemini: [
+        { value: 'disabled', label: '关闭思考 (reasoning_effort: none)' },
+        { value: 'low', label: '轻量思考 · Low' },
+        { value: 'medium', label: '均衡思考 · Medium' },
+        { value: 'high', label: '深度思考 · High (官方推荐)' },
+        { value: 'omit', label: '不发送思考参数 (遵循默认)' }
+    ],
+    deepseek: [
+        { value: 'disabled', label: '关闭思考 (关闭思维链)' },
+        { value: 'enabled', label: '开启思考 · 标准 (标准思维链)' },
+        { value: 'low', label: '轻量思考 · Low (网关分级)' },
+        { value: 'high', label: '深度思考 · High (网关分级)' },
+        { value: 'max', label: '极致思考 · Max (网关最高)' },
+        { value: 'omit', label: '不发送思考参数 (遵循默认)' }
+    ],
+    general: [
+        { value: 'disabled', label: '关闭思考' },
+        { value: 'enabled', label: '开启思考 · 标准' },
+        { value: 'low', label: '轻量思考 · Low' },
+        { value: 'medium', label: '均衡思考 · Medium' },
+        { value: 'high', label: '深度思考 · High' },
+        { value: 'max', label: '极致思考 · Max' },
+        { value: 'omit', label: '不发送思考参数' }
+    ]
+};
+
+function syncThinkingOptions(provider, preferredValue) {
+    const select = $('thinking');
+    if (!select) return;
+    const providerKey = ['kimi', 'glm', 'gemini', 'deepseek'].includes(provider) ? provider : 'general';
+    const options = THINKING_OPTIONS_BY_PROVIDER[providerKey] || THINKING_OPTIONS_BY_PROVIDER.general;
+
+    const supportedValues = options.map(o => o.value);
+    let matchedValue = preferredValue;
+    if (!supportedValues.includes(matchedValue)) {
+        if (matchedValue === 'enabled') {
+            matchedValue = (providerKey === 'gemini' || providerKey === 'kimi' || providerKey === 'glm') ? 'high' : supportedValues[0];
+        } else if (matchedValue === 'max' && providerKey === 'gemini') {
+            matchedValue = 'high';
+        } else if (matchedValue === 'medium' && providerKey === 'kimi') {
+            matchedValue = 'high';
+        } else if (matchedValue === 'low' || matchedValue === 'high') {
+            matchedValue = supportedValues.includes(matchedValue) ? matchedValue : 'disabled';
+        } else {
+            matchedValue = supportedValues.includes('disabled') ? 'disabled' : supportedValues[0];
+        }
+    }
+
+    select.replaceChildren();
+    options.forEach(opt => {
+        select.append(new Option(opt.label, opt.value));
+    });
+
+    select.value = matchedValue;
+    if (doc && doc.features[selected]) {
+        doc.features[selected].thinking = matchedValue;
+    }
+
+    const thHint = $('thinking-hint');
+    if (thHint) {
+        if (providerKey === 'gemini') thHint.textContent = '已自动匹配 Gemini reasoning_effort 协议 (推荐 High)';
+        else if (providerKey === 'kimi') thHint.textContent = '已自动匹配 Kimi 思考参数：支持 Low / High / Max (极致思考)';
+        else if (providerKey === 'glm') thHint.textContent = '已自动匹配 GLM 思考参数：支持 Low / Medium / High / Max';
+        else if (providerKey === 'deepseek') thHint.textContent = '已自动匹配 DeepSeek 思考协议：支持标准思维链及网关分级';
+        else thHint.textContent = '自动适配对应模型思考深度协议';
+    }
+}
+
 function renderEditor() {
     if (!doc || !metadata[selected]) return;
     const cfg = doc.features[selected];
@@ -205,8 +301,9 @@ function renderEditor() {
 
     const catEl = $('feature-category');
     catEl.textContent = category;
-    catEl.className = 'tag tag-provider ' + (selected === 'chat_gemini' ? 'gemini'
-        : selected.startsWith('formula_') && selected !== 'formula_alt' ? 'glm' : 'deepseek');
+    const pClass = detectProviderClass(cfg.model, selected);
+    catEl.className = 'tag tag-provider ' + pClass;
+    syncThinkingOptions(pClass, cfg.thinking);
 
     // 密钥来源下拉菜单
     const keySource = $('key_source');
@@ -218,8 +315,9 @@ function renderEditor() {
         }
     });
 
-    // 填入常规字段
+    // 填入常规字段 (prompt 字段使用独立逻辑填充以呈现继承共用内容)
     fields.forEach(key => {
+        if (key === 'prompt') return;
         const el = $(key);
         if (!el) return;
         if (key === 'web_search') {
@@ -230,6 +328,40 @@ function renderEditor() {
             el.value = cfg[key] ?? '';
         }
     });
+
+    // 提示词完整显示与共用提示
+    const promptInput = $('prompt');
+    const promptSourceTag = $('prompt-source-tag');
+    const sharedPromptHint = $('shared-prompt-hint');
+    const sharedPromptText = $('shared-prompt-text');
+
+    const ownPrompt = cfg.prompt || '';
+    const effectivePrompt = cfg.effective_prompt || defaultPrompts[selected] || '';
+    const displayPrompt = ownPrompt || effectivePrompt;
+    if (promptInput) promptInput.value = displayPrompt;
+
+    const isSharedPrompt = !ownPrompt && Boolean(effectivePrompt);
+    let promptSourceName = '';
+    if (isSharedPrompt) {
+        if (selected === 'chat_gemini') {
+            promptSourceName = metadata['chat']?.[0] || '内置对话';
+        } else if (selected === 'formula_handwriting' || selected === 'formula_alt') {
+            promptSourceName = metadata['formula_image']?.[0] || '图片公式识别';
+        }
+    }
+
+    if (promptSourceTag) {
+        promptSourceTag.hidden = !isSharedPrompt;
+        promptSourceTag.textContent = promptSourceName ? `共用自「${promptSourceName}」` : '共用提示词';
+    }
+    if (sharedPromptHint) {
+        sharedPromptHint.hidden = !isSharedPrompt;
+        if (sharedPromptText) {
+            sharedPromptText.textContent = promptSourceName
+                ? `当前共用「${promptSourceName}」的系统提示词（已完整显示，直接编辑即保存为专属提示词）`
+                : '当前共用内置系统提示词（已完整显示，直接编辑即保存为专属提示词）';
+        }
+    }
 
     // 需求 1 重点：默认直接明文显示当前使用的 API Key！
     // 无论当前是独立 Key 还是共用 Key，输入窗口都直接呈现当前生效的真实 Key
@@ -322,7 +454,16 @@ fields.forEach(key => {
         if (key === 'key_source') {
             renderEditor();
         }
-        if (key === 'model') renderNav();
+        if (key === 'model') {
+            renderNav();
+            const pClass = detectProviderClass(el.value, selected);
+            $('feature-category').className = 'tag tag-provider ' + pClass;
+            syncThinkingOptions(pClass, cfg.thinking);
+        }
+        if (key === 'prompt') {
+            if ($('prompt-source-tag')) $('prompt-source-tag').hidden = true;
+            if ($('shared-prompt-hint')) $('shared-prompt-hint').hidden = true;
+        }
         updateStatus();
     });
 });
@@ -389,6 +530,8 @@ $('reset-prompt').onclick = () => {
     const defPrompt = defaultPrompts[selected] ?? '';
     doc.features[selected].prompt = defPrompt;
     $('prompt').value = defPrompt;
+    if ($('prompt-source-tag')) $('prompt-source-tag').hidden = true;
+    if ($('shared-prompt-hint')) $('shared-prompt-hint').hidden = true;
     updateStatus();
     notice('已恢复为该功能的内置默认提示词，保存后生效。');
 };

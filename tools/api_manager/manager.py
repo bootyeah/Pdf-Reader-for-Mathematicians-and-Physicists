@@ -65,7 +65,8 @@ def probe(doc, fid, list_models=False):
                        {'type': 'image_url', 'image_url': {'url': test_image()}}]
         payload = settings.apply_parameters({'model': cfg['model'], 'stream': False,
                                             'messages': [{'role': 'user', 'content': content}]}, cfg)
-        cap = 4096 if payload.get('reasoning_effort') else 256
+        is_thinking = (payload.get('reasoning_effort') not in (None, 'none')) or (payload.get('thinking', {}).get('type') == 'enabled')
+        cap = 4096 if is_thinking else 256
         payload['max_tokens'] = min(int(cfg['max_tokens'] or cap), cap)
         if cfg['web_search'] and not settings.is_gemini_config(cfg):
             payload['tools'] = [{'type': 'web_search'}]
