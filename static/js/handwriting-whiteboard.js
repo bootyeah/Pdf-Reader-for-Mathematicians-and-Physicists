@@ -184,7 +184,7 @@
             scBtn.title = (collapsed ? '展开白板' : '折叠为标题栏') + ' (快捷键: V)';
             scBtn.setAttribute('aria-label', (collapsed ? '展开白板' : '折叠白板') + ' (V)');
         }
-        clamp(); draw(); save();
+        clamp(); window.FloatingWindowLayers?.resetViewportBase(panel); draw(); save();
         if (collapsed) phone.schedule(); else phone.start();
     }
     // 白板显示时按 V 折叠/展开；输入文字、组合快捷键和长按不受影响。
@@ -553,7 +553,9 @@
         });
         for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) panel.addEventListener(event, e => {
             if (gesture?.pointer !== e.pointerId) return;
-            gesture = null; if (panel.hasPointerCapture(e.pointerId)) panel.releasePointerCapture(e.pointerId); save();
+            gesture = null; if (panel.hasPointerCapture(e.pointerId)) panel.releasePointerCapture(e.pointerId);
+            window.FloatingWindowLayers?.resetViewportBase(panel);
+            save();
         });
         // 快捷键支持：Esc 关闭配对、结果或纯白板模式，Ctrl+Enter 快捷触发识别，Ctrl+C 复制画板图片
         panel.addEventListener('keydown', e => {
@@ -577,10 +579,29 @@
         for (const event of ['click', 'mousedown', 'pointerdown', 'keydown', 'keyup', 'wheel']) panel.addEventListener(event, e => e.stopPropagation());
         new ResizeObserver(() => { if (!panel.hidden) { updateResponsive(); draw(); } }).observe(panel);
         new ResizeObserver(draw).observe($('pad'));
-        window.addEventListener('resize', () => { if (!panel.hidden) { clamp(); draw(); } });
+        const syncLayoutOnViewportChange = () => {
+            if (panel.hidden) return;
+            window.FloatingWindowLayers?.syncViewportBottom(panel);
+            clamp();
+            window.FloatingWindowLayers?.noteViewportClamped(panel);
+            draw();
+        };
+        window.addEventListener('resize', syncLayoutOnViewportChange);
+        window.FloatingWindowLayers?.bindViewportFullscreenSync(panel, syncLayoutOnViewportChange);
     }
     window.HandwritingWhiteboard = {
-        show() { ensure(); panel.hidden = false; window.FloatingWindowLayers?.bringToFront(panel); clamp(); draw(); phone.start(); window.ReaderModelLabels?.refresh(); },
+        show() {
+            ensure(); panel.hidden = false; window.FloatingWindowLayers?.bringToFront(panel);
+            if (window.FloatingWindowLayers?.hasViewportBase(panel)) {
+                window.FloatingWindowLayers.syncViewportBottom(panel);
+                clamp();
+                window.FloatingWindowLayers.noteViewportClamped(panel);
+            } else {
+                clamp();
+                window.FloatingWindowLayers?.resetViewportBase(panel);
+            }
+            draw(); phone.start(); window.ReaderModelLabels?.refresh();
+        },
         hide,
         setPureMode(enabled) { ensure(); setPureMode(enabled); },
         isPureMode() { return !!pureMode; }

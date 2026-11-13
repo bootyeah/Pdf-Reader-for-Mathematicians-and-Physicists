@@ -1411,6 +1411,7 @@
             document.body.style.userSelect = '';
             document.removeEventListener('mousemove', onDragMove, true);
             document.removeEventListener('mouseup', onDragEnd, true);
+            window.FloatingWindowLayers?.resetViewportBase(panel);
             saveState();
         }
         headerEl.addEventListener('mousedown', function (e) {
@@ -1440,6 +1441,7 @@
             document.body.style.cursor = '';
             document.removeEventListener('mousemove', onResizeMove, true);
             document.removeEventListener('mouseup', onResizeEnd, true);
+            window.FloatingWindowLayers?.resetViewportBase(panel);
             saveState();
         }
         resizeHandle.addEventListener('mousedown', function (e) {
@@ -1456,14 +1458,15 @@
 
         window.addEventListener('blur', function () { onDragEnd(); onResizeEnd(); });
 
-        // 窗口尺寸变化时把面板拉回可视区
-        window.addEventListener('resize', function () {
+        // 窗口尺寸变化时保持底边贴靠并把面板拉回可视区
+        function syncLayoutOnViewportChange() {
             if (!panelVisible) return;
-            const maxLeft = Math.max(0, window.innerWidth - 120);
-            const maxTop = Math.max(getHeaderHeight(), window.innerHeight - 80);
-            if (panel.offsetLeft > maxLeft) panel.style.left = maxLeft + 'px';
-            if (panel.offsetTop > maxTop) panel.style.top = maxTop + 'px';
-        });
+            window.FloatingWindowLayers?.syncViewportBottom(panel);
+            clampViewportBounds();
+            window.FloatingWindowLayers?.noteViewportClamped(panel);
+        }
+        window.addEventListener('resize', syncLayoutOnViewportChange);
+        window.FloatingWindowLayers?.bindViewportFullscreenSync(panel, syncLayoutOnViewportChange);
 
         // 工具栏按钮
         if (toolbarBtn) {
@@ -1983,6 +1986,14 @@
     // =========================================================================
     // 八、显示 / 隐藏
     // =========================================================================
+    function clampViewportBounds() {
+        if (!panel) return;
+        const maxLeft = Math.max(0, window.innerWidth - 120);
+        const maxTop = Math.max(getHeaderHeight(), window.innerHeight - 80);
+        if (panel.offsetLeft > maxLeft) panel.style.left = maxLeft + 'px';
+        if (panel.offsetTop > maxTop) panel.style.top = maxTop + 'px';
+    }
+
     function showPanel() {
         ensureDom();
         refreshApiSettings().catch(function () {});
@@ -2003,6 +2014,14 @@
             top = Math.max(headerH, Math.min(top, Math.max(headerH, window.innerHeight - h - 8)));
             panel.style.left = Math.round(left) + 'px';
             panel.style.top = Math.round(top) + 'px';
+            window.FloatingWindowLayers?.resetViewportBase(panel);
+        } else if (window.FloatingWindowLayers?.hasViewportBase(panel)) {
+            window.FloatingWindowLayers.syncViewportBottom(panel);
+            clampViewportBounds();
+            window.FloatingWindowLayers.noteViewportClamped(panel);
+        } else {
+            clampViewportBounds();
+            window.FloatingWindowLayers?.resetViewportBase(panel);
         }
         syncToolbarButton(true);
         setTimeout(function () { if (inputEl) inputEl.focus(); }, 30);

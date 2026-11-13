@@ -123,7 +123,10 @@
             document.removeEventListener('mousemove', onMouseMove, true);
             document.removeEventListener('mouseup', onMouseUp, true);
             window.removeEventListener('blur', onMouseUp);
+            window.FloatingWindowLayers?.resetViewportBase(panel);
         }
+
+        window.FloatingWindowLayers?.bindViewportFullscreenSync(panel, syncDraggedPanelViewport);
 
         header.addEventListener('mousedown', function (e) {
             if (e.target.closest('#dict-panel-close')) return;
@@ -328,9 +331,22 @@
         showBubble(ctx.rect);
     }
 
+    function syncDraggedPanelViewport() {
+        if (!panel || panel.style.display === 'none' || !panelDragged) return;
+        window.FloatingWindowLayers?.syncViewportBottom(panel);
+        const panelW = panel.offsetWidth || 320;
+        const panelH = panel.offsetHeight || 180;
+        const maxLeft = Math.max(8, window.innerWidth - panelW - 8);
+        const maxTop = Math.max(8, window.innerHeight - Math.min(panelH, 60) - 8);
+        if (panel.offsetLeft > maxLeft) panel.style.left = maxLeft + 'px';
+        if (panel.offsetTop > maxTop) panel.style.top = maxTop + 'px';
+        window.FloatingWindowLayers?.noteViewportClamped(panel);
+    }
+
     function onScrollOrResize(e) {
         // 面板内部滚动不应触发关闭
         if (e && e.target && e.target.closest && e.target.closest('#dict-panel, #dict-bubble')) return;
+        if (e && e.type === 'resize') syncDraggedPanelViewport();
         
         // 当用户滚动或缩放屏幕时，尝试重新获取选区位置以使浮窗“附着”在文本上
         const sel = window.getSelection();
@@ -639,6 +655,7 @@
         hidePanel();
         current = null;
         panelDragged = false;
+        window.FloatingWindowLayers?.clearViewportBase(panel);
     }
 
     // ---------- 初始化 ----------

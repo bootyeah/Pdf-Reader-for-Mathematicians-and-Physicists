@@ -324,20 +324,39 @@
             }
         }
 
-        let isDragging = false, startX, startY, initialLeft, initialTop;
+        let isDragging = false, noteModalDragged = false, startX, startY, initialLeft, initialTop;
         const dragHeader = document.getElementById('note-header');
-        dragHeader.addEventListener('mousedown', (e) => { isDragging = true; startX = e.clientX; startY = e.clientY; const r = els.noteModal.getBoundingClientRect(); initialLeft = r.left; initialTop = r.top; dragHeader.style.cursor = 'grabbing'; });
+        dragHeader.addEventListener('mousedown', (e) => { isDragging = true; noteModalDragged = false; startX = e.clientX; startY = e.clientY; const r = els.noteModal.getBoundingClientRect(); initialLeft = r.left; initialTop = r.top; dragHeader.style.cursor = 'grabbing'; });
         document.addEventListener('mousemove', (e) => {
             if (!isDragging) return;
+            noteModalDragged = true;
             const r = els.noteModal.getBoundingClientRect();
             const nextLeft = Math.max(8, Math.min(window.innerWidth - r.width - 8, initialLeft + e.clientX - startX));
             const nextTop = Math.max(8, Math.min(window.innerHeight - r.height - 8, initialTop + e.clientY - startY));
             els.noteModal.style.left = `${nextLeft}px`;
             els.noteModal.style.top = `${nextTop}px`;
         });
-        const stopNoteHeaderDrag = () => { if (isDragging) { isDragging = false; dragHeader.style.cursor = 'move'; } };
+        const stopNoteHeaderDrag = () => {
+            if (!isDragging) return;
+            isDragging = false;
+            dragHeader.style.cursor = 'move';
+            if (noteModalDragged) window.FloatingWindowLayers?.resetViewportBase(els.noteModal);
+        };
         document.addEventListener('mouseup', stopNoteHeaderDrag);
         window.addEventListener('blur', stopNoteHeaderDrag);
+        const syncNoteModalViewport = () => {
+            if (!els.noteModal || els.noteModal.classList.contains('hidden')) return;
+            if (!window.FloatingWindowLayers?.hasViewportBase(els.noteModal)) return;
+            window.FloatingWindowLayers.syncViewportBottom(els.noteModal);
+            const r = els.noteModal.getBoundingClientRect();
+            const maxLeft = Math.max(8, window.innerWidth - r.width - 8);
+            const maxTop = Math.max(8, window.innerHeight - r.height - 8);
+            if (r.left > maxLeft) els.noteModal.style.left = `${maxLeft}px`;
+            if (r.top > maxTop) els.noteModal.style.top = `${maxTop}px`;
+            window.FloatingWindowLayers.noteViewportClamped(els.noteModal);
+        };
+        window.addEventListener('resize', syncNoteModalViewport);
+        window.FloatingWindowLayers?.bindViewportFullscreenSync(els.noteModal, syncNoteModalViewport);
 
         document.getElementById('font-minus-btn').addEventListener('click', (e) => { e.stopPropagation(); adjustFontSize(-0.2); });
         document.getElementById('font-plus-btn').addEventListener('click', (e) => { e.stopPropagation(); adjustFontSize(0.2); });

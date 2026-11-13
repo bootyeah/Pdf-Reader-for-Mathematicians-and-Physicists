@@ -813,15 +813,19 @@
         });
         resizeObserver.observe(viewportEl);
 
-        window.addEventListener('resize', () => {
+        const syncLayoutOnViewportChange = () => {
             if (!isOpen) return;
             if (isDocked) {
                 layoutDocked(panel.offsetWidth);
             } else {
+                window.FloatingWindowLayers?.syncViewportBottom(panel);
                 clampPosition();
+                window.FloatingWindowLayers?.noteViewportClamped(panel);
             }
             queueZoom();
-        });
+        };
+        window.addEventListener('resize', syncLayoutOnViewportChange);
+        window.FloatingWindowLayers?.bindViewportFullscreenSync(panel, syncLayoutOnViewportChange);
     }
 
     // ---------- 拖拽移动与 8 向缩放 ----------
@@ -903,6 +907,7 @@
             document.body.style.userSelect = gesture.userSelect;
             gesture = null;
             if (panel.hasPointerCapture(e.pointerId)) panel.releasePointerCapture(e.pointerId);
+            if (!isDocked) window.FloatingWindowLayers?.resetViewportBase(panel);
             saveState();
         };
 
@@ -1691,6 +1696,7 @@
             scheduleVisiblePages();
         }
         collapseBtn.setAttribute('aria-expanded', String(!isCollapsed));
+        if (!isDocked) window.FloatingWindowLayers?.resetViewportBase(panel);
         saveState();
     }
 
@@ -1727,6 +1733,7 @@
                 expandedHeight = savedFloatingRect.h;
             }
             clampPosition();
+            window.FloatingWindowLayers?.resetViewportBase(panel);
         }
         applyZoom(position);
         saveState();
@@ -1755,6 +1762,7 @@
         if (!isOpen) returnFocus = document.activeElement;
         panel.hidden = false;
         isOpen = true;
+        const firstShow = !restoredLayout;
         if (!restoredLayout) {
             restoredLayout = true;
             const saved = loadSavedState();
@@ -1773,7 +1781,17 @@
         bringToFront();
         panel.focus({ preventScroll: true });
         syncOpenButton();
-        clampPosition();
+        if (!isDocked) {
+            if (!firstShow && window.FloatingWindowLayers?.hasViewportBase(panel)) {
+                window.FloatingWindowLayers.syncViewportBottom(panel);
+            }
+            clampPosition();
+            if (firstShow || !window.FloatingWindowLayers?.hasViewportBase(panel)) {
+                window.FloatingWindowLayers?.resetViewportBase(panel);
+            } else {
+                window.FloatingWindowLayers?.noteViewportClamped(panel);
+            }
+        }
         if (currentScaleMode === 'fit-width' || currentScaleMode === 'fit-page') applyZoom();
         scheduleVisiblePages();
     }

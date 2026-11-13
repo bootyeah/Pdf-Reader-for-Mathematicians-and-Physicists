@@ -329,6 +329,70 @@ async function readCollapseDirState(locator) {
         approxEqual(vReloadExp.height, vExp.height, 2, 'Video expand after reload restores height');
         approxEqual(vReloadExp.y, vExp.y, 2, 'Video expand after reload restores original top');
 
+        // Drag video window so it overlaps/occludes the top toolbar (72px), then verify collapse/expand & reload never push it below the toolbar.
+        const dragVideoToTop = async targetTop => {
+            const panelBox = await vPanel.boundingBox();
+            const titleBox = await vPanel.locator('#video-panel-title').boundingBox();
+            const sx = titleBox.x + titleBox.width / 2;
+            const sy = titleBox.y + titleBox.height / 2;
+            await page.mouse.move(sx, sy);
+            await page.mouse.down();
+            await page.mouse.move(sx, sy + (targetTop - panelBox.y), { steps: 8 });
+            await page.mouse.up();
+        };
+        await dragVideoToTop(14);
+        const vOverlapExp = await vPanel.boundingBox();
+        assert.ok(vOverlapExp.y >= 0 && vOverlapExp.y < 30, `Video dragged over toolbar should stay near top=14, got y=${vOverlapExp.y}`);
+
+        // (a) ↓ mode: collapse keeps bottom fixed, expand restores top overlapping toolbar (must NOT jump below 72px).
+        await page.locator('#video-collapse-btn').click();
+        const vOverlapDownCol = await vPanel.boundingBox();
+        approxEqual(vOverlapDownCol.height, 38, 1.5, 'Video overlapping toolbar ↓ collapsed height');
+        approxEqual(vOverlapDownCol.y + vOverlapDownCol.height, vOverlapExp.y + vOverlapExp.height, 1.5, 'Video overlapping toolbar ↓ collapse anchors bottom');
+        await page.locator('#video-collapse-btn').click();
+        const vOverlapDownReexp = await vPanel.boundingBox();
+        approxEqual(vOverlapDownReexp.y, vOverlapExp.y, 1.5, 'Video overlapping toolbar ↓ expand must NOT jump below toolbar');
+        approxEqual(vOverlapDownReexp.height, vOverlapExp.height, 1.5, 'Video overlapping toolbar ↓ expand restores height');
+
+        // (b) ↑ mode: collapse & expand (via button and Shift) keep top fixed over the toolbar.
+        await vDir.locator('[data-collapse-dir="up"]').click();
+        await page.locator('#video-collapse-btn').click();
+        const vOverlapUpCol = await vPanel.boundingBox();
+        approxEqual(vOverlapUpCol.height, 38, 1.5, 'Video overlapping toolbar ↑ collapsed height');
+        approxEqual(vOverlapUpCol.y, vOverlapExp.y, 1.5, 'Video overlapping toolbar ↑ collapse must NOT jump below toolbar');
+        await page.keyboard.press('Shift');
+        const vOverlapUpReexp = await vPanel.boundingBox();
+        approxEqual(vOverlapUpReexp.y, vOverlapExp.y, 1.5, 'Video overlapping toolbar ↑ expand must NOT jump below toolbar');
+        approxEqual(vOverlapUpReexp.height, vOverlapExp.height, 1.5, 'Video overlapping toolbar ↑ expand restores height');
+
+        // (c) Reload while overlapping toolbar preserves top < 72px (both collapsed and expanded, including top=0).
+        await dragVideoToTop(0);
+        const vAtZero = await vPanel.boundingBox();
+        approxEqual(vAtZero.y, 0, 1.5, 'Video dragged to viewport top=0');
+        await page.keyboard.press('Shift');
+        approxEqual((await vPanel.boundingBox()).y, 0, 1.5, 'Video collapsed at top=0 stays at top=0');
+
+        await page.reload();
+        await instrument(page);
+        await loadFixture(page, 'a.pdf');
+        await page.keyboard.press('F9');
+        await vPanel.waitFor({ state: 'visible' });
+        await page.waitForFunction(() => {
+            const el = document.getElementById('video-panel');
+            return el && getComputedStyle(el).transform === 'none';
+        });
+        approxEqual((await vPanel.boundingBox()).y, 0, 1.5, 'Video reload preserves top=0 over toolbar');
+        await page.keyboard.press('Shift');
+        approxEqual((await vPanel.boundingBox()).y, 0, 1.5, 'Video expand after reload preserves top=0 over toolbar');
+
+        // (d) ↓ mode: dragging collapsed bar onto toolbar (y=12) and expanding clamps at top=0 (never jumps below 72px).
+        await vDir.locator('[data-collapse-dir="down"]').click();
+        await page.keyboard.press('Shift');
+        await dragVideoToTop(12);
+        approxEqual((await vPanel.boundingBox()).y, 12, 1.5, 'Video collapsed bar dragged to y=12');
+        await page.keyboard.press('Shift');
+        approxEqual((await vPanel.boundingBox()).y, 0, 1.5, 'Video ↓ expand from collapsed bar on toolbar clamps at top=0');
+
         // Narrow 280px video width + eye-protection mode check across all 3 windows.
         await page.evaluate(() => {
             document.body.classList.add('eye-protection-mode');

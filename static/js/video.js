@@ -81,7 +81,7 @@
     const STORAGE_KEY = 'pdf_reader_video_companion_state';
 
     // 顶部工具栏高度（与 LOCALPdfReader.html 里 header 的 h-[72px] 保持一致）：
-    // 悬浮播放器与其它浮层的 top 下限，避免被顶栏压住
+    // 悬浮播放器首次居中显示时的 top 下限，避免初始打开时压住顶栏
     const HEADER_HEIGHT = 72;
     function getHeaderHeight() { const h = document.querySelector('header'); return h ? h.offsetHeight : HEADER_HEIGHT; }
 
@@ -470,6 +470,7 @@
             document.body.style.userSelect = '';
             document.removeEventListener('mousemove', onDragMove, true);
             document.removeEventListener('mouseup', onDragEnd, true);
+            window.FloatingWindowLayers?.resetViewportBase(panel);
             saveWindowState();
         }
         header.addEventListener('mousedown', function (e) {
@@ -524,6 +525,7 @@
             document.body.style.cursor = '';
             document.removeEventListener('mousemove', onResizeMove, true);
             document.removeEventListener('mouseup', onResizeEnd, true);
+            window.FloatingWindowLayers?.resetViewportBase(panel);
             saveWindowState();
         }
 
@@ -550,16 +552,16 @@
             cancelCropGesture();
         });
 
-        // 窗口尺寸变化时防止浮窗越界
-        window.addEventListener('resize', function () {
+        // 窗口尺寸变化时保持底边贴靠并防止浮窗越界
+        function syncLayoutOnViewportChange() {
             if (!panel || !panelVisible) return;
-            const curLeft = panel.offsetLeft;
-            const curTop = panel.offsetTop;
-            const maxLeft = Math.max(0, window.innerWidth - (panel.offsetWidth || 320));
-            const maxTop = Math.max(0, window.innerHeight - 48);
-            if (curLeft > maxLeft) panel.style.left = Math.max(8, maxLeft) + 'px';
-            if (curTop > maxTop) panel.style.top = Math.max(getHeaderHeight(), maxTop) + 'px';
-        });
+            if (document.fullscreenElement && panel.contains(document.fullscreenElement)) return;
+            window.FloatingWindowLayers?.syncViewportBottom(panel);
+            clampViewportBounds();
+            window.FloatingWindowLayers?.noteViewportClamped(panel);
+        }
+        window.addEventListener('resize', syncLayoutOnViewportChange);
+        window.FloatingWindowLayers?.bindViewportFullscreenSync(panel, syncLayoutOnViewportChange);
 
         if (toolbarBtn) toolbarBtn.addEventListener('click', function () { togglePanel(); });
 
@@ -832,7 +834,7 @@
             bottom: panel.offsetTop + panel.offsetHeight,
             height: panel.offsetHeight
         };
-        const minTop = getHeaderHeight();
+        const minTop = 0;
         isCollapsed = !isCollapsed;
         if (isCollapsed) {
             panel.classList.add('is-collapsed');
@@ -870,6 +872,7 @@
         updateHeaderShortcutBtn();
         cancelCropGesture();
         updateCropLayout();
+        window.FloatingWindowLayers?.resetViewportBase(panel);
         saveWindowState();
     }
 
@@ -904,11 +907,12 @@
             if (s.width) panel.style.width = s.width;
             if (s.height) panel.style.height = s.height;
             if (s.left && s.top) {
-                const headerH = getHeaderHeight();
                 const maxLeft = Math.max(0, window.innerWidth - (parseInt(s.width, 10) || 320));
                 const maxTop = Math.max(0, window.innerHeight - 48);
-                panel.style.left = Math.min(Math.max(8, parseInt(s.left, 10) || 0), maxLeft) + 'px';
-                panel.style.top = Math.min(Math.max(headerH, parseInt(s.top, 10) || headerH), maxTop) + 'px';
+                const parsedLeft = parseInt(s.left, 10);
+                const parsedTop = parseInt(s.top, 10);
+                panel.style.left = Math.min(Math.max(0, Number.isFinite(parsedLeft) ? parsedLeft : 8), maxLeft) + 'px';
+                panel.style.top = Math.min(Math.max(0, Number.isFinite(parsedTop) ? parsedTop : getHeaderHeight()), maxTop) + 'px';
             }
             if (s.isCollapsed) {
                 isCollapsed = true;
@@ -1458,6 +1462,16 @@
     }
 
     // ---------- 显示 / 隐藏 ----------
+    function clampViewportBounds() {
+        if (!panel) return;
+        const curLeft = panel.offsetLeft;
+        const curTop = panel.offsetTop;
+        const maxLeft = Math.max(0, window.innerWidth - (panel.offsetWidth || 320));
+        const maxTop = Math.max(0, window.innerHeight - 48);
+        if (curLeft > maxLeft) panel.style.left = Math.max(8, maxLeft) + 'px';
+        if (curTop > maxTop) panel.style.top = maxTop + 'px';
+    }
+
     function showPanel() {
         ensureDom();
         if (!panelVisible) {
@@ -1472,6 +1486,14 @@
                 const h = panel.offsetHeight || 380;
                 panel.style.left = Math.max(8, Math.round((window.innerWidth - w) / 2)) + 'px';
                 panel.style.top = Math.max(getHeaderHeight(), Math.round((window.innerHeight - h) / 2)) + 'px';
+                window.FloatingWindowLayers?.resetViewportBase(panel);
+            } else if (window.FloatingWindowLayers?.hasViewportBase(panel)) {
+                window.FloatingWindowLayers.syncViewportBottom(panel);
+                clampViewportBounds();
+                window.FloatingWindowLayers.noteViewportClamped(panel);
+            } else {
+                clampViewportBounds();
+                window.FloatingWindowLayers?.resetViewportBase(panel);
             }
         }
         updateHint();

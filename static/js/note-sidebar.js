@@ -64,6 +64,7 @@
             
             els.noteModal.style.left = `${Math.max(10, left)}px`;
             els.noteModal.style.top = `${Math.max(10, top)}px`;
+            window.FloatingWindowLayers?.clearViewportBase(els.noteModal);
 
             if (anno.note && !forceEditMode) {
                 setNoteMode('preview');

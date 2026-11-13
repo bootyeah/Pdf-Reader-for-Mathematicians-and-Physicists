@@ -102,6 +102,113 @@
         return Math.max(minTop, Math.min(Math.round(rawTop), upperTop));
     }
 
+    // 视口高度变化（如进入/退出全屏或缩放窗口）时，保持贴近底部的悬浮窗继续贴合新视口底部。
+    const viewportTrackers = new WeakMap();
+    const fullscreenSyncHandlers = new Map();
+    const BOTTOM_ANCHOR_GAP = 48;
+
+    function isAtViewportBottom(top, height, viewportH) {
+        if (!(height > 0) || !(viewportH > 0)) return false;
+        const bottomGap = viewportH - (top + height);
+        const minTop = Math.max(88, Math.min(120, viewportH * 0.16));
+        return bottomGap <= BOTTOM_ANCHOR_GAP && top > minTop;
+    }
+
+    function hasViewportBase(panel) {
+        return !!(panel && viewportTrackers.has(panel));
+    }
+
+    function resetViewportBase(panel, viewportH = window.innerHeight) {
+        if (!panel) return;
+        const top = panel.offsetTop;
+        const height = panel.offsetHeight;
+        if (!(height > 0)) return;
+        viewportTrackers.set(panel, {
+            viewportH,
+            lastTop: top,
+            lastHeight: height,
+            anchored: isAtViewportBottom(top, height, viewportH)
+        });
+    }
+
+    function clearViewportBase(panel) {
+        if (panel) viewportTrackers.delete(panel);
+    }
+
+    function noteViewportClamped(panel, viewportH = window.innerHeight) {
+        if (!panel) return;
+        const tracker = viewportTrackers.get(panel);
+        if (!tracker) return;
+        tracker.viewportH = viewportH;
+        tracker.lastTop = panel.offsetTop;
+        tracker.lastHeight = panel.offsetHeight;
+    }
+
+    function syncViewportBottom(panel, options = {}) {
+        if (!panel) return false;
+        if (document.fullscreenElement && document.fullscreenElement !== document.documentElement) return false;
+        const nextH = window.innerHeight;
+        const curHeight = panel.offsetHeight;
+        if (!(curHeight > 0) || !(nextH > 0)) return false;
+
+        const curTop = panel.offsetTop;
+        const tracker = viewportTrackers.get(panel);
+        if (!tracker) {
+            viewportTrackers.set(panel, {
+                viewportH: nextH,
+                lastTop: curTop,
+                lastHeight: curHeight,
+                anchored: isAtViewportBottom(curTop, curHeight, nextH)
+            });
+            return false;
+        }
+
+        const prevH = tracker.viewportH;
+        if (nextH === prevH) return false;
+
+        const movedExternally = Math.abs(curTop - tracker.lastTop) > 1 || Math.abs(curHeight - tracker.lastHeight) > 1;
+        const anchored = movedExternally
+            ? isAtViewportBottom(curTop, curHeight, prevH)
+            : tracker.anchored;
+
+        const delta = nextH - prevH;
+        let shifted = false;
+        if (anchored && delta !== 0) {
+            const minTop = Number.isFinite(options.minTop) ? options.minTop : 0;
+            const maxTop = Number.isFinite(options.maxTop)
+                ? options.maxTop
+                : Math.max(minTop, nextH - 48);
+            const nextTop = Math.max(minTop, Math.min(Math.round(curTop + delta), maxTop));
+            if (nextTop !== curTop) {
+                panel.style.top = nextTop + 'px';
+                shifted = true;
+            }
+        }
+
+        tracker.viewportH = nextH;
+        tracker.lastTop = panel.offsetTop;
+        tracker.lastHeight = panel.offsetHeight;
+        tracker.anchored = anchored;
+        return shifted;
+    }
+
+    function bindViewportFullscreenSync(panel, handler) {
+        if (panel && typeof handler === 'function') {
+            fullscreenSyncHandlers.set(panel, handler);
+        }
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+        if (document.fullscreenElement && document.fullscreenElement !== document.documentElement) return;
+        for (const [panel, handler] of fullscreenSyncHandlers) {
+            if (!panel.isConnected) {
+                fullscreenSyncHandlers.delete(panel);
+                continue;
+            }
+            handler();
+        }
+    });
+
     window.FloatingWindowLayers = {
         bringToFront,
         attach,
@@ -109,6 +216,12 @@
         collapseDirectionHtml,
         syncCollapseDirectionControl,
         bindCollapseDirectionControl,
-        computeCollapseAnchorTop
+        computeCollapseAnchorTop,
+        hasViewportBase,
+        resetViewportBase,
+        clearViewportBase,
+        noteViewportClamped,
+        syncViewportBottom,
+        bindViewportFullscreenSync
     };
 })();
