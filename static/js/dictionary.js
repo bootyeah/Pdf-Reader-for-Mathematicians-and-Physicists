@@ -288,9 +288,10 @@
             }
 
             stable = 0;
-            if (!findPageWrapper(ctx.pageNum)) {     // 该页已被回收，锚点失去意义
+            if (!findPageWrapper(ctx.pageNum)) {     // 该页已被虚拟滚动回收：停止还原选区，已展开面板保持可读
                 stopSelectionRestore();
-                if (current === ctx) hideAll();
+                hideBubble();
+                if (!panel || panel.style.display !== 'block') hideAll();
                 return;
             }
             const range = buildRangeFromOffsets(ctx);
@@ -646,9 +647,6 @@
         document.addEventListener('mouseup', onDocumentMouseUp);
         window.addEventListener('scroll', onScrollOrResize, true);
         window.addEventListener('resize', onScrollOrResize);
-        if (typeof els !== 'undefined' && els.container) {
-            els.container.addEventListener('scroll', onScrollOrResize);
-        }
         // 页面缩放时（工具栏的 % 读数会被改写）立即同步气泡尺寸：
         //   · 选区还在 → 量一次新位置把气泡贴回去
         //   · 选区被重建流程清空了 → 走还原流程，等文本层重建好后把蓝色高亮和气泡一起恢复

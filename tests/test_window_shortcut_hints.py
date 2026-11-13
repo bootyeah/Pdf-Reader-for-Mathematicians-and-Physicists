@@ -44,7 +44,7 @@ class TestWindowShortcutHints(unittest.TestCase):
         self.assertIn('video-header-shortcut-btn', video_content)
         self.assertIn('video-shortcut-btn', video_content)
         self.assertIn('<kbd class="ws-key">Shift</kbd>', video_content)
-        self.assertIn('视频伴读', video_content)
+        self.assertIn('title="视频">视频</strong>', video_content)
 
         mm_content = (ROOT / 'static/js/mindmap.js').read_text(encoding='utf-8')
         self.assertIn('shortcutBtn: document.getElementById(\'mindmap-shortcut-btn\')', mm_content)

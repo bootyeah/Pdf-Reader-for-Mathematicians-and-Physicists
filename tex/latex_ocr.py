@@ -98,7 +98,7 @@ class ApiError(RuntimeError):
         self.code = code
 
 
-def _post_chat(cfg, img_b64, model):
+def _post_chat(cfg, img_b64, model, is_fallback=False):
     """按指定模型发一次 chat/completions 请求。"""
     url = api_settings.completion_url(str(cfg.get("base_url", "")))
     payload = {
@@ -118,7 +118,7 @@ def _post_chat(cfg, img_b64, model):
         # 避免推理内容混进 LaTeX 结果，同时减少等待时间。
         "thinking": {"type": "disabled"},
     }
-    api_settings.apply_parameters(payload, cfg)
+    api_settings.apply_parameters(payload, cfg, model=model, allow_fallback=is_fallback)
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -169,7 +169,7 @@ def call_api(cfg, img_b64):
         log(f"主模型 {model} 拥堵（{exc}），自动降级到 {fallback} 重试")
         time.sleep(0.4)  # 官方建议增加重试间隔，避免立即高频重试
         retry_cfg = dict(cfg, model=fallback)
-        return _post_chat(retry_cfg, img_b64, fallback)
+        return _post_chat(retry_cfg, img_b64, fallback, is_fallback=True)
 
 
 def _is_overload(exc):

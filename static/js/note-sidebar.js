@@ -898,17 +898,21 @@
         }
 
         window.syncVirtualCursor = function() {
+            if (cursorSyncFrameId) cancelAnimationFrame(cursorSyncFrameId);
+            cursorSyncFrameId = null;
             // 1. 如果退出了编辑模式，彻底清理光标并终止雷达
             if (!state.isEditingNote) {
                 const vCursor = document.getElementById('virtual-cursor');
                 if (vCursor) vCursor.style.display = 'none';
-                if (cursorSyncFrameId) cancelAnimationFrame(cursorSyncFrameId);
-                cursorSyncFrameId = null;
                 return;
             }
 
             // 2. 🚀 只要还在编辑状态，雷达绝对不能停！立刻挂载下一帧扫描！
             cursorSyncFrameId = requestAnimationFrame(window.syncVirtualCursor);
+
+            if (phantomMemo.text === els.noteInput.value) {
+                refreshActiveTextCursor();
+            }
 
             // 3. 只取「当前正在编辑的文本块」里的幻影节点，其它块的一律不算数
             const phantom = phantomCursorIn(phantomMemo.div);

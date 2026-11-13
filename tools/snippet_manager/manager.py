@@ -150,9 +150,10 @@ class ManagerHandler(BaseHTTPRequestHandler):
         elif path.startswith("/static/lib/"):
             # Map /static/lib/... to PROJECT_ROOT/static/lib/...
             rel_path = path[len("/static/lib/"):]
-            target = (PROJECT_ROOT / "static" / "lib" / rel_path).resolve()
+            lib_root = (PROJECT_ROOT / "static" / "lib").resolve()
+            target = (lib_root / rel_path).resolve()
             # Prevent path traversal
-            if str(target).startswith(str((PROJECT_ROOT / "static" / "lib").resolve())):
+            if target.is_relative_to(lib_root):
                 self.serve_static(target)
             else:
                 self.send_data(403, {"error": "禁止访问该目录。"})
@@ -161,25 +162,38 @@ class ManagerHandler(BaseHTTPRequestHandler):
         else:
             self.send_data(404, {"error": "页面不存在。"})
 
+    def _drain_bounded(self, size, limit=65536):
+        remaining = min(max(size, 0), limit)
+        try:
+            while remaining > 0:
+                chunk = self.rfile.read(min(16384, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except OSError:
+            pass
+        if size > limit:
+            self.close_connection = True
+
     def do_POST(self):
         try:
             size = int(self.headers.get("Content-Length", "0"))
         except (ValueError, TypeError):
             size = 0
 
-        raw_body = self.rfile.read(size) if 0 < size <= MAX_BODY else b""
-        if size > MAX_BODY:
-            try:
-                self.rfile.read(size)
-            except Exception:
-                pass
-
         if not self.authorized(api=True):
+            if size > 0:
+                self._drain_bounded(size)
             return
 
+        if not 0 < size <= MAX_BODY or self.headers.get_content_type() != "application/json":
+            if size > 0:
+                self._drain_bounded(size)
+            self.send_data(400, {"error": "请求必须是有效的 JSON，且小于 2 MB。"}, close_conn=(size > MAX_BODY))
+            return
+
+        raw_body = self.rfile.read(size)
         try:
-            if not 0 < size <= MAX_BODY or self.headers.get_content_type() != "application/json":
-                raise storage.StorageError("请求必须是有效的 JSON，且小于 2 MB。")
             body = json.loads(raw_body)
             if not isinstance(body, dict):
                 raise storage.StorageError("无效的请求。")

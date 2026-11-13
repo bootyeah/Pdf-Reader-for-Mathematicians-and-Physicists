@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import socket
 import sys
 import tempfile
 import threading
@@ -532,6 +533,45 @@ class ManagerTests(unittest.TestCase):
                 self.assertFalse(result['ok'])
                 self.assertNotIn('None', result['error'])
                 self.assertEqual(len(Upstream.calls), count + 1)
+
+    def test_max_tokens_route_cap_disable_thinking_and_fallback_adaptation(self):
+        self.update('chat', model='busy', fallback_model='GLM-5.3-Flash', thinking='high', max_tokens=100000)
+        # /api/chat must not silently clamp max_tokens at 65536 when API Manager allows up to 1,000,000.
+        status, result = self.request('/api/chat', {
+            'messages': [{'role': 'user', 'content': 'hi'}],
+            'thinking': False,
+            'max_tokens': 100000,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(result['model'], 'GLM-5.3-Flash')
+        last_body = Upstream.calls[-1]['body']
+        self.assertEqual(last_body['max_tokens'], 100000)
+        self.assertEqual(last_body['thinking'], {'type': 'enabled'})
+        self.assertEqual(last_body['reasoning_effort'], 'low')
+        # Strict validation still rejects incompatible primary configuration.
+        with self.assertRaises(settings.ConfigError):
+            settings.apply_parameters({'model': 'GLM-5.3-Flash'}, {'thinking': 'disabled'})
+        # Verify disable_thinking polarity in Reader._call_deepseek.
+        handler = Reader.__new__(Reader)
+        handler._active_translate_config = settings.resolve('dictionary', {})
+        handler._active_translate_config['thinking'] = 'disabled'
+        handler._call_deepseek([{'role': 'user', 'content': 'hello'}], disable_thinking=True)
+        self.assertEqual(Upstream.calls[-1]['body']['thinking'], {'type': 'disabled'})
+        handler._call_deepseek([{'role': 'user', 'content': 'hello'}], disable_thinking=False)
+        self.assertEqual(Upstream.calls[-1]['body']['thinking'], {'type': 'enabled'})
+
+    def test_unauthenticated_oversized_post_rejected_immediately(self):
+        req = (
+            f'POST /api/save HTTP/1.0\r\n'
+            f'Host: 127.0.0.1:{self.fx.manager.server_port}\r\n'
+            f'Content-Type: application/json\r\n'
+            f'Origin: https://evil.test\r\n'
+            f'Content-Length: 999999999\r\n\r\n{{}}'
+        ).encode('ascii')
+        with socket.create_connection(('127.0.0.1', self.fx.manager.server_port), timeout=3) as sock:
+            sock.sendall(req)
+            resp = sock.recv(1024)
+        self.assertIn(b' 403 ', resp)
 
 
 if __name__ == '__main__':

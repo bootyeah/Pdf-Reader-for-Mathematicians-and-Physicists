@@ -1064,7 +1064,7 @@
                 // 3. 数组型批注 (高亮、下划线、括号)
                 else if (anno.rects && anno.rects.length > 0) {
                     let minX = Infinity;
-                    anno.rects.forEach(r => { if (r.x < minX) minX = r.x; });
+                    if (Array.isArray(anno.rects)) anno.rects.forEach(r => { if (r.x < minX) minX = r.x; });
                     if (minX >= 0.98) isSidecarOnly = true;
                 }
                 
@@ -1329,7 +1329,9 @@
                         head.setAttribute("fill", color); 
                         head.setAttribute("opacity", "0.7"); 
                         
-                        line.addEventListener('click', (e) => { e.stopPropagation(); els.modalTitle.textContent = "箭头"; openNoteModal(anno, pageNum, e.clientX, e.clientY); });
+                        const openArrowNote = (e) => { e.stopPropagation(); els.modalTitle.textContent = "箭头"; openNoteModal(anno, pageNum, e.clientX, e.clientY); };
+                        line.addEventListener('click', openArrowNote);
+                        head.addEventListener('click', openArrowNote);
                         svg.appendChild(line); svg.appendChild(head);
 
                     }
@@ -1499,7 +1501,7 @@
                     container.appendChild(svg);
 
                 } else {
-                    anno.rects.forEach(r => {
+                    if (Array.isArray(anno.rects)) anno.rects.forEach(r => {
                         const el = document.createElement('div');
                         el.className = (anno.type === 'highlight' ? 'highlight-rect' : 'underline-rect') + (isSidecarOnly ? ' sidecar-only-anno' : '');
                         el.style.left = (r.x * w) + 'px'; el.style.top = (r.y * h) + 'px';
@@ -1509,7 +1511,7 @@
                             el.style.borderBottomColor = color;
                             el.style.borderBottomWidth = `${2 * currentScale}px`; 
                         }
-                        el.addEventListener('click', (e) => { e.stopPropagation(); el.scrollIntoView({behavior: "smooth", block: "center"}); els.modalTitle.textContent = "批注"; openNoteModal(anno, pageNum, e.clientX, e.clientY); });
+                        el.addEventListener('click', (e) => { e.stopPropagation(); els.modalTitle.textContent = "批注"; openNoteModal(anno, pageNum, e.clientX, e.clientY); });
                         container.appendChild(el);
                     });
                 }

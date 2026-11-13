@@ -74,6 +74,7 @@
     const msgEntryMap = new WeakMap(); // wrap (.ds-msg) -> history entry {role, content}
     let history = [];              // [{role:'user'|'assistant', content:string|Array}]
     let attachments = [];          // 待发送图片 [{id, dataUrl, name}]
+    let pendingImages = 0;         // 正在异步读取中的图片数，防止并发超额
     let streaming = false;         // 正在生成
     let abortController = null;
     let panelVisible = false;
@@ -131,9 +132,14 @@
             });
             buildModelMenu();
             apiRevision = cfg.revision;
-            setModel(changed ? cfg.model : model);
-            if (changed) setThinking(isThinkingModeEnabled(modelThinking[model] || cfg.thinking));
-            syncThinkingAvailability();
+            if (changed) {
+                setModel(cfg.model);
+                setThinking(isThinkingModeEnabled(modelThinking[model] || cfg.thinking));
+            } else if (!MODELS.some(function (m) { return m.id === model; })) {
+                setModel(cfg.model);
+            } else {
+                syncThinkingAvailability();
+            }
         })().finally(function () { apiRefresh = null; });
         return apiRefresh;
     }
@@ -1078,7 +1084,8 @@
 
     // 把当前累积的文本铺进气泡：思考块（若有）在上，正文在下
     function paintStream(state) {
-        if (state.headEl && state.reasoning) {
+        if (state.headEl && state.reasoning && state.renderedReasoningLen !== state.reasoning.length) {
+            state.renderedReasoningLen = state.reasoning.length;
             state.headEl.style.display = '';
             // 思考过程只当速记本看：里面的 TikZ 不送去编译（真正要画的是正文里那份）
             state.headEl.querySelector('.ds-reasoning-body').innerHTML =
@@ -1172,6 +1179,7 @@
         }
         setModel(data.model || MODELS[0].id);
         setThinking(!!data.thinking);
+        syncThinkingAvailability();
 
         if (Array.isArray(data.history) && data.history.length) {
             clearBody();
@@ -1197,7 +1205,11 @@
     }
 
     function storedEntry(m) {
-        const entry = { role: m.role, content: typeof m.content === 'string' ? m.content : getEntryText(m) };
+        let text = typeof m.content === 'string' ? m.content : getEntryText(m);
+        if (!text && Array.isArray(m.content) && m.content.some(function (p) { return p && p.type === 'image_url'; })) {
+            text = '[图片]';
+        }
+        const entry = { role: m.role, content: text };
         if (m.role === 'assistant') {
             for (const key of ['reasoning_content', '_reader_model']) {
                 if (typeof m[key] === 'string') entry[key] = m[key];
@@ -1213,7 +1225,7 @@
         closeBtn.addEventListener('click', function (e) { e.stopPropagation(); hidePanel(); });
         clearBtn.addEventListener('click', function (e) {
             e.stopPropagation();
-            if (!history.length) return;
+            if (!history.length && !bodyEl.querySelector('.ds-msg')) return;
             // 直接清空，不弹确认框（清空只是本地动作，不会动 PDF 与批注）
             history = [];
             clearBody();
@@ -1351,8 +1363,9 @@
             if (rHead) rHead.parentNode.classList.toggle('collapsed');
         });
 
-        // 只在对话区放行原生右键菜单；PDF 区域继续使用阅读器原来的行为。
+        // 只在对话区放行原生右键菜单；隔离滚轮；PDF 区域继续使用阅读器原来的行为。
         panel.addEventListener('contextmenu', function (e) { e.stopPropagation(); });
+        panel.addEventListener('wheel', function (e) { e.stopPropagation(); }, { passive: true });
         bodyEl.addEventListener('mousedown', function (e) {
             if (e.target.closest('.ds-message-copy, .ds-msg-action, .ds-edit-btn')) { e.preventDefault(); return; }
             if (e.button === 0) selectingBody = e.target.closest('.ds-content');
@@ -1671,12 +1684,21 @@
                 flashHint('图片过大（上限 8 MB）');
                 return;
             }
-            if (attachments.length >= MAX_IMAGES) {
+            if (attachments.length + pendingImages >= MAX_IMAGES) {
                 flashHint('单条消息最多 ' + MAX_IMAGES + ' 张图片');
                 return;
             }
+            pendingImages++;
             const reader = new FileReader();
+            const finishRead = function () {
+                pendingImages = Math.max(0, pendingImages - 1);
+            };
             reader.onload = function () {
+                finishRead();
+                if (attachments.length >= MAX_IMAGES) {
+                    flashHint('单条消息最多 ' + MAX_IMAGES + ' 张图片');
+                    return;
+                }
                 attachments.push({
                     id: 'img-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
                     dataUrl: reader.result,
@@ -1685,6 +1707,7 @@
                 renderThumbs();
                 inputEl.focus();
             };
+            reader.onerror = reader.onabort = finishRead;
             reader.readAsDataURL(file);
         });
     }
@@ -1810,15 +1833,20 @@
         try {
             await refreshApiSettings();
             if (abortController.signal.aborted) throw new DOMException('Stopped', 'AbortError');
+            const reqModel = model;
+            const reqThinking = thinkingAllowed() ? thinking : undefined;
+            state.model = reqModel;
+            const loadingTextEl = state.bodyEl.querySelector('.ds-chat-loading span:last-child');
+            if (loadingTextEl) loadingTextEl.textContent = reqThinking ? '正在深度思考…' : '正在思考…';
             const resp = await fetch(API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 signal: abortController.signal,
                 body: JSON.stringify({
                     messages: history,
-                    model: model,
+                    model: reqModel,
                     stream: true,
-                    thinking: thinkingAllowed() ? thinking : undefined
+                    thinking: reqThinking
                 })
             });
 

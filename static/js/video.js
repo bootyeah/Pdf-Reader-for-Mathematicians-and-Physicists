@@ -250,8 +250,13 @@
         restoreWindowState();
     }
 
+    function hasLoadedVideo() {
+        return !!(dashPlayer || (video && (video.getAttribute('src') || video.currentSrc)));
+    }
+
     // ---------- 事件绑定 ----------
     function bindEvents() {
+        panel.addEventListener('wheel', function (e) { e.stopPropagation(); }, { passive: true });
         openBtn.addEventListener('click', function (e) { e.stopPropagation(); openVideo(); });
         urlBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleUrlInput(urlForm.hidden); });
         urlForm.addEventListener('submit', openOnlineVideo);
@@ -330,7 +335,7 @@
                 }
                 overlayClickTimer = setTimeout(function () {
                     overlayClickTimer = null;
-                    if (!video.src && !dashPlayer) { openVideo(); return; }
+                    if (!hasLoadedVideo()) { openVideo(); return; }
                     if (video.paused) {
                         video.play();
                         showHud('播放');
@@ -595,7 +600,7 @@
             }
 
             if (isTyping || e.ctrlKey || e.metaKey || e.altKey) return;
-            if (!video || !video.src) return;
+            if (!panelVisible || !hasLoadedVideo()) return;
 
             // Z / X 倍速微调（全局有效）
             if (e.key === 'z' || e.key === 'Z') {
@@ -1075,13 +1080,21 @@
         if (resume) {
             restorePlaybackListener = function () {
                 restorePlaybackListener = null;
-                video.currentTime = Math.min(resume.time, Math.max(0, video.duration - 0.1));
+                if (Number.isFinite(video.duration)) {
+                    video.currentTime = Math.min(resume.time, Math.max(0, video.duration - 0.1));
+                } else if (resume.time > 0) {
+                    video.currentTime = resume.time;
+                }
                 if (resume.crop) { cropRegion = resume.crop; updateCropLayout(); }
                 if (resume.paused) video.pause();
             };
             video.addEventListener('loadedmetadata', restorePlaybackListener, { once: true });
         }
         if (file.transport === 'dash') {
+            if (video.getAttribute('src')) {
+                video.removeAttribute('src');
+                video.load();
+            }
             const player = window.dashjs.MediaPlayer().create();
             dashPlayer = player;
             player.updateSettings({ debug: { logLevel: 0 } });
@@ -1281,7 +1294,7 @@
 
     // ---------- 字幕 ----------
     function openSubtitle() {
-        if (!video.src) { alert('请先打开视频，再加载字幕。'); return; }
+        if (!hasLoadedVideo()) { alert('请先打开视频，再加载字幕。'); return; }
 
         let input = document.getElementById('video-subtitle-input');
         if (!input) {
@@ -1301,7 +1314,7 @@
     }
 
     async function loadSubtitle(file) {
-        if (!video.src) { alert('请先打开视频，再加载字幕。'); return; }
+        if (!hasLoadedVideo()) { alert('请先打开视频，再加载字幕。'); return; }
         const loadId = ++subtitleLoadId;
         let text;
         try {
@@ -1435,7 +1448,7 @@
 
     function updateHint() {
         if (!hintEl || !video) return;
-        const hasVideo = !!dashPlayer || !!(video.src || video.currentSrc);
+        const hasVideo = hasLoadedVideo();
         hintEl.style.display = hasVideo ? 'none' : 'flex';
         video.style.display = hasVideo ? 'block' : 'none';
         if (overlayEl) overlayEl.style.display = hasVideo ? 'block' : 'none';

@@ -101,11 +101,7 @@
             closeBtn: document.getElementById('mindmap-close-btn'),
             shortcutBtn: document.getElementById('mindmap-shortcut-btn'),
             centerBtn: document.getElementById('mindmap-center-btn'),
-            toggleAllBtn: document.getElementById('mindmap-toggle-all-btn'),
-            bindCurrentBtn: document.getElementById('mindmap-bind-current-btn'),
-            addChainBtn: document.getElementById('mindmap-add-chain-btn'),
-            forkBtn: document.getElementById('mindmap-fork-btn'),
-            mergeBtn: document.getElementById('mindmap-merge-btn')
+            toggleAllBtn: document.getElementById('mindmap-toggle-all-btn')
         };
         if (elsObj.panel && elsObj.treeRoot) _cachedEls = elsObj;
         return elsObj;
@@ -2987,11 +2983,16 @@
             });
         }
 
-        // 自适应高度并实时更新贝塞尔连接线
+        // 自适应高度并按帧合并更新贝塞尔连接线（高度未变时不重算全图连线）
+        let lastAutoHeight = 0;
         const autoHeight = () => {
             textarea.style.height = 'auto';
-            textarea.style.height = Math.max(48, textarea.scrollHeight) + 'px';
-            updateSvgConnections();
+            const nextHeight = Math.max(48, textarea.scrollHeight);
+            textarea.style.height = nextHeight + 'px';
+            if (nextHeight !== lastAutoHeight) {
+                lastAutoHeight = nextHeight;
+                scheduleSvgConnectionsUpdate();
+            }
         };
         autoHeight();
         textarea.addEventListener('input', autoHeight);
@@ -3856,6 +3857,15 @@
         }
     }
 
+    let svgUpdateRaf = 0;
+    function scheduleSvgConnectionsUpdate() {
+        if (svgUpdateRaf) return;
+        svgUpdateRaf = requestAnimationFrame(() => {
+            svgUpdateRaf = 0;
+            updateSvgConnections();
+        });
+    }
+
     function updateSvgConnections() {
         const els = getEls();
         if (!els.canvas || !els.treeRoot) return;
@@ -3880,7 +3890,7 @@
         ].map(([id, color]) => `<marker id="${id}" viewBox="0 0 10 10" refX="7.5" refY="5"
             markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
             <path d="M 1.5 1.5 C 5.5 2, 7.5 3.5, 7.5 5 C 7.5 6.5, 5.5 8, 1.5 8.5" fill="none" stroke="${color}"
-                stroke-width="${id.endsWith('-active') ? '2' : '1.6'}" stroke-linecap="round" />
+                stroke-width="${id.endsWith('-active') ? '1.8' : '1.5'}" stroke-linecap="round" />
         </marker>`).join('')}</defs>`;
 
         const data = getMindMapData();
@@ -5169,18 +5179,6 @@
         const count = selectedNodeIds.size || (selectedNodeId ? 1 : 0);
         const label = document.getElementById('mindmap-selection-label');
         if (label) label.textContent = count ? `已选 ${count} 项` : '点选节点开始编辑';
-        if (els.forkBtn) {
-            const vertical = selectedNodeId && isVerticalSpineNode(getMindMapData(), selectedNodeId);
-            els.forkBtn.hidden = count === 1 && !vertical;
-            els.forkBtn.disabled = count !== 1 || !vertical;
-        }
-        if (els.bindCurrentBtn) els.bindCurrentBtn.disabled = count !== 1;
-        if (els.mergeBtn) {
-            els.mergeBtn.disabled = !count;
-            const text = els.mergeBtn.querySelector('span');
-            if (text) text.textContent = count > 1 ? '合流' : '连接';
-            els.mergeBtn.title = count > 1 ? `将所选 ${count} 个节点合流为新节点 (Enter)` : '合流、连线与内容融合';
-        }
     }
 
     function selectNode(nodeId, scrollIntoView = true, isMulti = false) {
@@ -5355,12 +5353,6 @@
                 toggleAllNodes(null);
             });
         }
-        if (els.addChainBtn) {
-            els.addChainBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                addMainChain();
-            });
-        }
         if (els.addPageBtn) {
             els.addPageBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -5404,63 +5396,6 @@
                     els.pagesList.scrollLeft += (e.deltaY || e.deltaX);
                 }
             }, { passive: false });
-        }
-        if (els.forkBtn) {
-            els.forkBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (!selectedNodeId) {
-                    const data = getMindMapData();
-                    const chains = getAllMainChains(data);
-                    const firstChain = chains[0];
-                    const fallbackId = (firstChain && firstChain.children && firstChain.children[0])
-                        ? firstChain.children[0].id
-                        : (firstChain ? firstChain.id : null);
-                    if (fallbackId) {
-                        forkNodeBranch(fallbackId);
-                    } else {
-                        showMindmapToast('请先点击选中一个节点，再开启并行分支', 'warn');
-                    }
-                    return;
-                }
-                forkNodeBranch(selectedNodeId);
-            });
-        }
-        if (els.mergeBtn) {
-            els.mergeBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (mergingSourceNodeId) {
-                    stopInteractiveMergeMode();
-                    showMindmapToast('已退出合并连线模式');
-                    return;
-                }
-                if (selectedNodeIds.size > 1) {
-                    convergeNodesToNext(Array.from(selectedNodeIds));
-                    return;
-                }
-                if (!selectedNodeId) {
-                    showMindmapToast('请先选中源节点，再点击「合并」或按 M 键选择汇入目标！', 'warn');
-                    return;
-                }
-                showMergePopover(selectedNodeId, els.mergeBtn);
-            });
-        }
-        if (els.bindCurrentBtn) {
-            els.bindCurrentBtn.addEventListener('click', () => {
-                if (!selectedNodeId) {
-                    showMindmapToast('请先在思维导图中点击选中一个节点，再绑定当前页！', 'warn');
-                    return;
-                }
-                const curPage = (state.currentPhysicalPage && state.currentPhysicalPage > 0) ? state.currentPhysicalPage : 1;
-                const data = getMindMapData();
-                const node = findNodeInTree(data, selectedNodeId);
-                if (node && node.page === curPage) {
-                    setNodePage(selectedNodeId, null);
-                    showMindmapToast(`已取消节点与第 ${curPage} 页的关联`);
-                } else {
-                    setNodePage(selectedNodeId, curPage);
-                    showMindmapToast(`已成功绑定当前正文第 ${curPage} 页`, 'success');
-                }
-            });
         }
 
         // 核心滚轮隔离与缩放：导图区域滚轮绝对不影响底层 PDF

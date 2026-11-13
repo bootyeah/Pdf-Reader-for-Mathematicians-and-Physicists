@@ -71,7 +71,7 @@ def _engine_config(kind, engine, deepseek=None):
     if engine == ENGINE_DEEPSEEK:
         return _apply_engine(cfg, engine, deepseek)
     if not str(cfg.get('api_key', '')).strip():
-        raise ValueError('请先在 %s/config.json 中填写 api_key'
+        raise ValueError('请通过 API-Manager.bat 或 %s/config.json 填写 api_key'
                          % ('tex' if kind == 'image' else 'airtex'))
     return cfg
 
@@ -224,18 +224,23 @@ def _reap_idle():
 
 def _set_engine(entry, engine, deepseek):
     base = _config('handwriting')
-    base.update({k: entry['base'][k] for k in ('host', 'port', 'token', 'input_mode',
-                 'auto_recognize', 'auto_copy', 'require_page_token')})
-    cfg = _purpose_config(_apply_engine(base, engine, deepseek), entry.get('purpose'))
-    entry['server'].app.cfg = entry['server'].cfg = cfg
-    entry['engine'] = engine
-    entry['deepseek'] = deepseek
+    with _lock:
+        base.update({k: entry['base'][k] for k in ('host', 'port', 'token', 'input_mode',
+                     'auto_recognize', 'auto_copy', 'require_page_token')})
+        cfg = _purpose_config(_apply_engine(base, engine, deepseek), entry.get('purpose'))
+        entry['server'].app.cfg = entry['server'].cfg = cfg
+        entry['engine'] = engine
+        entry['deepseek'] = deepseek
 
 
 def _phone_config(entry):
-    deepseek = api_settings.resolve('formula_alt', entry.get('deepseek') or {})
-    _set_engine(entry, entry['engine'], deepseek)
-    return entry['server'].app.cfg
+    with _lock:
+        engine = entry['engine']
+        base_ds = dict(entry.get('deepseek') or {})
+    deepseek = api_settings.resolve('formula_alt', base_ds)
+    _set_engine(entry, engine, deepseek)
+    with _lock:
+        return entry['server'].app.cfg
 
 
 def phone(body, deepseek=None):
@@ -247,7 +252,7 @@ def phone(body, deepseek=None):
         connection = _connection(body)
         base = _config('handwriting')
         if engine != ENGINE_DEEPSEEK and not str(base.get('api_key', '')).strip():
-            raise ValueError('请先在 airtex/config.json 中填写 api_key')
+            raise ValueError('请通过 API-Manager.bat 或 airtex/config.json 填写 api_key')
         base.update(host='0.0.0.0', port=0, token=secrets.token_urlsafe(24),
                     input_mode='phone', auto_recognize=False, auto_copy=False,
                     require_page_token=True)
@@ -289,7 +294,8 @@ def phone(body, deepseek=None):
             raise ValueError('手机连接已结束，请重新扫码')
         entry['seen'] = time.monotonic()
         app = entry['server'].app
-    if action != 'state' or entry.get('engine') != engine or entry.get('deepseek') != deepseek:
+        need_set = (action != 'state' or entry.get('engine') != engine or entry.get('deepseek') != deepseek)
+    if need_set:
         _set_engine(entry, engine, deepseek)
     if action == 'connection':
         _set_connection(entry, _connection(body), retry=body.get('retry') is True)

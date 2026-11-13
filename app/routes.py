@@ -308,7 +308,7 @@ def handle_chat(handler):
         temperature = cfg['temperature']
     try:
         max_tokens = int(req_data.get('max_tokens', cfg['max_tokens']) or 0)
-        max_tokens = max(0, min(65536, max_tokens))
+        max_tokens = max(0, min(1000000, max_tokens))
     except Exception:
         max_tokens = cfg['max_tokens']
 

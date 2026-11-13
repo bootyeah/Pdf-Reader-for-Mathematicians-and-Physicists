@@ -79,7 +79,7 @@
                         await processSelectedFile(new File([blob], name, { type: 'application/pdf' }), null, false, openPath);
                     } catch (err) {
                         console.error("按路径打开教材失败:", err);
-                        alert(`未能打开教材：${err.message}\n请确认已通过 starter(H).bat 启动本地服务。`);
+                        alert(`未能打开教材：${err.message}\n请确认已通过 start.bat 启动本地服务。`);
                     }
                 })();
             }
@@ -93,16 +93,24 @@
 
         // 注意：原有的 saveHistory 函数被彻底删除，其逻辑已被融入 performAction 的增量追踪中！
 
+        function applyHistoryDelta(delta) {
+            if (!delta) return;
+            Object.keys(delta).forEach(k => {
+                if (delta[k] === "[]" && k !== 'snippets' && k !== 'mindmap' && k !== 'settings') {
+                    state.annotations[k] = [];
+                } else {
+                    state.annotations[k] = JSON.parse(delta[k]);
+                }
+            });
+        }
+
         function undo() {
             if (state.historyIndex > 0) {
                 const step = state.history[state.historyIndex];
                 if (step.type === 'FULL') {
                     state.annotations = JSON.parse(step.data);
-                } else if (step.backward) {
-                    Object.keys(step.backward).forEach(k => {
-                        if (step.backward[k] === "[]" && k !== 'snippets' && k !== 'mindmap' && k !== 'settings') state.annotations[k] = []; 
-                        else state.annotations[k] = JSON.parse(step.backward[k]);
-                    });
+                } else {
+                    applyHistoryDelta(step.backward);
                 }
                 state.historyIndex--;
                 refreshUI(step.type === 'FULL' ? null : Object.keys(step.backward || step.forward));
@@ -118,11 +126,8 @@
                 const step = state.history[state.historyIndex];
                 if (step.type === 'FULL') {
                     state.annotations = JSON.parse(step.data);
-                } else if (step.forward) {
-                    Object.keys(step.forward).forEach(k => {
-                        if (step.forward[k] === "[]" && k !== 'snippets' && k !== 'mindmap' && k !== 'settings') state.annotations[k] = [];
-                        else state.annotations[k] = JSON.parse(step.forward[k]);
-                    });
+                } else {
+                    applyHistoryDelta(step.forward);
                 }
                 refreshUI(step.type === 'FULL' ? null : Object.keys(step.backward || step.forward));
                 updateSaveStatus(true);     // 【修改】将状态判定提前
@@ -424,18 +429,28 @@
             url.searchParams.set('_readerLoad', window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`);
             return url;
         }
+        function trackChildWindow(win) {
+            window._readerChildWindows = (window._readerChildWindows || []).filter(w => w && !w.closed);
+            if (win) window._readerChildWindows.push(win);
+            return win;
+        }
+        function generateSessionId() {
+            if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+                return crypto.randomUUID();
+            }
+            return 'sid-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+        }
         async function processSelectedFile(file, handle, newWindow = false, localPath = null) {
             if (newWindow) {
                 // 🚀 新窗口发信端模式：生成唯一暗号 (Session ID)
-                const sid = crypto.randomUUID();
+                const sid = generateSessionId();
                 const target = freshReaderWindowUrl();
                 target.searchParams.set('mode', 'receiver');
                 target.searchParams.set('sid', sid);
                 const newUrl = target.href;
 
                 // 开新标签页：选完文件（或点完下拉项）之后立刻开，浏览器会把它切到前台
-                const newWin = window.open(newUrl, '_blank');
-                if (newWin) { (window._readerChildWindows = window._readerChildWindows || []).push(newWin); }
+                const newWin = trackChildWindow(window.open(newUrl, '_blank'));
                 if (!newWin) {
                     alert("未能打开新标签页：多半被浏览器的弹窗拦截拦住了。\n请在地址栏右侧允许本站弹窗后重试。");
                     return;
@@ -653,8 +668,7 @@
                 if (openInNewTab) {
                     const target = freshReaderWindowUrl();            // 每次新开都绕过升级前的旧页面缓存
                     target.searchParams.set('open', data.path);       // 路径由 URLSearchParams 负责编码
-                    const win = window.open(target.href, '_blank');
-                    if (win) { (window._readerChildWindows = window._readerChildWindows || []).push(win); }
+                    const win = trackChildWindow(window.open(target.href, '_blank'));
                     if (!win) {
                         alert("未能打开新标签页：多半被浏览器的弹窗拦截拦住了。\n请在地址栏右侧允许本站弹窗后重试。");
                     }
@@ -683,7 +697,7 @@
                 await processSelectedFile(file, null, false, data.path);
             } catch (err) {
                 console.error("选取并打开文件异常:", err);
-                alert(`未能读取或打开所选文件。\n请确保通过 starter(H).bat 启动了本地服务。\n\n错误信息：${err.message}`);
+                alert(`未能读取或打开所选文件。\n请确保通过 start.bat 启动了本地服务。\n\n错误信息：${err.message}`);
             } finally {
                 quickFolderBusy = false;
             }
@@ -703,7 +717,7 @@
                 }
             } catch (err) {
                 console.error("呼叫后台打开文件夹失败:", err);
-                alert(`未能连接后台 Python 引擎。\n请确保通过 starter(H).bat 启动了本地阅读器服务。\n\n尝试打开的路径：\n${folderPath}`);
+                alert(`未能连接后台 Python 引擎。\n请确保通过 start.bat 启动了本地阅读器服务。\n\n尝试打开的路径：\n${folderPath}`);
             }
         }
 

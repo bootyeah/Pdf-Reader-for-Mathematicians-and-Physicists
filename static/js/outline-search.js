@@ -3,7 +3,18 @@
         let searchSidebarView = null;
         let searchSidebarFrame = 0;
         let outlineMapSortFrame = 0;
+        let outlineMapNeedsSort = false;
         let activeOutlineElement = null;
+
+        function flushOutlineMapSort() {
+            if (outlineMapSortFrame) {
+                cancelAnimationFrame(outlineMapSortFrame);
+                outlineMapSortFrame = 0;
+            }
+            if (!outlineMapNeedsSort) return;
+            outlineMapNeedsSort = false;
+            state.outlineMap.sort((a, b) => a.pageNum - b.pageNum || a.order - b.order);
+        }
 
         // =========================================================================
         // =========================================================================
@@ -18,6 +29,7 @@
                 state.outlineNextOrder = 0;
                 cancelAnimationFrame(outlineMapSortFrame);
                 outlineMapSortFrame = 0;
+                outlineMapNeedsSort = false;
                 activeOutlineElement = null;
             }
 
@@ -56,11 +68,11 @@
                                     pageNum: physicalPage,
                                     element: titleDiv, order
                                 });
+                                outlineMapNeedsSort = true;
                                 // 每帧统一排序；同页条目按目录本身的顺序，独立于异步完成顺序。
                                 if (!outlineMapSortFrame) outlineMapSortFrame = requestAnimationFrame(() => {
                                     outlineMapSortFrame = 0;
                                     if (isStale()) return;
-                                    state.outlineMap.sort((a, b) => a.pageNum - b.pageNum || a.order - b.order);
                                     updateCurrentOutline();
                                 });
                             }
@@ -94,6 +106,7 @@
 
         // 当前页属于起始页不晚于它的最后一个目录条目，兼容没有独立目录项的页。
         function updateCurrentOutline(scroll = false, block = 'nearest') {
+            flushOutlineMapSort();
             let activeItem = null;
             let low = 0, high = state.outlineMap.length;
             while (low < high) {

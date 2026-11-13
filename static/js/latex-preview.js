@@ -119,18 +119,45 @@
             const width = Math.min(320, innerWidth - margin * 2);
             const height = Math.min(Math.max(rect.height, 180), 400, innerHeight - margin * 2);
             const sideTop = Math.max(margin, Math.min(rect.top, innerHeight - height - margin));
-            // 只放在输入框左右两侧，不再上下摆放。
+            // 优先放在输入框左右两侧；窄视口下左右都放不下时回退到上下空隙，避免遮挡编辑窗本身。
             const sides = [
                 { left: rect.right + gap, top: sideTop, maxHeight: height },
                 { left: rect.left - width - gap, top: sideTop, maxHeight: height }
             ];
             const candidates = sides.filter(p => p.left >= margin && p.left + width <= innerWidth - margin);
+            if (!candidates.length) {
+                const alignedLeft = Math.max(margin, Math.min(rect.left, innerWidth - width - margin));
+                const belowSpace = innerHeight - margin - (rect.bottom + gap);
+                const aboveSpace = (rect.top - gap) - margin;
+                const vertical = [];
+                if (belowSpace >= 80) {
+                    const h = Math.min(height, belowSpace);
+                    vertical.push({ left: alignedLeft, top: rect.bottom + gap, maxHeight: h, space: belowSpace });
+                }
+                if (aboveSpace >= 80) {
+                    const h = Math.min(height, aboveSpace);
+                    vertical.push({ left: alignedLeft, top: rect.top - gap - h, maxHeight: h, space: aboveSpace });
+                }
+                vertical.sort((a, b) => b.space - a.space);
+                candidates.push(...vertical);
+            }
             const source = avoid?.isConnected ? avoid.getBoundingClientRect() : null;
+            const clearsSource = p => !source || p.left + width <= source.left || p.left >= source.right ||
+                p.top + p.maxHeight <= source.top || p.top >= source.bottom;
+            const pool = [...candidates];
+            if (source && !pool.some(clearsSource)) {
+                for (const base of candidates) {
+                    for (const top of [source.bottom + gap, source.top - height - gap]) {
+                        if (top >= margin && top + height <= innerHeight - margin) {
+                            pool.push({ left: base.left, top, maxHeight: height });
+                        }
+                    }
+                }
+            }
             // 文本块还支持在正文上右键定位光标，旁侧预览尽量不盖住这块正文。
             // 两侧都放不下时，贴着空间更大的一侧并夹进视口。
             const roomRight = innerWidth - rect.right, roomLeft = rect.left;
-            const placement = candidates.find(p => !source || p.left + width <= source.left || p.left >= source.right ||
-                p.top + p.maxHeight <= source.top || p.top >= source.bottom) || candidates[0] || {
+            const placement = pool.find(clearsSource) || candidates[0] || {
                 left: roomRight >= roomLeft ? innerWidth - width - margin : margin, top: sideTop, maxHeight: height
             };
             const { left, top, maxHeight } = placement;

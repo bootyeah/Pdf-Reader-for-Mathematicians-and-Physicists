@@ -284,7 +284,19 @@ async function renderNativeLinks(page, pageNum, viewport, isCurrent) {
         element.style.top = Math.min(viewRect[1], viewRect[3]) + 'px';
         element.style.width = Math.abs(viewRect[0] - viewRect[2]) + 'px';
         element.style.height = Math.abs(viewRect[1] - viewRect[3]) + 'px';
-        if (url) { element.href = url; element.target = '_blank'; element.title = `打开链接: ${url}`; }
+        if (url) {
+            try {
+                const parsedUrl = new URL(url, window.location.href);
+                if (['http:', 'https:', 'mailto:'].includes(parsedUrl.protocol)) {
+                    element.href = parsedUrl.href;
+                    element.target = '_blank';
+                    element.rel = 'noopener noreferrer';
+                    element.title = `打开链接: ${parsedUrl.href}`;
+                }
+            } catch (_) {
+                // 忽略格式非法的外部链接
+            }
+        }
         else if (dest) {
             element.href = '#'; const sourceInfo = { pageNum, rect }; if (typeof bindInternalLinkPreview === 'function') bindInternalLinkPreview(element, dest, sourceInfo);
             element.onclick = e => { e.preventDefault(); if (typeof hideLinkPreview === 'function') hideLinkPreview(true); navigateToDestination(dest, sourceInfo); };

@@ -80,17 +80,43 @@ def capabilities(model, base_url=''):
     return result
 
 
-def thinking_mode(cfg, model, override=None):
+def _nearest_thinking_mode(desired, cap):
+    """Map an incompatible thinking mode to the closest option supported by a fallback model."""
+    options = cap['options']
+    preferences = {
+        'disabled': ('disabled', 'minimal', 'low', 'omit', 'enabled'),
+        'minimal': ('minimal', 'low', 'enabled', 'medium', 'omit'),
+        'low': ('low', 'minimal', 'enabled', 'medium', 'omit'),
+        'medium': ('medium', 'high', 'low', 'enabled', 'omit'),
+        'high': ('high', 'medium', 'max', 'enabled', 'omit'),
+        'xhigh': ('xhigh', 'max', 'high', 'enabled', 'omit'),
+        'max': ('max', 'xhigh', 'high', 'enabled', 'omit'),
+        'enabled': ('enabled', 'medium', 'high', 'low', 'omit'),
+        'omit': ('omit',),
+    }.get(desired, ('enabled', 'omit'))
+    for option in preferences:
+        if option in options:
+            return option
+    return options[0]
+
+
+def thinking_mode(cfg, model, override=None, allow_fallback=False):
     cap = capabilities(model, cfg.get('base_url', ''))
     mode = cfg.get('thinking', 'disabled')
     if mode not in cap['options']:
-        raise ValueError('%s 不支持思考参数 %s，请在 API Manager 中选择 %s。' %
-                         (model, mode, ' / '.join(cap['options'])))
+        if not allow_fallback:
+            raise ValueError('%s 不支持思考参数 %s，请在 API Manager 中选择 %s。' %
+                             (model, mode, ' / '.join(cap['options'])))
+        mode = _nearest_thinking_mode(mode, cap)
     if mode != 'omit' and override is not None:
-        mode = (mode if mode in ACTIVE_MODES else 'enabled') if override else 'disabled'
-    if mode not in cap['options']:
-        raise ValueError('%s 不支持思考参数 %s，请在 API Manager 中选择 %s。' %
-                         (model, mode, ' / '.join(cap['options'])))
+        candidate = (mode if mode in ACTIVE_MODES else 'enabled') if override else 'disabled'
+        if candidate not in cap['options']:
+            if not allow_fallback:
+                raise ValueError('%s 不支持思考参数 %s，请在 API Manager 中选择 %s。' %
+                                 (model, candidate, ' / '.join(cap['options'])))
+            mode = _nearest_thinking_mode(candidate, cap)
+        else:
+            mode = candidate
     return mode, cap
 
 

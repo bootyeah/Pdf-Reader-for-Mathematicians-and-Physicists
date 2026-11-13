@@ -494,7 +494,7 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
                 'configured': False,
                 'enabled': bool(cfg.get('enabled')),
                 'provider': cfg.get('provider'),
-                'message': '云端批注库未启用（在 server.py 顶部的 CLOUD_SYNC 或 cloud_config.json 中配置）',
+                'message': '云端批注库未启用（在 app/services/cloud_sync.py 的 CLOUD_SYNC 或 cloud_config.json 中配置）',
             }
         return cfg, None
 
@@ -558,11 +558,11 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
         cfg = dict(cfg, temperature=temperature, max_tokens=max_tokens)
         target_model = model or cfg['model']
 
-        def request(target):
+        def request(target, is_fallback=False):
             payload = api_settings.apply_parameters({
                 'model': target, 'stream': bool(stream),
                 'messages': api_settings.protocol.history_for_model(messages, target, cfg['base_url']),
-            }, cfg, enable_thinking=enable_thinking, model=target)
+            }, cfg, enable_thinking=enable_thinking, model=target, allow_fallback=is_fallback)
             api_settings.protocol.apply_search(payload, cfg, target)
             req = urllib.request.Request(
                 api_settings.completion_url(cfg['base_url']),
@@ -590,7 +590,7 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
                 exc.close()
                 raise urllib.error.HTTPError(exc.url, exc.code, exc.msg, exc.headers, io.BytesIO(detail)) from exc
             exc.close()
-            return request(fallback)
+            return request(fallback, is_fallback=True)
 
     def _chat_stream(self, messages, model, enable_thinking, temperature, max_tokens):
         try:
@@ -706,7 +706,7 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
         cfg = getattr(self, '_active_translate_config', None) or _api_config('dictionary' if mode == 'word' else 'translation')
         return cfg['prompt'], None if mode == 'word' else 'sentence'
 
-    def _call_deepseek(self, messages, use_search=False, model=None, disable_thinking=None):
+    def _call_deepseek(self, messages, use_search=False, model=None, disable_thinking=None, allow_fallback=False):
         cfg = getattr(self, '_active_translate_config', None) or _api_config('dictionary')
         target_model = model or cfg['model']
         body = {
@@ -714,9 +714,9 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
             "messages": messages,
             "stream": False,
         }
-        enable = None if (disable_thinking is None or disable_thinking) else False
+        enable = None if disable_thinking is None else (not bool(disable_thinking))
         try:
-            body = api_settings.apply_parameters(body, cfg, enable_thinking=enable, model=target_model)
+            body = api_settings.apply_parameters(body, cfg, enable_thinking=enable, model=target_model, allow_fallback=allow_fallback)
             api_settings.protocol.apply_search(body, dict(cfg, web_search=use_search), target_model)
         except ValueError as exc:
             return {'ok': False, 'error': str(exc), 'status': 400}
@@ -770,7 +770,8 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
 
         last = {'ok': False, 'error': '未知错误', 'status': 0}
         for model in attempts:
-            result = self._call_deepseek(messages, use_search=cfg['web_search'], model=model)
+            result = self._call_deepseek(messages, use_search=cfg['web_search'], model=model,
+                                         allow_fallback=(model != cfg['model']))
             if result.get('ok'):
                 result['kind'] = kind or _detect_entry_kind(result.get('content'))
                 print("[词典] %s(%s) → %s" % (mode, result.get('kind') or '未定', text[:60]))

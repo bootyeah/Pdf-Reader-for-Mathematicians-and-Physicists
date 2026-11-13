@@ -292,7 +292,7 @@
                         }
                     } catch (saveErr) {
                         console.error("原位保存失败:", saveErr);
-                        if (isCurrent()) alert("原位保存失败：" + saveErr.message + "\n请确保通过 starter(H).bat 启动了本地服务。");
+                        if (isCurrent()) alert("原位保存失败：" + saveErr.message + "\n请确保通过 start.bat 启动了本地服务。");
                     }
                 } else {
                     if (window.showSaveFilePicker) {
@@ -667,7 +667,10 @@
             list.appendChild(header);
 
             if (snippets.length === 0) {
-                list.innerHTML += `<div class="text-center text-gray-400 text-sm mt-8 p-4"><i class="ph-fill ph-star text-3xl mb-2 opacity-30"></i><p>暂无素材</p></div>`;
+                const empty = document.createElement('div');
+                empty.className = 'text-center text-gray-400 text-sm mt-8 p-4';
+                empty.innerHTML = '<i class="ph-fill ph-star text-3xl mb-2 opacity-30"></i><p>暂无素材</p>';
+                list.appendChild(empty);
                 return;
             }
 

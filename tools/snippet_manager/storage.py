@@ -223,6 +223,11 @@ def categorize_snippet(trigger: str, replacement: str, options: str) -> str:
         return "math_symbol"
     return "general"
 
+def _normalize_regex_flags(flags: object) -> str:
+    """Keep valid, deduplicated JS RegExp flags."""
+    return "".join(dict.fromkeys(c for c in str(flags or "") if c in "dgimsuvy"))
+
+
 def parse_snippet_object(raw: str, index: int) -> dict:
     trig_m = re.search(r'trigger:\s*(/(?:\\.|[^/\\])+/[a-z]*|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\')', raw)
     if not trig_m:
@@ -232,11 +237,16 @@ def parse_snippet_object(raw: str, index: int) -> dict:
         raw_trig = trig_m.group(1).strip()
 
     is_regex = False
+    regex_flags = ""
     trigger_val = ""
     if raw_trig.startswith("/") and len(raw_trig) > 1:
         is_regex = True
         last_slash = raw_trig.rfind("/")
-        trigger_val = raw_trig[1:last_slash]
+        if last_slash > 0:
+            trigger_val = raw_trig[1:last_slash]
+            regex_flags = _normalize_regex_flags(raw_trig[last_slash + 1:])
+        else:
+            trigger_val = raw_trig[1:]
     elif (raw_trig.startswith('"') and raw_trig.endswith('"')) or (raw_trig.startswith("'") and raw_trig.endswith("'")):
         try:
             trigger_val = json.loads(f'"{raw_trig[1:-1]}"')
@@ -307,7 +317,7 @@ def parse_snippet_object(raw: str, index: int) -> dict:
 
     category = categorize_snippet(trigger_val, replacement, options)
 
-    return {
+    obj = {
         "id": f"snip_{index + 1}",
         "trigger": trigger_val,
         "is_regex": is_regex,
@@ -319,6 +329,9 @@ def parse_snippet_object(raw: str, index: int) -> dict:
         "enabled": True,
         "category": category
     }
+    if regex_flags:
+        obj["regex_flags"] = regex_flags
+    return obj
 
 def format_snippet_to_js(item: dict) -> str:
     """Format single snippet item to JavaScript object literal."""
@@ -327,9 +340,10 @@ def format_snippet_to_js(item: dict) -> str:
     # 1. Trigger
     trig = item.get("trigger", "")
     is_regex = item.get("is_regex", False) or "r" in item.get("options", "")
+    regex_flags = _normalize_regex_flags(item.get("regex_flags", ""))
     has_template_var = "${" in trig
     if is_regex and trig and not has_template_var and not trig.startswith("/") and "/" not in trig:
-        parts.append(f"trigger: /{trig}/")
+        parts.append(f"trigger: /{trig}/{regex_flags}")
     else:
         parts.append(f"trigger: {json.dumps(trig, ensure_ascii=False)}")
 
@@ -420,7 +434,7 @@ def save_data(snippets: list[dict], current_revision: str | None = None) -> dict
             trigger = str(snip.get("trigger", ""))
             if not trigger.strip() and not snip.get("is_regex"):
                 continue
-            validated.append({
+            entry = {
                 "id": snip.get("id") or f"snip_{uuid.uuid4().hex[:8]}",
                 "trigger": trigger,
                 "is_regex": bool(snip.get("is_regex")),
@@ -431,7 +445,11 @@ def save_data(snippets: list[dict], current_revision: str | None = None) -> dict
                 "priority": int(snip.get("priority", 0)),
                 "enabled": bool(snip.get("enabled", True)),
                 "category": str(snip.get("category") or categorize_snippet(trigger, snip.get("replacement", ""), snip.get("options", "")))
-            })
+            }
+            flags = _normalize_regex_flags(snip.get("regex_flags", ""))
+            if flags:
+                entry["regex_flags"] = flags
+            validated.append(entry)
 
         new_doc = {
             "version": 1,
@@ -516,7 +534,7 @@ def import_snippets(data: list | dict, mode: str = "merge") -> dict:
             opts = str(item.get("options", ""))
             if not trig.strip():
                 continue
-            normalized_incoming.append({
+            item_entry = {
                 "id": item.get("id") or f"snip_{uuid.uuid4().hex[:8]}",
                 "trigger": trig,
                 "is_regex": bool(item.get("is_regex") or "r" in opts),
@@ -527,7 +545,11 @@ def import_snippets(data: list | dict, mode: str = "merge") -> dict:
                 "priority": int(item.get("priority", 0)),
                 "enabled": bool(item.get("enabled", True)),
                 "category": str(item.get("category") or categorize_snippet(trig, rep, opts))
-            })
+            }
+            flags = _normalize_regex_flags(item.get("regex_flags", ""))
+            if flags:
+                item_entry["regex_flags"] = flags
+            normalized_incoming.append(item_entry)
 
         if mode == "replace":
             final_list = normalized_incoming

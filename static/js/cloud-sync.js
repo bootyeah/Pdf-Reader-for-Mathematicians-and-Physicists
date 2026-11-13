@@ -762,7 +762,7 @@
                 if (!(await ensureConfigured())) {
                     if (dom.panelList) {
                         dom.panelList.replaceChildren(panelMessage(
-                            info.detail || '云端批注库未启用：请在 server.py 顶部的 CLOUD_SYNC 或 cloud_config.json 中配置。',
+                            info.detail || '云端批注库未启用：请在 app/services/cloud_sync.py 中的 CLOUD_SYNC 或 cloud_config.json 中配置。',
                             'text-amber-600'));
                     }
                     return;

@@ -1,5 +1,6 @@
 """Bilibili QR authentication and same-origin MP4 / DASH playback."""
 import base64
+import copy
 import ctypes
 import http.cookiejar
 import io
@@ -104,18 +105,28 @@ class _ApiRedirects(urllib.request.HTTPRedirectHandler):
 
 def fetch_api(url):
     _api_url(url)
+    snapshot = http.cookiejar.CookieJar()
     with _lock:
-        # Bilibili is reachable directly; do not inherit a stopped Clash/system proxy.
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _ApiRedirects(),
-                                            urllib.request.HTTPCookieProcessor(_cookies()))
-        with opener.open(urllib.request.Request(url, headers=_HEADERS), timeout=15) as response:
-            body = response.read(2 * 1024 * 1024 + 1)
-        if len(body) > 2 * 1024 * 1024:
-            raise ValueError('B 站响应过大')
-        doc = json.loads(body)
-        if not isinstance(doc, dict):
-            raise ValueError('B 站返回了无效数据')
-        return doc
+        start_rev = _revision
+        for cookie in _cookies():
+            snapshot.set_cookie(copy.copy(cookie))
+    # Bilibili is reachable directly; do not inherit a stopped Clash/system proxy.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _ApiRedirects(),
+                                        urllib.request.HTTPCookieProcessor(snapshot))
+    with opener.open(urllib.request.Request(url, headers=_HEADERS), timeout=15) as response:
+        body = response.read(2 * 1024 * 1024 + 1)
+    if len(body) > 2 * 1024 * 1024:
+        raise ValueError('B 站响应过大')
+    doc = json.loads(body)
+    if not isinstance(doc, dict):
+        raise ValueError('B 站返回了无效数据')
+    with _lock:
+        if _revision == start_rev:
+            jar = _cookies()
+            for cookie in snapshot:
+                if cookie.domain.lstrip('.') == 'bilibili.com' and not cookie.is_expired():
+                    jar.set_cookie(cookie)
+    return doc
 
 
 def account_status():
@@ -153,13 +164,18 @@ def login_poll(token):
         if not pending or pending[1] < time.monotonic():
             _qr.pop(token, None)
             return {'ok': True, 'state': 'expired'}
-        doc = fetch_api('https://passport.bilibili.com/x/passport-login/web/qrcode/poll?' + urlencode({'qrcode_key': pending[0]}))
-        if doc.get('code') != 0:
-            raise ValueError('登录状态查询失败，请重试')
-        code = (doc.get('data') or {}).get('code')
-        state = {0: 'success', 86038: 'expired', 86090: 'confirm', 86101: 'waiting'}.get(code)
-        if state is None:
-            raise ValueError('登录状态异常，请重新扫码')
+        qr_key = pending[0]
+        start_rev = _revision
+    doc = fetch_api('https://passport.bilibili.com/x/passport-login/web/qrcode/poll?' + urlencode({'qrcode_key': qr_key}))
+    if doc.get('code') != 0:
+        raise ValueError('登录状态查询失败，请重试')
+    code = (doc.get('data') or {}).get('code')
+    state = {0: 'success', 86038: 'expired', 86090: 'confirm', 86101: 'waiting'}.get(code)
+    if state is None:
+        raise ValueError('登录状态异常，请重新扫码')
+    with _lock:
+        if _revision != start_rev or _qr.get(token, (None,))[0] != qr_key:
+            return {'ok': True, 'state': 'expired'}
         if state in ('success', 'expired'):
             _qr.pop(token, None)
         if state == 'success':

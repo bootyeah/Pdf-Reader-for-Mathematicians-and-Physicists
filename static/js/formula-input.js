@@ -56,7 +56,7 @@
             response = await fetch('/api/formula/' + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
         } catch (error) {
             if (error.name === 'AbortError') throw error;
-            throw new Error('无法连接识别服务，请通过 starter(H).bat 启动阅读器');
+            throw new Error('无法连接识别服务，请通过 start.bat 启动阅读器');
         }
         let data;
         try { data = await response.json(); } catch (_) { throw new Error('公式服务尚未就绪，请重启阅读器服务后重试'); }

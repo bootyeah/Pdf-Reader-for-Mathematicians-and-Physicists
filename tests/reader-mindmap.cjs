@@ -267,7 +267,7 @@ const server = http.createServer((req, res) => {
       window.MindMap.center(false, true);
       document.querySelector('.mm-card[data-id="definition"]').click();
     });
-    await page.locator('#mindmap-merge-btn').click();
+    await page.locator('.mm-card[data-id="definition"] .mm-act-merge').click({ force: true });
     await page.locator('#mm-pop-pick-canvas').click();
     await page.waitForSelector('#mm-merge-banner');
     await settle();

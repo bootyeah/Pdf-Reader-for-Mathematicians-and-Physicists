@@ -155,8 +155,13 @@ class AppCore:
 
     def unregister_ws(self, wid):
         with self.ws_lock:
-            self.ws_clients.pop(wid, None)
+            item = self.ws_clients.pop(wid, None)
             self._ws_send_locks.pop(wid, None)
+        if item:
+            try:
+                item[0].close()
+            except Exception:
+                pass
 
     def set_ws_client(self, wid, client_id):
         with self.ws_lock:
@@ -277,7 +282,7 @@ class AppCore:
             self.error = ""
             if self.cfg.get("auto_recognize"):
                 self.auto_recognize_at = (
-                    time.time() + float(
+                    time.monotonic() + float(
                         self.cfg.get("auto_recognize_delay", 1800)) / 1000.0)
         self._notify()
         self.push_state()
@@ -360,7 +365,7 @@ class AppCore:
             self.error = ""
             if self.cfg.get("auto_recognize") and core.ink_pixels(doc) > 0:
                 self.auto_recognize_at = (
-                    time.time() + float(
+                    time.monotonic() + float(
                         self.cfg.get("auto_recognize_delay", 1800)) / 1000.0)
             else:
                 self.auto_recognize_at = 0.0
@@ -474,7 +479,7 @@ class AppCore:
     def _recognize_worker(self, doc, mode=core.MODE_PHONE, page_generation=None, page_id=""):
         log("开始识别（%s，笔迹 %d 条）"
             % (core.mode_label(mode), len(doc.get("strokes", []))))
-        t0 = time.time()
+        t0 = time.monotonic()
         try:
             provider = getattr(self, 'config_provider', None)
             cfg = provider() if provider else self.cfg
@@ -482,7 +487,7 @@ class AppCore:
         except Exception as exc:
             res = {"ok": False, "error": "识别异常：" + str(exc), "latex": "",
                    "model": "", "image": None, "empty": False}
-        cost = time.time() - t0
+        cost = time.monotonic() - t0
         out = {
             "latex": res.get("latex", ""),
             "model": res.get("model", ""),
@@ -528,7 +533,7 @@ class AppCore:
         """由 GUI 定时调用：到点则自动识别。"""
         with self.lock:
             due = self.auto_recognize_at
-            if not due or self.recognizing or time.time() < due:
+            if not due or self.recognizing or time.monotonic() < due:
                 return
             self.auto_recognize_at = 0.0
         self.start_recognize()

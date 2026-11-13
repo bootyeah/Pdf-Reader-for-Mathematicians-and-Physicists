@@ -3,10 +3,15 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
+import urllib.error
+import urllib.request
 
+from tools.snippet_manager import manager as snippet_manager
 from tools.snippet_manager import storage
 
 class TestSnippetStorage(unittest.TestCase):
@@ -111,6 +116,56 @@ class TestSnippetStorage(unittest.TestCase):
                 restored = storage.restore_backup()
                 self.assertEqual(len(restored["snippets"]), orig_count)
                 self.assertFalse(any(s["trigger"] == "xyztest123" for s in restored["snippets"]))
+
+    def test_regex_flags_roundtrip(self):
+        raw_regex = '{trigger: /([a-z]+)/im, replacement: "X", options: "rmA"}'
+        parsed = storage.parse_snippet_object(raw_regex, 0)
+        self.assertTrue(parsed["is_regex"])
+        self.assertEqual(parsed["trigger"], "([a-z]+)")
+        self.assertEqual(parsed.get("regex_flags"), "im")
+        formatted = storage.format_snippet_to_js(parsed)
+        self.assertEqual(formatted, '{trigger: /([a-z]+)/im, replacement: "X", options: "rmA"}')
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            tmp_storage = tmp_path / ".snippet-manager"
+            tmp_config_js = tmp_path / "config.js"
+            shutil.copy2(storage.CONFIG_JS_PATH, tmp_config_js)
+            with patch.dict(os.environ, {
+                "PDF_READER_SNIPPET_STORAGE": str(tmp_storage),
+                "PDF_READER_SNIPPET_CONFIG_JS": str(tmp_config_js),
+            }):
+                current = storage.load_data()
+                snippets = list(current["snippets"]) + [parsed]
+                saved = storage.save_data(snippets, current_revision=current["revision"])
+                self.assertEqual(saved["snippets"][-1].get("regex_flags"), "im")
+                self.assertIn("trigger: /([a-z]+)/im", tmp_config_js.read_text(encoding="utf-8"))
+
+    def test_manager_traversal_and_oversized_unauth_post(self):
+        srv = snippet_manager.ManagerServer()
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"{srv.origin}/static/lib/../../server.py"
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.build_opener(urllib.request.ProxyHandler({})).open(url, timeout=3)
+            self.assertEqual(ctx.exception.code, 403)
+            ctx.exception.close()
+
+            req = (
+                f"POST /api/save HTTP/1.0\r\n"
+                f"Host: 127.0.0.1:{srv.server_port}\r\n"
+                f"Content-Type: application/json\r\n"
+                f"Origin: https://evil.test\r\n"
+                f"Content-Length: 999999999\r\n\r\n{{}}"
+            ).encode("ascii")
+            with socket.create_connection(("127.0.0.1", srv.server_port), timeout=3) as sock:
+                sock.sendall(req)
+                resp = sock.recv(1024)
+            self.assertIn(b" 403 ", resp)
+        finally:
+            srv.shutdown()
+            srv.server_close()
 
 if __name__ == "__main__":
     unittest.main()

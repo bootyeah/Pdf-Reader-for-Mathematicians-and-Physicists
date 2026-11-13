@@ -463,13 +463,13 @@ def apply_temperature(payload, cfg, enable_thinking=None, model=None):
     return payload
 
 
-def apply_parameters(payload, cfg, enable_thinking=None, model=None):
+def apply_parameters(payload, cfg, enable_thinking=None, model=None, allow_fallback=False):
     target_model = model or payload.get('model') or cfg.get('model')
     try:
-        thinking, cap = protocol.thinking_mode(cfg, target_model, enable_thinking)
+        thinking, cap = protocol.thinking_mode(cfg, target_model, enable_thinking, allow_fallback=allow_fallback)
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc
-    apply_temperature(payload, cfg, enable_thinking=enable_thinking, model=target_model)
+    apply_temperature(payload, dict(cfg, thinking=thinking), enable_thinking=None, model=target_model)
     payload.pop('thinking', None)
     payload.pop('reasoning_effort', None)
     payload.pop('chat_template_kwargs', None)
