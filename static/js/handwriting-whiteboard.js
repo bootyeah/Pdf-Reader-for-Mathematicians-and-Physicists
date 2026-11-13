@@ -2,11 +2,14 @@
 (() => {
     const MIN_W = 280, MIN_H = 200;
     let panel, phone, board = null, whole = false, connected = false, collapsed = false, pureMode = false;
-    let engine = '', resultKey = '', expandedHeight = 620, phonePageId = '';
+    let engine = '', resultKey = '', expandedHeight = 620, phonePageId = '', collapseDir = 'up';
     const KEY = 'pdf_reader_handwriting_whiteboard';
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (_) {}
     engine = saved.engine === 'deepseek' ? 'deepseek' : '';
+    collapseDir = window.FloatingWindowLayers
+        ? window.FloatingWindowLayers.normalizeCollapseDirection(saved.collapseDir)
+        : (saved.collapseDir === 'down' ? 'down' : 'up');
     const $ = id => document.getElementById('whiteboard-' + id);
     function updateResponsive(width) {
         if (!panel) return;
@@ -37,7 +40,7 @@
     function save() {
         const r = panel.getBoundingClientRect();
         try { localStorage.setItem(KEY, JSON.stringify({ x: r.x, y: r.y, w: r.width,
-            h: collapsed ? expandedHeight : r.height, engine })); } catch (_) {}
+            h: collapsed ? expandedHeight : r.height, engine, collapseDir })); } catch (_) {}
     }
     function clamp() {
         const r = panel.getBoundingClientRect();
@@ -147,10 +150,29 @@
     }
     function toggleCollapsed() {
         if (!panel || panel.hidden) return;
-        if (!collapsed) expandedHeight = panel.getBoundingClientRect().height;
+        const rect = {
+            top: panel.offsetTop,
+            bottom: panel.offsetTop + panel.offsetHeight,
+            height: panel.offsetHeight
+        };
+        if (!collapsed && rect.height > 42) expandedHeight = rect.height;
         collapsed = !collapsed; panel.classList.toggle('collapsed', collapsed);
         panel.classList.toggle('wb-pure-mode', pureMode && !collapsed);
-        panel.style.height = (collapsed ? 42 : expandedHeight) + 'px';
+        const maxH = Math.max(42, innerHeight - 88);
+        const targetH = collapsed ? 42 : Math.max(Math.min(MIN_H, maxH), Math.min(expandedHeight, maxH));
+        panel.style.height = targetH + 'px';
+        const Layers = window.FloatingWindowLayers;
+        if (Layers) {
+            panel.style.top = Layers.computeCollapseAnchorTop({
+                dir: collapseDir,
+                collapsing: collapsed,
+                rect,
+                collapsedHeight: 42,
+                expandedHeight: collapsed ? expandedHeight : targetH,
+                minTop: 0,
+                maxBottom: Math.max(targetH, innerHeight - 8)
+            }) + 'px';
+        }
         $('collapse').setAttribute('aria-expanded', String(!collapsed));
         $('collapse').title = collapsed ? '展开白板 (V)' : '折叠为标题栏 (V，保持手机连接)';
         $('collapse').setAttribute('aria-label', collapsed ? '展开白板' : '折叠白板');
@@ -194,6 +216,7 @@
             </div>
             <div class="wb-header-actions">
               <button type="button" id="whiteboard-pure" class="wb-hbtn" title="纯白板模式 (隐藏标题与工具栏)" aria-label="纯白板模式" aria-pressed="false"><i class="ph ph-chalkboard"></i></button>
+              ${window.FloatingWindowLayers ? window.FloatingWindowLayers.collapseDirectionHtml('whiteboard-collapse-dir', collapseDir) : ''}
               <button type="button" id="whiteboard-collapse" class="wb-hbtn" title="折叠为标题栏 (V，保持手机连接)" aria-label="折叠白板" aria-expanded="true" aria-controls="whiteboard-body"><i class="ph ph-caret-up"></i></button>
               <button type="button" id="whiteboard-close" class="wb-hbtn wb-hbtn-close" title="隐藏白板 (保留连接和草稿)" aria-label="隐藏白板"><i class="ph ph-x"></i></button>
             </div>
@@ -320,6 +343,11 @@
         $('tunnel-retry').onclick = () => phone.setConnection('internet', true);
         $('close').onclick = hide;
         $('pure').onclick = () => setPureMode(!pureMode);
+        window.FloatingWindowLayers?.bindCollapseDirectionControl(
+            $('collapse-dir'),
+            () => collapseDir,
+            nextDir => { collapseDir = nextDir; save(); }
+        );
         $('collapse').onclick = toggleCollapsed;
         if ($('shortcut-btn')) $('shortcut-btn').onclick = (e) => { e.stopPropagation(); toggleCollapsed(); };
         $('pair').onclick = () => pairing($('pairing').hidden);
@@ -502,7 +530,7 @@
         panel.addEventListener('pointerdown', e => {
             const edge = e.target.closest('[data-edge]')?.dataset.edge;
             const isGrip = !!e.target.closest('.whiteboard-resize-grip');
-            if (e.button !== 0 || (!edge && !isGrip && (!e.target.closest('#whiteboard-header') || e.target.closest('button')))) return;
+            if (e.button !== 0 || (!edge && !isGrip && (!e.target.closest('#whiteboard-header') || e.target.closest('button, .window-collapse-dir-btn')))) return;
             gesture = { edge: edge || (isGrip ? 'se' : null), x: e.clientX, y: e.clientY, r: panel.getBoundingClientRect(), pointer: e.pointerId };
             panel.setPointerCapture(e.pointerId); e.preventDefault();
         });

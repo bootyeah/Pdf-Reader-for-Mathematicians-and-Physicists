@@ -824,7 +824,8 @@
             border-radius: 0;
         }
         .video-panel:fullscreen .video-resize-handle,
-        .video-panel:fullscreen #video-collapse-btn { display: none; }
+        .video-panel:fullscreen #video-collapse-btn,
+        .video-panel:fullscreen #video-collapse-dir-btn { display: none; }
         /* 放大时通过双击画面全屏，保留取消按钮和可拖动的原画预览。 */
         .video-panel.is-crop-zoomed video::-webkit-media-controls-fullscreen-button,
         .video-panel.has-video-playlist video::-webkit-media-controls-fullscreen-button { display: none; }
@@ -2462,6 +2463,7 @@ body.eye-protection-mode #formula-code { background: #fafbf6; border-color: #d8d
 #handwriting-whiteboard.wb-pure-mode .wb-header-brand,
 #handwriting-whiteboard.wb-pure-mode #whiteboard-connection,
 #handwriting-whiteboard.wb-pure-mode #whiteboard-collapse,
+#handwriting-whiteboard.wb-pure-mode #whiteboard-collapse-dir,
 #handwriting-whiteboard.wb-pure-mode #whiteboard-close,
 #handwriting-whiteboard.wb-pure-mode #whiteboard-actions,
 #handwriting-whiteboard.wb-pure-mode #whiteboard-result,
@@ -3184,6 +3186,101 @@ body.eye-protection-mode #handwriting-whiteboard.wb-pure-mode #whiteboard-pure:h
     opacity: 0.35 !important;
     cursor: not-allowed !important;
     pointer-events: none !important;
+}
+
+/* 悬浮窗折叠方向切换按钮（↑↓ segmented pill） */
+.window-collapse-dir-btn {
+    display: inline-flex;
+    align-items: stretch;
+    flex-shrink: 0;
+    height: 24px;
+    padding: 2px;
+    gap: 1px;
+    border-radius: 7px;
+    border: 1px solid #cbd5e1;
+    background: #e2e8f0;
+    box-sizing: border-box;
+    user-select: none;
+}
+.window-collapse-dir-part {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 14px;
+    padding: 0 3px;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+}
+.window-collapse-dir-part:hover:not(.is-active) {
+    background: rgba(255, 255, 255, 0.65);
+    color: #1e293b;
+}
+.window-collapse-dir-part.is-active {
+    background: #2563eb;
+    color: #ffffff;
+    box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.28);
+}
+.window-collapse-dir-part:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 1px;
+}
+
+/* 深色视频悬浮窗配色适配 */
+#video-panel .window-collapse-dir-btn {
+    border-color: rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.08);
+    height: 22px;
+}
+#video-panel .window-collapse-dir-part {
+    color: #a1a1aa;
+    min-width: 13px;
+    padding: 0 2px;
+}
+#video-panel .window-collapse-dir-part:hover:not(.is-active) {
+    background: rgba(255, 255, 255, 0.12);
+    color: #f4f4f5;
+}
+#video-panel .window-collapse-dir-part.is-active {
+    background: #3b82f6;
+    color: #ffffff;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+@container (max-width: 320px) {
+    #video-panel .window-collapse-dir-part {
+        min-width: 11px;
+        padding: 0 2px;
+        font-size: 10px;
+    }
+}
+@container wb (max-width: 420px) {
+    #handwriting-whiteboard .window-collapse-dir-part {
+        min-width: 12px;
+        padding: 0 2px;
+        font-size: 10px;
+    }
+}
+
+/* 护眼模式配色适配 */
+body.eye-protection-mode #companion-pdf-panel .window-collapse-dir-btn,
+body.eye-protection-mode #handwriting-whiteboard .window-collapse-dir-btn {
+    border-color: #bccab5;
+    background: #dce5d5;
+}
+body.eye-protection-mode #companion-pdf-panel .window-collapse-dir-part,
+body.eye-protection-mode #handwriting-whiteboard .window-collapse-dir-part {
+    color: #4b5d4e;
+}
+body.eye-protection-mode #companion-pdf-panel .window-collapse-dir-part.is-active,
+body.eye-protection-mode #handwriting-whiteboard .window-collapse-dir-part.is-active {
+    background: #3d6b47;
+    color: #f6faf2;
 }
 
 /* 内容主体 */

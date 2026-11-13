@@ -73,6 +73,8 @@
     let subtitleLoadId = 0;
     let panelVisible = false;
     let isCollapsed = false;
+    let collapseDir = 'up';
+    let collapseDirBtn = null;
     let hudTimer = null;
     let isMouseOverPanel = false;
 
@@ -164,6 +166,7 @@
                 '<button type="button" class="video-panel-btn" id="video-crop-btn" title="框选放大" aria-label="框选放大" aria-pressed="false" disabled>' +
                     '<i class="ph ph-crop text-[15px]"></i>' +
                 '</button>' +
+                (window.FloatingWindowLayers ? window.FloatingWindowLayers.collapseDirectionHtml('video-collapse-dir-btn', collapseDir) : '') +
                 '<button type="button" class="video-panel-btn" id="video-collapse-btn" title="折叠播放器 (Shift)" aria-expanded="true">' +
                     '<i class="ph ph-caret-up text-[15px]"></i>' +
                 '</button>' +
@@ -232,6 +235,7 @@
         fullscreenBtn = panel.querySelector('#video-fullscreen-btn');
         subtitleBtn = panel.querySelector('#video-subtitle-btn');
         subtitleReplaceBtn = panel.querySelector('#video-subtitle-replace-btn');
+        collapseDirBtn = panel.querySelector('#video-collapse-dir-btn');
         collapseBtn = panel.querySelector('#video-collapse-btn');
         headerShortcutBtn = panel.querySelector('#video-header-shortcut-btn');
         closeBtn = panel.querySelector('#video-close-btn');
@@ -289,6 +293,14 @@
         });
         subtitleReplaceBtn.addEventListener('click', function (e) { e.stopPropagation(); openSubtitle(); });
         closeBtn.addEventListener('click', function (e) { e.stopPropagation(); hidePanel(); });
+        window.FloatingWindowLayers?.bindCollapseDirectionControl(
+            collapseDirBtn,
+            function () { return collapseDir; },
+            function (nextDir) {
+                collapseDir = nextDir;
+                saveWindowState();
+            }
+        );
         collapseBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleCollapse(); });
         if (headerShortcutBtn) {
             headerShortcutBtn.addEventListener('click', function (e) {
@@ -462,7 +474,7 @@
         }
         header.addEventListener('mousedown', function (e) {
             if (document.fullscreenElement === panel) return;
-            if (e.target.closest('.video-panel-btn') || e.target.closest('#video-speed')) return;
+            if (e.target.closest('.video-panel-btn') || e.target.closest('.window-collapse-dir-btn') || e.target.closest('#video-speed')) return;
             e.preventDefault();
             dragging = true;
             sx = e.clientX; sy = e.clientY;
@@ -814,13 +826,43 @@
 
     function toggleCollapse() {
         if (document.fullscreenElement === panel) return;
+        const Layers = window.FloatingWindowLayers;
+        const beforeRect = {
+            top: panel.offsetTop,
+            bottom: panel.offsetTop + panel.offsetHeight,
+            height: panel.offsetHeight
+        };
+        const minTop = getHeaderHeight();
         isCollapsed = !isCollapsed;
         if (isCollapsed) {
             panel.classList.add('is-collapsed');
+            if (Layers && beforeRect.height > 0) {
+                panel.style.top = Layers.computeCollapseAnchorTop({
+                    dir: collapseDir,
+                    collapsing: true,
+                    rect: beforeRect,
+                    collapsedHeight: 38,
+                    expandedHeight: beforeRect.height,
+                    minTop,
+                    maxBottom: Math.max(minTop + 38, window.innerHeight - 8)
+                }) + 'px';
+            }
             collapseBtn.innerHTML = '<i class="ph ph-caret-down text-[15px]"></i>';
             collapseBtn.title = '展开播放器 (Shift)';
         } else {
             panel.classList.remove('is-collapsed');
+            const expandedHeight = panel.offsetHeight;
+            if (Layers && beforeRect.height > 0 && expandedHeight > 0) {
+                panel.style.top = Layers.computeCollapseAnchorTop({
+                    dir: collapseDir,
+                    collapsing: false,
+                    rect: beforeRect,
+                    collapsedHeight: 38,
+                    expandedHeight: expandedHeight,
+                    minTop,
+                    maxBottom: Math.max(minTop + expandedHeight, window.innerHeight - 8)
+                }) + 'px';
+            }
             collapseBtn.innerHTML = '<i class="ph ph-caret-up text-[15px]"></i>';
             collapseBtn.title = '折叠播放器 (Shift)';
         }
@@ -841,6 +883,7 @@
                 width: panel.style.width,
                 height: panel.style.height,
                 isCollapsed: isCollapsed,
+                collapseDir: collapseDir,
                 videoFolder: videoFolder,
                 rate: video ? video.playbackRate : 1
             };
@@ -853,6 +896,10 @@
             const raw = localStorage.getItem(STORAGE_KEY);
             if (!raw) return;
             const s = JSON.parse(raw);
+            collapseDir = window.FloatingWindowLayers
+                ? window.FloatingWindowLayers.normalizeCollapseDirection(s.collapseDir)
+                : (s.collapseDir === 'down' ? 'down' : 'up');
+            window.FloatingWindowLayers?.syncCollapseDirectionControl(collapseDirBtn, collapseDir);
             if (typeof s.videoFolder === 'string') videoFolder = s.videoFolder;
             if (s.width) panel.style.width = s.width;
             if (s.height) panel.style.height = s.height;

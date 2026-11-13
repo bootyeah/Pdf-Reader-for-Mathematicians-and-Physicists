@@ -93,21 +93,75 @@ const { chromium } = require(path.join(deps, 'playwright'));
         const math = 'before $x^2$ middle $$\\frac{a}{b}$$ after $x^2$ end \\(q+1\\) more \\[r^2\\] last';
         await seed(math);
         await rightClick(await textPoint('last', 2), math.indexOf('last') + 2, math);
-        for (const [i, start] of [math.indexOf('$x^2$'), math.indexOf('$$'), math.lastIndexOf('$x^2$'), math.indexOf('\\('), math.indexOf('\\[')].entries()) {
+        const formulaRanges = [
+            [math.indexOf('$x^2$'), 1, 1],
+            [math.indexOf('$$'), 2, 2],
+            [math.lastIndexOf('$x^2$'), 1, 1],
+            [math.indexOf('\\('), 2, 2],
+            [math.indexOf('\\['), 2, 2]
+        ];
+        const spans = ['$x^2$', '$$\\frac{a}{b}$$', '$x^2$', '\\(q+1\\)', '\\[r^2\\]'];
+        for (const [i, [start, openLen, closeLen]] of formulaRanges.entries()) {
             const rect = await page.locator(selector + ' .katex').nth(i).boundingBox();
-            await rightClick({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }, start, math);
+            await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2, { button: 'right' });
+            await page.waitForTimeout(100);
+            const stateNow = await page.evaluate(s => ({
+                start: document.querySelector('#note-input')?.selectionStart,
+                text: s === document.querySelector('#note-input')?.value ? s : document.querySelector('#note-input')?.value
+            }), math);
+            assert.equal(stateNow.text, math);
+            assert(
+                stateNow.start >= start + openLen && stateNow.start <= start + spans[i].length - closeLen,
+                `formula ${i} caret ${stateNow.start} not inside [${start + openLen}, ${start + spans[i].length - closeLen}]`
+            );
             assert.equal(await page.locator(selector + ' .katex').count(), 5);
+            await page.evaluate(() => { els.noteModal.style.left = '1080px'; els.noteModal.style.top = '100px'; });
         }
         await rightClick(await textPoint('middle', 3), math.indexOf('middle') + 3, math);
         await rightClick(await textPoint('after', 3), math.indexOf('after') + 3, math);
         pass('四种公式定界符、重复公式及公式前后文字均对应正确源码位置，公式渲染保持完整');
 
+        const deepMath = 'start $x_{i+1}^{2}$ mid $$\\frac{u_3}{v^4} + \\sqrt[n]{k+5}$$ vec $\\alpha + \\text{hi}$ end';
+        await seed(deepMath);
+        const glyphPoint = async (formulaIndex, glyphChar) => page.evaluate(({ sel, formulaIndex, glyphChar }) => {
+            const box = document.querySelectorAll(sel + ' .katex')[formulaIndex];
+            const html = box.querySelector('.katex-html');
+            const walker = document.createTreeWalker(html, NodeFilter.SHOW_TEXT);
+            let node;
+            while ((node = walker.nextNode())) {
+                const idx = node.data.indexOf(glyphChar);
+                if (idx !== -1) {
+                    const r = document.createRange();
+                    r.setStart(node, idx);
+                    r.setEnd(node, idx + 1);
+                    const rect = r.getBoundingClientRect();
+                    return { x: rect.left + rect.width * 0.25, y: rect.top + rect.height / 2 };
+                }
+            }
+            return null;
+        }, { sel: selector, formulaIndex, glyphChar });
+        await rightClick(await glyphPoint(0, 'i'), deepMath.indexOf('_{i+1}') + 2, deepMath);
+        await rightClick(await glyphPoint(0, '1'), deepMath.indexOf('_{i+1}') + 4, deepMath);
+        await rightClick(await glyphPoint(0, '2'), deepMath.indexOf('^{2}') + 2, deepMath);
+        await rightClick(await glyphPoint(1, '3'), deepMath.indexOf('u_3') + 2, deepMath);
+        await rightClick(await glyphPoint(1, '4'), deepMath.indexOf('v^4') + 2, deepMath);
+        await rightClick(await glyphPoint(1, 'n'), deepMath.indexOf('[n]') + 1, deepMath);
+        await rightClick(await glyphPoint(1, '5'), deepMath.indexOf('k+5') + 2, deepMath);
+        await rightClick(await glyphPoint(2, 'α'), deepMath.indexOf('\\alpha'), deepMath);
+        await rightClick(await glyphPoint(2, 'h'), deepMath.indexOf('\\text{hi}') + 6, deepMath);
+        await rightClick(await textPoint('end', 1), deepMath.indexOf(' end') + 2, deepMath);
+        pass('右击复杂公式可精确定位至下标、上标、分子分母、根指数、宏命令与公式文本字符');
+
         const brokenMath = 'head $\\frac{a}$ tail';
         await seed(brokenMath);
         await rightClick(await textPoint('tail', 2), brokenMath.indexOf('tail') + 2, brokenMath);
         const errorRect = await page.locator(selector + ' .katex-error').boundingBox();
-        await rightClick({ x: errorRect.x + 5, y: errorRect.y + errorRect.height / 2 }, brokenMath.indexOf('$'), brokenMath);
-        pass('未成功编译的公式也能定位，后续文字偏移不受影响');
+        await page.mouse.click(errorRect.x + 5, errorRect.y + errorRect.height / 2, { button: 'right' });
+        await page.waitForTimeout(100);
+        const brokenPos = await page.evaluate(() => document.querySelector('#note-input').selectionStart);
+        assert(brokenPos >= brokenMath.indexOf('$') + 1 && brokenPos <= brokenMath.lastIndexOf('$'), JSON.stringify({ brokenPos }));
+        await page.evaluate(() => { els.noteModal.style.left = '1080px'; els.noteModal.style.top = '100px'; });
+        pass('未成功编译的公式也能精确定位，后续文字偏移不受影响');
 
         const wrapped = 'wrap words '.repeat(8) + '\n\nfinal line';
         await seed(wrapped, { width: .23 });

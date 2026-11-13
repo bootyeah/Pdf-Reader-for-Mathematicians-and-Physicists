@@ -202,6 +202,61 @@ const { chromium } = require(path.join(deps, 'playwright'));
             await page.locator('#close-note-btn').click();
             assert.equal(await preview.count(), 0);
         }
+
+        const rightClickPreviewGlyph = async (inputLocator, previewContainer, glyphChar) => {
+            const pt = await previewContainer.evaluate((root, ch) => {
+                const walker = document.createTreeWalker(root.querySelector('.katex-html'), NodeFilter.SHOW_TEXT);
+                let tn;
+                while ((tn = walker.nextNode())) {
+                    const idx = tn.data.indexOf(ch);
+                    if (idx !== -1) {
+                        const r = document.createRange();
+                        r.setStart(tn, idx);
+                        r.setEnd(tn, idx + 1);
+                        const rect = r.getBoundingClientRect();
+                        return { x: rect.left + rect.width * 0.25, y: rect.top + rect.height / 2 };
+                    }
+                }
+                return null;
+            }, glyphChar);
+            assert(pt, `missing glyph ${glyphChar}`);
+            await page.mouse.click(pt.x, pt.y, { button: 'right' });
+            await page.waitForTimeout(80);
+            return inputLocator.evaluate(el => el.selectionStart);
+        };
+
+        // Note modal live preview: right-click exact formula subscript/fraction/sum positions
+        await page.setViewportSize({ width: 1440, height: 1000 });
+        await page.evaluate(() => {
+            const anno = state.annotations[1][0];
+            openNoteModal(anno, 1, 200, 250, true);
+        });
+        const liveFormulaText = '公式 $x_{i+1}^{2} + \\frac{p_3}{q^4} + \\sum_{k=1}^{n} a_k$ 结束';
+        await note.fill(liveFormulaText);
+        await page.waitForFunction(() => document.querySelector('.latex-live-preview')?.textContent?.includes('结束'));
+        assert.equal(await rightClickPreviewGlyph(note, preview, 'i'), liveFormulaText.indexOf('_{i+1}') + 2);
+        assert.equal(await rightClickPreviewGlyph(note, preview, '1'), liveFormulaText.indexOf('_{i+1}') + 4);
+        assert.equal(await rightClickPreviewGlyph(note, preview, '2'), liveFormulaText.indexOf('^{2}') + 2);
+        assert.equal(await rightClickPreviewGlyph(note, preview, '3'), liveFormulaText.indexOf('p_3') + 2);
+        assert.equal(await rightClickPreviewGlyph(note, preview, '4'), liveFormulaText.indexOf('q^4') + 2);
+        assert.equal(await rightClickPreviewGlyph(note, preview, 'n'), liveFormulaText.indexOf('{n}') + 1);
+        await page.locator('#close-note-btn').click();
+        assert.equal(await preview.count(), 0);
+
+        // Mind map editor live preview: right-click exact formula matrix & subscript positions
+        await page.evaluate(() => window.MindMap.toggle(true));
+        await card.dispatchEvent('dblclick');
+        const mmFormula = '导图 $A_{m+7} + \\begin{pmatrix} u & v \\\\ w & z \\end{pmatrix}$';
+        await editor.fill(mmFormula);
+        await page.waitForFunction(() => document.querySelector('.latex-live-preview')?.textContent?.includes('导图'));
+        await page.waitForFunction(() => (document.querySelector('.latex-live-preview .katex-html')?.textContent || '').includes('u'));
+        assert.equal(await rightClickPreviewGlyph(editor, preview, '7'), mmFormula.indexOf('m+7') + 2);
+        assert.equal(await rightClickPreviewGlyph(editor, preview, 'w'), mmFormula.indexOf(' w ') + 1);
+        assert.equal(await rightClickPreviewGlyph(editor, preview, 'z'), mmFormula.indexOf(' z ') + 1);
+        await page.keyboard.press('Escape');
+        await page.evaluate(() => window.MindMap.toggle(false));
+        console.log('PASS live preview right-click jumps to exact LaTeX sub/sup/frac/sum/matrix offsets');
+
         assert.deepEqual(errors, []);
         console.log('PASS hidden editor cleanup and preview containment at 1440/700/390px; no browser errors');
     } finally {

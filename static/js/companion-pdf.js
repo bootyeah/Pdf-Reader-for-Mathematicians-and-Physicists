@@ -75,6 +75,8 @@
     // 状态管理
     let isOpen = false;
     let isCollapsed = false;
+    let collapseDir = 'up';
+    let collapseDirBtn = null;
     let isDocked = false;
     let savedFloatingRect = null; // 贴靠前保存的浮动位置尺寸
     let expandedHeight = 480;
@@ -134,6 +136,7 @@
             w: isDocked && savedFloatingRect ? savedFloatingRect.w : rect.width,
             h: isDocked && savedFloatingRect ? savedFloatingRect.h : (isCollapsed ? expandedHeight : rect.height),
             collapsed: isCollapsed,
+            collapseDir,
             docked: isDocked,
             dockWidth: isDocked ? rect.width : previous.dockWidth,
             scaleMode: currentScaleMode,
@@ -245,6 +248,7 @@
                     <button type="button" id="cp-dock-btn" class="cp-hbtn" title="半屏贴靠对比 (再次点击恢复浮动)" aria-label="半屏对比">
                         <i class="ph ph-sidebar-simple"></i>
                     </button>
+                    ${window.FloatingWindowLayers ? window.FloatingWindowLayers.collapseDirectionHtml('cp-collapse-dir-btn', collapseDir) : ''}
                     <button type="button" id="cp-collapse-btn" class="cp-hbtn" title="折叠为标题栏 (P)" aria-label="折叠" aria-expanded="true">
                         <i class="ph ph-caret-up"></i>
                     </button>
@@ -323,6 +327,7 @@
         outlineBtn = panel.querySelector('#cp-outline-btn');
         openBtn = panel.querySelector('#cp-open-btn');
         dockBtn = panel.querySelector('#cp-dock-btn');
+        collapseDirBtn = panel.querySelector('#cp-collapse-dir-btn');
         collapseBtn = panel.querySelector('#cp-collapse-btn');
         closeBtn = panel.querySelector('#cp-close-btn');
         bodyEl = panel.querySelector('#companion-pdf-body');
@@ -373,9 +378,14 @@
 
         expandedHeight = Math.max(MIN_H, initH);
         panel.style.width = initW + 'px';
-        panel.style.height = initH + 'px';
+        panel.style.height = (saved.collapsed && !saved.docked ? 40 : initH) + 'px';
         panel.style.left = initX + 'px';
         panel.style.top = initY + 'px';
+
+        collapseDir = window.FloatingWindowLayers
+            ? window.FloatingWindowLayers.normalizeCollapseDirection(saved.collapseDir)
+            : (saved.collapseDir === 'down' ? 'down' : 'up');
+        window.FloatingWindowLayers?.syncCollapseDirectionControl(collapseDirBtn, collapseDir);
 
         currentScaleMode = normalizeScale(saved.scaleMode);
         syncZoomSelectUI(currentScaleMode);
@@ -463,7 +473,18 @@
             }
         });
 
-        // 折叠 / 展开
+        // 折叠 / 展开 & 折叠方向
+        window.FloatingWindowLayers?.bindCollapseDirectionControl(
+            collapseDirBtn,
+            () => collapseDir,
+            nextDir => {
+                collapseDir = nextDir;
+                if (isDocked && isCollapsed) {
+                    layoutDocked(panel.getBoundingClientRect().width);
+                }
+                saveState();
+            }
+        );
         collapseBtn.addEventListener('click', e => { e.stopPropagation(); toggleCollapsed(); });
         if (shortcutBtn) {
             shortcutBtn.addEventListener('click', e => {
@@ -1589,20 +1610,45 @@
         setCollapsed(!isCollapsed);
     }
 
-    function setCollapsed(collapse) {
+    function setCollapsed(collapse, options = {}) {
         if (!panel) return;
         if (collapse === isCollapsed) return;
+        const preservePosition = !!options.preservePosition;
+        const rect = {
+            top: panel.offsetTop,
+            bottom: panel.offsetTop + panel.offsetHeight,
+            height: panel.offsetHeight
+        };
         if (collapse) lastReadingPosition = capturePosition() || loadSavedState().position || null;
         isCollapsed = !!collapse;
         panel.classList.toggle('cp-collapsed', isCollapsed);
+
+        const Layers = window.FloatingWindowLayers;
+        const headerH = getHeaderHeight();
+        const dockTop = headerH + 6;
+        const dockHeight = Math.max(40, window.innerHeight - headerH - 14);
+        const dockBottom = dockTop + dockHeight;
+        const anchorRect = isDocked ? { top: dockTop, bottom: dockBottom } : rect;
+        const minTop = isDocked ? dockTop : 0;
+        const maxBottom = isDocked ? dockBottom : Math.max(40, window.innerHeight - 8);
 
         if (isCollapsed) {
             if (handDrag.isDragging) endHandDrag();
             isSpaceDown = false;
             updateHandCursor();
-            const currentH = panel.getBoundingClientRect().height;
-            if (currentH > 40) expandedHeight = currentH;
+            if (!preservePosition && rect.height > 40) expandedHeight = rect.height;
             panel.style.height = '40px';
+            if (!preservePosition && Layers) {
+                panel.style.top = Layers.computeCollapseAnchorTop({
+                    dir: collapseDir,
+                    collapsing: true,
+                    rect: anchorRect,
+                    collapsedHeight: 40,
+                    expandedHeight,
+                    minTop,
+                    maxBottom
+                }) + 'px';
+            }
             collapseBtn.title = '展开小窗阅读 (P)';
             collapseBtn.setAttribute('aria-label', '展开');
             collapseBtn.innerHTML = '<i class="ph ph-caret-down"></i>';
@@ -1612,8 +1658,24 @@
                 shortcutBtn.title = '展开小窗阅读 (快捷键: P)';
                 shortcutBtn.setAttribute('aria-label', '展开小窗 (P)');
             }
+            if (!isDocked) clampPosition();
         } else {
-            panel.style.height = expandedHeight + 'px';
+            const maxH = Math.max(40, window.innerHeight - 16);
+            const targetH = isDocked
+                ? dockHeight
+                : Math.max(Math.min(MIN_H, maxH), Math.min(expandedHeight, maxH));
+            panel.style.height = targetH + 'px';
+            if (!preservePosition && Layers) {
+                panel.style.top = Layers.computeCollapseAnchorTop({
+                    dir: collapseDir,
+                    collapsing: false,
+                    rect: anchorRect,
+                    collapsedHeight: 40,
+                    expandedHeight: targetH,
+                    minTop,
+                    maxBottom: Math.max(targetH, maxBottom)
+                }) + 'px';
+            }
             collapseBtn.title = '折叠为标题栏 (P)';
             collapseBtn.setAttribute('aria-label', '折叠');
             collapseBtn.innerHTML = '<i class="ph ph-caret-up"></i>';
@@ -1623,7 +1685,7 @@
                 shortcutBtn.title = '折叠为标题栏 (快捷键: P)';
                 shortcutBtn.setAttribute('aria-label', '折叠小窗 (P)');
             }
-            clampPosition();
+            if (!isDocked) clampPosition();
             applyZoom();
             restorePosition(lastReadingPosition);
             scheduleVisiblePages();
@@ -1675,8 +1737,12 @@
         const maxWidth = Math.max(1, window.innerWidth - 16);
         const dockWidth = Math.min(maxWidth, Math.max(Math.min(MIN_W, maxWidth), width));
         const height = Math.max(40, window.innerHeight - headerH - 14);
+        const baseTop = headerH + 6;
+        const barTop = (isCollapsed && collapseDir === 'down')
+            ? Math.max(baseTop, baseTop + height - 40)
+            : baseTop;
         panel.style.left = (window.innerWidth - dockWidth - 8) + 'px';
-        panel.style.top = (headerH + 6) + 'px';
+        panel.style.top = barTop + 'px';
         panel.style.width = dockWidth + 'px';
         panel.style.height = (isCollapsed ? 40 : height) + 'px';
         expandedHeight = height;
@@ -1692,12 +1758,17 @@
         if (!restoredLayout) {
             restoredLayout = true;
             const saved = loadSavedState();
-            clampPosition();
             if (saved.docked) {
+                clampPosition();
                 setDocked(true);
                 if (Number.isFinite(saved.dockWidth)) layoutDocked(saved.dockWidth);
+                if (saved.collapsed) setCollapsed(true, { preservePosition: false });
+            } else {
+                if (saved.collapsed) {
+                    setCollapsed(true, { preservePosition: true });
+                }
+                clampPosition();
             }
-            if (saved.collapsed) setCollapsed(true);
         }
         bringToFront();
         panel.focus({ preventScroll: true });

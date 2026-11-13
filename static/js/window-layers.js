@@ -51,5 +51,64 @@
     }, true);
 
     apply();
-    window.FloatingWindowLayers = { bringToFront, attach };
+    function normalizeCollapseDirection(dir) {
+        return dir === 'down' ? 'down' : 'up';
+    }
+
+    function collapseDirectionHtml(id, dir = 'up', extraClass = '') {
+        const d = normalizeCollapseDirection(dir);
+        const cls = extraClass ? ` ${extraClass}` : '';
+        return `<span id="${id}" class="window-collapse-dir-btn${cls}" role="group" aria-label="折叠方向">`
+            + `<button type="button" class="window-collapse-dir-part${d === 'up' ? ' is-active' : ''}" data-collapse-dir="up" aria-pressed="${d === 'up'}" title="向上折叠（固定顶边）">↑</button>`
+            + `<button type="button" class="window-collapse-dir-part${d === 'down' ? ' is-active' : ''}" data-collapse-dir="down" aria-pressed="${d === 'down'}" title="向下折叠（固定底边）">↓</button>`
+            + `</span>`;
+    }
+
+    function syncCollapseDirectionControl(containerEl, dir) {
+        if (!containerEl) return;
+        const d = normalizeCollapseDirection(dir);
+        for (const part of containerEl.querySelectorAll('[data-collapse-dir]')) {
+            const active = part.dataset.collapseDir === d;
+            part.classList.toggle('is-active', active);
+            part.setAttribute('aria-pressed', String(active));
+        }
+    }
+
+    function bindCollapseDirectionControl(containerEl, getDir, onChange) {
+        if (!containerEl) return;
+        syncCollapseDirectionControl(containerEl, typeof getDir === 'function' ? getDir() : 'up');
+        containerEl.addEventListener('dblclick', e => e.stopPropagation());
+        containerEl.addEventListener('click', e => {
+            e.stopPropagation();
+            const part = e.target.closest('[data-collapse-dir]');
+            if (!part) return;
+            const nextDir = normalizeCollapseDirection(part.dataset.collapseDir);
+            const prevDir = typeof getDir === 'function' ? normalizeCollapseDirection(getDir()) : 'up';
+            syncCollapseDirectionControl(containerEl, nextDir);
+            if (nextDir !== prevDir && typeof onChange === 'function') {
+                onChange(nextDir);
+            }
+        });
+    }
+
+    // Keep the anchored edge fixed across expand/collapse transitions: top edge for 'up', bottom edge for 'down'.
+    function computeCollapseAnchorTop({ dir, collapsing, rect, collapsedHeight, expandedHeight, minTop = 0, maxBottom = window.innerHeight - 8 }) {
+        const d = normalizeCollapseDirection(dir);
+        const targetHeight = collapsing ? collapsedHeight : expandedHeight;
+        const rawTop = d === 'down'
+            ? (rect.bottom - targetHeight)
+            : rect.top;
+        const upperTop = Math.max(minTop, maxBottom - targetHeight);
+        return Math.max(minTop, Math.min(Math.round(rawTop), upperTop));
+    }
+
+    window.FloatingWindowLayers = {
+        bringToFront,
+        attach,
+        normalizeCollapseDirection,
+        collapseDirectionHtml,
+        syncCollapseDirectionControl,
+        bindCollapseDirectionControl,
+        computeCollapseAnchorTop
+    };
 })();
