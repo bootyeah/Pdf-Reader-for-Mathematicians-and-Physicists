@@ -121,11 +121,47 @@ const { chromium } = require(path.join(deps, 'playwright'));
         });
         assert.equal(sharedStyle, true, 'page and side preview use identical red marker styles');
         assert.equal(await preview.locator('.katex').count(), 1);
+        const previewFontSize = await preview.locator('.latex-preview-body').evaluate(el => parseFloat(getComputedStyle(el).fontSize));
+        assert(previewFontSize >= 17, `expected larger preview font size, got ${previewFontSize}`);
         await page.locator('#toggle-edit-btn').click();
         assert.equal(await page.evaluate(() => state.annotations[1].at(-1).text), '原始文本 $a$');
         assert.equal(await preview.count(), 0);
         await page.locator('#close-note-btn').click();
         console.log('PASS text block retains its page preview and cancellation restores its content');
+
+        await page.evaluate(() => {
+            state.annotations[1].push({
+                id: 'wide-text-side',
+                type: 'text',
+                text: '宽文本块 $\\alpha + \\beta$ 测试预览贴合左右两侧不避让',
+                color: '#000',
+                x: .05,
+                y: .22,
+                width: .85
+            });
+            renderAnnotations(1, true);
+            openNoteModal(state.annotations[1].at(-1), 1, 260, 220, true);
+        });
+        await page.waitForFunction(() => document.querySelector('.latex-live-preview .katex'));
+        const sideRightPos = await page.evaluate(() => {
+            const editor = els.noteModal.getBoundingClientRect();
+            const panel = document.querySelector('.latex-live-preview').getBoundingClientRect();
+            return { editor, panel };
+        });
+        assert(sideRightPos.panel.left >= sideRightPos.editor.right && Math.abs(sideRightPos.panel.top - sideRightPos.editor.top) <= 2,
+            'text block preview stays on the right side of the editor even over the text block');
+        await page.evaluate(() => openNoteModal(state.annotations[1].at(-1), 1, innerWidth - 180, 220, true));
+        await page.waitForFunction(() => document.querySelector('.latex-live-preview .katex'));
+        const sideLeftPos = await page.evaluate(() => {
+            const editor = els.noteModal.getBoundingClientRect();
+            const panel = document.querySelector('.latex-live-preview').getBoundingClientRect();
+            return { editor, panel };
+        });
+        assert(sideLeftPos.panel.right <= sideLeftPos.editor.left && Math.abs(sideLeftPos.panel.top - sideLeftPos.editor.top) <= 2,
+            'text block preview falls back to the left side of the editor even over the text block');
+        await page.locator('#close-note-btn').click();
+        assert.equal(await preview.count(), 0);
+        console.log('PASS text block preview always stays on the right or left of the editor without avoiding the text block');
 
         await page.evaluate(() => {
             window.MindMap.toggle(true);

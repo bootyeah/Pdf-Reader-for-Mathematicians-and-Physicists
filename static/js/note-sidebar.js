@@ -156,7 +156,6 @@
                 if (selectAllBtn) selectAllBtn.classList.remove('hidden'); 
                 state.isEditingNote = true;
                 closeNoteLivePreview = window.LatexLivePreview.open(els.noteInput, els.noteModal, {
-                    avoid: findTextAnnotationDiv(state.activeAnnotationId, state.activePageNum),
                     // 预览右键改了光标后，立即把正文文本块上的红光标同步过去。
                     onCaretMove: () => {
                         refreshActiveTextCursor();

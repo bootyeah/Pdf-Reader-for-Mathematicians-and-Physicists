@@ -345,11 +345,14 @@
             display: flex;
             flex-direction: column;
             box-sizing: border-box;
-            background: #fff;
-            color: #334155;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            box-shadow: 0 6px 24px #0f172a14;
+            background: #ffffff;
+            color: #0f172a;
+            border: 1px solid rgba(59, 130, 246, 0.26);
+            border-radius: 10px;
+            box-shadow:
+                0 0 0 2.5px rgba(59, 130, 246, 0.055),
+                0 10px 26px -6px rgba(15, 23, 42, 0.13),
+                0 2px 6px -1px rgba(15, 23, 42, 0.05);
             overflow: hidden;
         }
         .latex-preview-viewport {
@@ -362,19 +365,34 @@
             box-sizing: border-box;
             width: 100%;
             height: 100%;
-            padding: 10px;
-            font-size: 15px;
-            line-height: 1.6;
+            padding: 14px 16px;
+            font-size: 18px;
+            line-height: 1.65;
             white-space: pre-wrap;
             overflow-wrap: anywhere;
             overflow: auto;
             cursor: default;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
         }
-        .latex-preview-body.is-empty { color: #94a3b8; font-size: 12px; }
+        .latex-live-preview .latex-preview-body::-webkit-scrollbar { width: 6px; height: 6px; }
+        .latex-live-preview .latex-preview-body::-webkit-scrollbar-track { background: transparent; }
+        .latex-live-preview .latex-preview-body::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.4); border-radius: 999px; }
+        .latex-live-preview .latex-preview-body::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 0.6); }
+        .latex-preview-body.is-empty { color: #94a3b8; font-size: 14px; }
         .latex-preview-body img { max-width: 100% !important; height: auto !important; }
         .latex-preview-body .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
         .latex-preview-cursor { position: absolute; pointer-events: none; }
         .latex-preview-cursor[hidden] { display: none; }
+        body.eye-protection-mode aside.latex-live-preview {
+            background-color: #FCF9F3 !important;
+            border-color: rgba(161, 98, 7, 0.24) !important;
+            color: #292524;
+            box-shadow:
+                0 0 0 2.5px rgba(161, 98, 7, 0.05),
+                0 10px 26px -6px rgba(41, 37, 36, 0.12),
+                0 2px 6px -1px rgba(41, 37, 36, 0.04);
+        }
         @keyframes fadeIn {
             from { opacity: 0; transform: scale(0.95); }
             to { opacity: 1; transform: scale(1); }

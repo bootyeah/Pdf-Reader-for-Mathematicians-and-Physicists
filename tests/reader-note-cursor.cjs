@@ -54,7 +54,19 @@ const { chromium } = require(path.join(deps, 'playwright'));
             }, { selector, needle, local, side });
         }
 
+        async function clearModalSpace(point) {
+            await page.evaluate((y) => new Promise(resolve => {
+                if (!els.noteModal.classList.contains('hidden')) {
+                    els.noteModal.style.left = '1080px';
+                    els.noteModal.style.top = (y < 500 ? 680 : 20) + 'px';
+                }
+                requestAnimationFrame(() => requestAnimationFrame(resolve));
+            }), point.y);
+        }
+
         async function rightClick(point, expected, expectedText) {
+            // 为本次真实点击腾出空间，不改变被测文本块的位置。
+            await clearModalSpace(point);
             await page.mouse.click(point.x, point.y, { button: 'right' });
             await page.waitForTimeout(100);
             const result = await page.evaluate(() => ({
@@ -69,8 +81,6 @@ const { chromium } = require(path.join(deps, 'playwright'));
             assert.equal(result.editing, true);
             assert.equal(result.dragging, false);
             if (expectedText !== undefined) assert.equal(result.text, expectedText);
-            // 为下一次真实点击腾出空间，不改变被测文本块的位置。
-            await page.evaluate(() => { els.noteModal.style.left = '1080px'; els.noteModal.style.top = '100px'; });
         }
 
         const plain = '甲乙丙 ABCDE & <tag>\n第二行 😀 tail end';
@@ -103,7 +113,9 @@ const { chromium } = require(path.join(deps, 'playwright'));
         const spans = ['$x^2$', '$$\\frac{a}{b}$$', '$x^2$', '\\(q+1\\)', '\\[r^2\\]'];
         for (const [i, [start, openLen, closeLen]] of formulaRanges.entries()) {
             const rect = await page.locator(selector + ' .katex').nth(i).boundingBox();
-            await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2, { button: 'right' });
+            const pt = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+            await clearModalSpace(pt);
+            await page.mouse.click(pt.x, pt.y, { button: 'right' });
             await page.waitForTimeout(100);
             const stateNow = await page.evaluate(s => ({
                 start: document.querySelector('#note-input')?.selectionStart,
@@ -115,7 +127,6 @@ const { chromium } = require(path.join(deps, 'playwright'));
                 `formula ${i} caret ${stateNow.start} not inside [${start + openLen}, ${start + spans[i].length - closeLen}]`
             );
             assert.equal(await page.locator(selector + ' .katex').count(), 5);
-            await page.evaluate(() => { els.noteModal.style.left = '1080px'; els.noteModal.style.top = '100px'; });
         }
         await rightClick(await textPoint('middle', 3), math.indexOf('middle') + 3, math);
         await rightClick(await textPoint('after', 3), math.indexOf('after') + 3, math);
@@ -156,11 +167,12 @@ const { chromium } = require(path.join(deps, 'playwright'));
         await seed(brokenMath);
         await rightClick(await textPoint('tail', 2), brokenMath.indexOf('tail') + 2, brokenMath);
         const errorRect = await page.locator(selector + ' .katex-error').boundingBox();
-        await page.mouse.click(errorRect.x + 5, errorRect.y + errorRect.height / 2, { button: 'right' });
+        const errPt = { x: errorRect.x + 5, y: errorRect.y + errorRect.height / 2 };
+        await clearModalSpace(errPt);
+        await page.mouse.click(errPt.x, errPt.y, { button: 'right' });
         await page.waitForTimeout(100);
         const brokenPos = await page.evaluate(() => document.querySelector('#note-input').selectionStart);
         assert(brokenPos >= brokenMath.indexOf('$') + 1 && brokenPos <= brokenMath.lastIndexOf('$'), JSON.stringify({ brokenPos }));
-        await page.evaluate(() => { els.noteModal.style.left = '1080px'; els.noteModal.style.top = '100px'; });
         pass('未成功编译的公式也能精确定位，后续文字偏移不受影响');
 
         const wrapped = 'wrap words '.repeat(8) + '\n\nfinal line';
@@ -221,7 +233,9 @@ const { chromium } = require(path.join(deps, 'playwright'));
             renderAnnotations(1, true);
         });
         const other = await page.locator('.text-annotation[data-id="other-box"]').boundingBox();
-        await page.mouse.click(other.x + 8, other.y + 8, { button: 'right' });
+        const otherPt = { x: other.x + 8, y: other.y + 8 };
+        await clearModalSpace(otherPt);
+        await page.mouse.click(otherPt.x, otherPt.y, { button: 'right' });
         await page.waitForTimeout(150);
         assert.equal(await page.evaluate(() => state.activeAnnotationId), 'other-box');
         assert.equal(await page.evaluate(() => els.noteInput.value), 'second block');

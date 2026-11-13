@@ -2,7 +2,7 @@
 (() => {
     let active = null;
 
-    function open(input, anchor, { avoid = null, onCaretMove = null } = {}) {
+    function open(input, anchor, { onCaretMove = null } = {}) {
         active?.();
         const panel = document.createElement('aside');
         panel.className = 'latex-live-preview';
@@ -141,23 +141,9 @@
                 vertical.sort((a, b) => b.space - a.space);
                 candidates.push(...vertical);
             }
-            const source = avoid?.isConnected ? avoid.getBoundingClientRect() : null;
-            const clearsSource = p => !source || p.left + width <= source.left || p.left >= source.right ||
-                p.top + p.maxHeight <= source.top || p.top >= source.bottom;
-            const pool = [...candidates];
-            if (source && !pool.some(clearsSource)) {
-                for (const base of candidates) {
-                    for (const top of [source.bottom + gap, source.top - height - gap]) {
-                        if (top >= margin && top + height <= innerHeight - margin) {
-                            pool.push({ left: base.left, top, maxHeight: height });
-                        }
-                    }
-                }
-            }
-            // 文本块还支持在正文上右键定位光标，旁侧预览尽量不盖住这块正文。
             // 两侧都放不下时，贴着空间更大的一侧并夹进视口。
             const roomRight = innerWidth - rect.right, roomLeft = rect.left;
-            const placement = pool.find(clearsSource) || candidates[0] || {
+            const placement = candidates[0] || {
                 left: roomRight >= roomLeft ? innerWidth - width - margin : margin, top: sideTop, maxHeight: height
             };
             const { left, top, maxHeight } = placement;
