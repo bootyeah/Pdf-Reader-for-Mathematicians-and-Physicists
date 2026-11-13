@@ -110,12 +110,15 @@
         if (charCount) charCount.textContent = $('code').value.length + ' 字符';
     }
     function updateEngine() {
+        if (!panel) return;
         const isDeepSeek = engine === 'deepseek';
         $('engine').setAttribute('aria-pressed', String(isDeepSeek));
         $('engine').classList.toggle('active', isDeepSeek);
         $('engine-label').textContent = isDeepSeek ? '第二模型' : '默认模型';
-        $('engine').title = isDeepSeek ? '正在使用第二模型（DeepSeek）· 点击切回默认模型' : '正在使用默认模型（GLM）· 点击切换至第二模型';
+        $('engine').title = window.ReaderModelLabels?.title('handwriting', isDeepSeek)
+            || '切换默认模型 / 第二模型（在 API 管理工具中配置）';
     }
+    window.addEventListener('reader-model-labels-changed', updateEngine);
     function setPureMode(enabled) {
         pureMode = !!enabled;
         if (!panel) return;
@@ -335,6 +338,7 @@
             $('url').removeAttribute('href'); phone.start(true);
         };
         $('engine').onclick = () => { engine = engine ? '' : 'deepseek'; updateEngine(); save(); };
+        for (const event of ['pointerenter', 'focus']) $('engine').addEventListener(event, () => window.ReaderModelLabels?.refresh());
         updateEngine();
         let copyImageTimer = null;
         const copyBoardImage = async () => {
@@ -548,7 +552,7 @@
         window.addEventListener('resize', () => { if (!panel.hidden) { clamp(); draw(); } });
     }
     window.HandwritingWhiteboard = {
-        show() { ensure(); panel.hidden = false; window.FloatingWindowLayers?.bringToFront(panel); clamp(); draw(); phone.start(); },
+        show() { ensure(); panel.hidden = false; window.FloatingWindowLayers?.bringToFront(panel); clamp(); draw(); phone.start(); window.ReaderModelLabels?.refresh(); },
         hide,
         setPureMode(enabled) { ensure(); setPureMode(enabled); },
         isPureMode() { return !!pureMode; }

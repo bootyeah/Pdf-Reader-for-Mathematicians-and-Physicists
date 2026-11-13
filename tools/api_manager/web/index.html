@@ -210,7 +210,8 @@
             <div class="form-row form-row-3 pt-border">
               <div class="form-group">
                 <label for="temperature" class="form-label">温度 (Temperature)</label>
-                <input id="temperature" name="temperature" type="number" min="0" max="2" step="0.05" required class="form-input">
+                <input id="temperature" name="temperature" type="number" min="0" max="2" step="any" class="form-input" placeholder="自动（官方推荐）" aria-describedby="temperature-hint">
+                <span class="label-hint" id="temperature-hint">留空自动跟随模型；填写数值可自定义。</span>
               </div>
               <div class="form-group">
                 <label for="timeout" class="form-label">超时时间 (秒)</label>
@@ -228,13 +229,13 @@
                   思考参数 (Thinking) <span class="label-hint" id="thinking-hint">自动适配当前模型协议</span>
                 </label>
                 <select id="thinking" name="thinking" class="form-select">
-                  <option value="disabled">关闭思考 (更快，日常推荐)</option>
-                  <option value="enabled">开启思考 · 标准 (推荐用于通用推理)</option>
-                  <option value="low">轻量思考 · Low (快速推理，低延迟)</option>
-                  <option value="medium">均衡思考 · Medium (平衡深度与速度)</option>
-                  <option value="high">深度思考 · High (复杂推理，长链推导)</option>
-                  <option value="max">极致思考 · Max (天花板最高等级，极长思考链)</option>
-                  <option value="omit">不发送参数 (兼容第三方中转 / 纯文本模型)</option>
+                  <option value="disabled">disabled</option>
+                  <option value="enabled">enabled</option>
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                  <option value="max">max</option>
+                  <option value="omit">omit</option>
                 </select>
               </div>
               <div class="form-group">
@@ -257,6 +258,7 @@
                 <input id="web_search" name="web_search" type="checkbox">
                 <span class="checkbox-label">发送 web_search 工具参数</span>
               </label>
+              <p id="search-hint" class="label-hint"></p>
             </div>
           </div>
         </section>
@@ -277,6 +279,10 @@
           </summary>
 
           <div class="card-body prompt-body">
+            <div id="prompt-context-field" class="form-group" hidden>
+              <label for="prompt-context" class="form-label">识别场景</label>
+              <select id="prompt-context" class="form-select"></select>
+            </div>
             <div id="shared-prompt-hint" class="shared-key-pill" style="margin-bottom: 10px;" hidden>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="pill-icon">
                 <circle cx="12" cy="12" r="10"></circle>
@@ -286,6 +292,7 @@
               <span id="shared-prompt-text">当前共用其他功能的系统提示词（已完整显示，直接编辑即保存为专属提示词）</span>
             </div>
             <textarea id="prompt" name="prompt" rows="8" spellcheck="false" class="form-textarea prompt-textarea font-mono" aria-label="系统提示词"></textarea>
+            <p id="prompt-extra" class="label-hint" hidden></p>
           </div>
         </details>
 

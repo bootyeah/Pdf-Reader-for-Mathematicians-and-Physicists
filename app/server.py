@@ -183,10 +183,10 @@ def _api_config(feature):
     defaults = dict(api_settings.COMMON, base_url=DEEPSEEK_BASE_URL,
                     model=DEEPSEEK_MODEL, fallback_model=DEEPSEEK_FALLBACK_MODEL,
                     api_key=DEEPSEEK_API_KEY, proxy=PROXY, timeout=120,
-                    temperature=0.3, thinking='disabled' if DEEPSEEK_DISABLE_THINKING else 'omit',
+                    temperature=None, thinking='disabled' if DEEPSEEK_DISABLE_THINKING else 'omit',
                     web_search=ENABLE_WEB_SEARCH, prompt=ENTRY_PROMPT)
     if feature == 'chat':
-        defaults.update(api_key=CHAT_API_KEY or DEEPSEEK_API_KEY, temperature=0.7,
+        defaults.update(api_key=CHAT_API_KEY or DEEPSEEK_API_KEY, temperature=None,
                         thinking='disabled', web_search=False, prompt=CHAT_SYSTEM_PROMPT,
                         models=['deepseek-v4-pro'])
     elif feature == 'translation':
@@ -513,9 +513,14 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
                 continue
             content = m.get('content')
             if isinstance(content, str):
-                text = content.strip()
-                if text:
-                    cleaned.append({'role': role, 'content': text})
+                text = content if role == 'assistant' else content.strip()
+                if text.strip():
+                    entry = {'role': role, 'content': text}
+                    if role == 'assistant':
+                        for key in ('reasoning_content', '_reader_model'):
+                            if isinstance(m.get(key), str):
+                                entry[key] = m[key]
+                    cleaned.append(entry)
                 continue
             if not isinstance(content, list):
                 continue
@@ -548,24 +553,17 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
         return cleaned, None
 
     def _call_deepseek_stream(self, messages, model, stream,
-                              enable_thinking=False, temperature=0.7, max_tokens=0):
+                              enable_thinking=None, temperature=None, max_tokens=0):
         cfg = getattr(self, '_active_chat_config', None) or _api_config('chat')
+        cfg = dict(cfg, temperature=temperature, max_tokens=max_tokens)
         target_model = model or cfg['model']
-        body = api_settings.apply_parameters({
-            'model': target_model,
-            'messages': messages,
-            'stream': bool(stream),
-            'temperature': temperature,
-        }, cfg, enable_thinking=enable_thinking, model=target_model)
-        body['temperature'] = temperature
-        if max_tokens > 0:
-            body['max_tokens'] = max_tokens
-        else:
-            body.pop('max_tokens', None)
-        if cfg.get('web_search') and not api_settings.is_gemini_config(cfg, model=target_model):
-            body['tools'] = [{'type': 'web_search'}]
 
-        def request(payload):
+        def request(target):
+            payload = api_settings.apply_parameters({
+                'model': target, 'stream': bool(stream),
+                'messages': api_settings.protocol.history_for_model(messages, target, cfg['base_url']),
+            }, cfg, enable_thinking=enable_thinking, model=target)
+            api_settings.protocol.apply_search(payload, cfg, target)
             req = urllib.request.Request(
                 api_settings.completion_url(cfg['base_url']),
                 data=json.dumps(payload, ensure_ascii=False).encode('utf-8'),
@@ -575,22 +573,24 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 },
                 method='POST')
-            return api_settings.open_request(req, cfg)
+            response = api_settings.open_request(req, cfg)
+            self._response_model = target
+            return response
         try:
-            return request(body)
+            return request(target_model)
         except urllib.error.HTTPError as exc:
             fallback = cfg.get('fallback_model', '')
-            if exc.code not in (400, 404, 429, 500, 502, 503, 504) or not fallback or fallback == body['model']:
-                raise
+            detail = exc.read()
+            try:
+                code = json.loads(detail).get('error', {}).get('code', '')
+            except (ValueError, AttributeError):
+                code = ''
+            retryable = exc.code == 404 or api_settings.protocol.retryable_overload(exc.code, code, detail.decode('utf-8', errors='replace'))
+            if not retryable or not fallback or fallback == target_model:
+                exc.close()
+                raise urllib.error.HTTPError(exc.url, exc.code, exc.msg, exc.headers, io.BytesIO(detail)) from exc
             exc.close()
-            retry_body = api_settings.apply_parameters(
-                dict(body, model=fallback), cfg, enable_thinking=enable_thinking, model=fallback)
-            retry_body['temperature'] = temperature
-            if max_tokens > 0:
-                retry_body['max_tokens'] = max_tokens
-            else:
-                retry_body.pop('max_tokens', None)
-            return request(retry_body)
+            return request(fallback)
 
     def _chat_stream(self, messages, model, enable_thinking, temperature, max_tokens):
         try:
@@ -613,53 +613,60 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header('X-Accel-Buffering', 'no')
         self.end_headers()
 
-        done_sent = False
+        terminal = False
+        has_content = False
         try:
+            self._sse({'model': getattr(self, '_response_model', model)})
             for raw_line in resp:
                 line = raw_line.decode('utf-8', errors='replace').strip()
                 if not line or not line.startswith('data:'):
                     continue
                 payload = line[5:].strip()
                 if payload == '[DONE]':
+                    terminal = True
                     break
                 try:
                     chunk = json.loads(payload)
-                except Exception:
-                    continue
+                except ValueError:
+                    raise ValueError('模型返回了无法解析的数据，回答未完成。') from None
 
                 if chunk.get('error'):
-                    self._sse({'error': api_settings.redact(str(chunk['error'])[:400], self._active_chat_config)})
-                    done_sent = True
-                    break
+                    raise ValueError(api_settings.redact(str(chunk['error'])[:400], self._active_chat_config))
+                if chunk.get('usage'):
+                    self._sse({'usage': chunk['usage']})
                 choices = chunk.get('choices') or []
                 if not choices:
                     continue
                 delta = choices[0].get('delta') or {}
                 frame = {}
-                if delta.get('content'):
-                    frame['delta'] = delta['content']
+                content = api_settings.protocol.text_content(delta.get('content'))
+                if content:
+                    has_content = has_content or bool(content.strip())
+                    frame['delta'] = content
                 reasoning = delta.get('reasoning_content') or delta.get('reasoning') or delta.get('thought')
-                if reasoning:
+                if isinstance(reasoning, str) and reasoning:
                     frame['reasoning'] = reasoning
                 if frame:
                     self._sse(frame)
-                if chunk.get('usage'):
-                    self._sse({'usage': chunk['usage']})
+                reason = choices[0].get('finish_reason')
+                error = api_settings.protocol.finish_error(reason, delta.get('refusal'), delta.get('tool_calls'))
+                if error:
+                    raise ValueError(error)
+                if reason == 'stop':
+                    terminal = True
+            if not terminal:
+                raise ValueError('连接提前结束，回答未完成，请重试。')
+            if not has_content:
+                raise ValueError('模型未返回正文，可能只有思考内容；请检查输出上限后重试。')
+            self._sse({'done': True})
         except Exception as e:
             try:
                 self._sse({'error': '连接中断：%s' % e})
-                done_sent = True
             except Exception:
                 pass
         finally:
             try:
                 resp.close()
-            except Exception:
-                pass
-
-        if not done_sent:
-            try:
-                self._sse({'done': True})
             except Exception:
                 pass
 
@@ -680,13 +687,11 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
             return {'ok': False, 'error': '请求异常：%s' % e}
 
         try:
+            content = api_settings.protocol.completion_text(payload)
             message = payload['choices'][0]['message']
-        except Exception:
-            return {'ok': False, 'error': '模型返回了空结果'}
-        content = message.get('content') or ''
-        if not content.strip():
-            return {'ok': False, 'error': '模型返回了空结果'}
-        return {'ok': True, 'content': content,
+        except ValueError as exc:
+            return {'ok': False, 'error': str(exc)}
+        return {'ok': True, 'content': content, 'model': getattr(self, '_response_model', model),
                 'reasoning': message.get('reasoning_content') or message.get('reasoning') or message.get('thought') or '',
                 'usage': payload.get('usage') or {}}
 
@@ -710,9 +715,11 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
             "stream": False,
         }
         enable = None if (disable_thinking is None or disable_thinking) else False
-        body = api_settings.apply_parameters(body, cfg, enable_thinking=enable, model=target_model)
-        if use_search and not api_settings.is_gemini_config(cfg, model=target_model):
-            body["tools"] = [{"type": "web_search"}]
+        try:
+            body = api_settings.apply_parameters(body, cfg, enable_thinking=enable, model=target_model)
+            api_settings.protocol.apply_search(body, dict(cfg, web_search=use_search), target_model)
+        except ValueError as exc:
+            return {'ok': False, 'error': str(exc), 'status': 400}
 
         url = api_settings.completion_url(cfg['base_url'])
         req = urllib.request.Request(
@@ -733,18 +740,21 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
                 detail = e.read().decode('utf-8', errors='replace')
             except Exception:
                 detail = ''
-            return {'ok': False, 'error': '模型 API 错误 %s: %s' % (e.code, api_settings.redact(detail[:400], cfg)), 'status': e.code}
+            try:
+                code = json.loads(detail).get('error', {}).get('code', '')
+            except (ValueError, AttributeError):
+                code = ''
+            return {'ok': False, 'error': '模型 API 错误 %s: %s' % (e.code, api_settings.redact(detail[:400], cfg)),
+                    'status': e.code, 'retryable': e.code == 404 or api_settings.protocol.retryable_overload(e.code, code, detail)}
         except urllib.error.URLError as e:
-            return {'ok': False, 'error': '无法连接 DeepSeek API：%s' % e.reason, 'status': 0}
+            return {'ok': False, 'error': '无法连接模型 API：%s' % e.reason, 'status': 0}
         except Exception as e:
             return {'ok': False, 'error': '请求异常：%s' % e, 'status': 0}
 
         try:
-            content = payload['choices'][0]['message']['content']
-        except Exception:
-            content = ''
-        if not (content or '').strip():
-            return {'ok': False, 'error': '模型返回了空结果', 'status': 0, 'empty': True}
+            content = api_settings.protocol.completion_text(payload)
+        except ValueError as exc:
+            return {'ok': False, 'error': str(exc), 'status': 0}
         return {'ok': True, 'content': content}
 
     def translate(self, text, mode):
@@ -754,33 +764,23 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
             {'role': 'system', 'content': system},
             {'role': 'user', 'content': text},
         ]
-        attempts = []
-        has_thinking = cfg['thinking'] != 'omit'
-        if cfg['web_search']:
-            attempts.append((cfg['model'], True, has_thinking))
-        attempts.append((cfg['model'], False, has_thinking))
-        if has_thinking:
-            attempts.append((cfg['model'], False, False))
+        attempts = [cfg['model']]
         if cfg['fallback_model'] and cfg['fallback_model'] != cfg['model']:
-            attempts.append((cfg['fallback_model'], False, has_thinking))
+            attempts.append(cfg['fallback_model'])
 
         last = {'ok': False, 'error': '未知错误', 'status': 0}
-        unavailable = set()
-        for model, use_search, disable_thinking in attempts:
-            if model in unavailable:
-                continue
-            result = self._call_deepseek(messages, use_search=use_search,
-                                         model=model, disable_thinking=disable_thinking)
+        for model in attempts:
+            result = self._call_deepseek(messages, use_search=cfg['web_search'], model=model)
             if result.get('ok'):
                 result['kind'] = kind or _detect_entry_kind(result.get('content'))
                 print("[词典] %s(%s) → %s" % (mode, result.get('kind') or '未定', text[:60]))
                 return result
             last = result
-            if result.get('status') in (429, 503):
-                unavailable.add(model)
-            if not result.get('empty') and result.get('status') not in (400, 404, 429, 503):
+            if not result.get('retryable'):
                 return result
         return last
+
+
 
     def render_tikz_cached(self, tex_code):
         return tikz_compiler.render_tikz_cached(tex_code, compiler=getattr(self, 'render_latex_to_svg', None))

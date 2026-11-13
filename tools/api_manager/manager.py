@@ -65,11 +65,15 @@ def probe(doc, fid, list_models=False):
                        {'type': 'image_url', 'image_url': {'url': test_image()}}]
         payload = settings.apply_parameters({'model': cfg['model'], 'stream': False,
                                             'messages': [{'role': 'user', 'content': content}]}, cfg)
-        is_thinking = (payload.get('reasoning_effort') not in (None, 'none')) or (payload.get('thinking', {}).get('type') == 'enabled')
+        model_cap = settings.protocol.capabilities(cfg['model'], cfg['base_url'])
+        is_thinking = cfg['thinking'] in settings.THINKING_ACTIVE_MODES or (cfg['thinking'] == 'omit' and model_cap['default_thinking'])
         cap = 4096 if is_thinking else 256
-        payload['max_tokens'] = min(int(cfg['max_tokens'] or cap), cap)
-        if cfg['web_search'] and not settings.is_gemini_config(cfg):
-            payload['tools'] = [{'type': 'web_search'}]
+        budget = min(int(cfg['max_tokens'] or cap), cap)
+        settings.protocol.apply_token_limit(payload, cfg, limit=budget)
+        try:
+            settings.protocol.apply_search(payload, cfg)
+        except ValueError as exc:
+            raise settings.ConfigError(str(exc)) from exc
     req = urllib.request.Request(url, data=json.dumps(payload).encode() if payload else None, headers=headers)
     result = {'ok': False, 'model': cfg['model'], 'endpoint': url, 'status': 0}
     try:
@@ -85,11 +89,17 @@ def probe(doc, fid, list_models=False):
                 raise ValueError('接口未返回模型列表；仍可手动填写模型名称。')
             result.update(ok=True, models=models[:300])
         else:
-            text = data['choices'][0]['message'].get('content')
-            if not text:
-                raise ValueError('接口已响应，但未返回正文。可尝试关闭思考后重测（测试上限为 256 tokens）。')
-            result.update(ok=True, reply=settings.redact(str(text)[:1500], cfg),
-                          model=data.get('model', cfg['model']), usage=data.get('usage', {}))
+            choice = data['choices'][0]
+            message = choice['message']
+            text = settings.protocol.text_content(message.get('content'))
+            incomplete = choice.get('finish_reason') == 'length' or (not text.strip() and message.get('reasoning_content'))
+            result.update(connected=True, model=data.get('model', cfg['model']), usage=data.get('usage', {}), test_token_limit=budget)
+            if incomplete and not message.get('refusal') and not message.get('tool_calls'):
+                result.update(ok=True, complete=False, reply=settings.redact(text[:1500], cfg),
+                              warning='接口已连接，但测试输出未完成（本次上限 %s tokens）。可提高配置的输出上限或降低思考档位后重测；测试最多使用 4096 tokens。' % budget)
+            else:
+                text = settings.protocol.completion_text(data)
+                result.update(ok=True, complete=True, reply=settings.redact(text[:1500], cfg))
     except urllib.error.HTTPError as exc:
         hints = {
             401: 'Key 无效或已过期',
@@ -209,6 +219,17 @@ class ManagerHandler(BaseHTTPRequestHandler):
             body = json.loads(raw_body)
             if not isinstance(body, dict):
                 raise settings.ConfigError('无效的请求。')
+            if self.path == '/api/temperature':
+                self.send_data(200, settings.temperature_policy(body.get('model'), body.get('thinking')))
+                return
+            if self.path == '/api/parameters':
+                self.send_data(200, settings.parameter_policy(body.get('model'), body.get('base_url'), body.get('thinking')))
+                return
+            if self.path == '/api/prompt-preview':
+                if body.get('feature') not in settings.FEATURES:
+                    raise settings.ConfigError('请选择有效的功能。')
+                self.send_data(200, settings.prompt_preview(body['document'], body['feature'], body.get('context')))
+                return
             if self.path == '/api/restore':
                 self.send_data(200, self.snapshot(settings.restore(body['revision'])))
                 return

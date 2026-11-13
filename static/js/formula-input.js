@@ -106,6 +106,8 @@
         if (!expanded) { target = identity(); remember(); fitModal(); }
         cancelRequest(); clearResult(); status();
         activeMode = mode; expanded = true; panel.hidden = false; modal.classList.add('formula-expanded');
+        updateEngine();
+        window.ReaderModelLabels?.refresh();
         $('collapse').hidden = false;
         bar.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
         panel.querySelectorAll('[data-formula-pane]').forEach(p => p.hidden = p.dataset.formulaPane !== mode);
@@ -141,21 +143,23 @@
     bar.hidden = true;
     bar.addEventListener('click', e => { const b = e.target.closest('[data-mode]'); if (b) expanded && activeMode === b.dataset.mode ? collapse() : open(b.dataset.mode); });
     $('collapse').onclick = collapse;
-    // 识别模型开关：手写 / 识图 / 手机三条识别共用，按下即改用 DeepSeek V4.1 Flash。
+    // Keep the stored engine identifier compatible; display the currently configured models.
     function updateEngine() {
         const on = engine === 'deepseek';
         $('deepseek').setAttribute('aria-pressed', String(on));
-        $('deepseek').title = on
-            ? '正在使用第二模型 · 按下切回默认模型（在 API 管理工具中配置）'
-            : '正在使用默认模型 · 按下改用第二模型（在 API 管理工具中配置）';
+        $('deepseek').title = window.ReaderModelLabels?.title(activeMode, on)
+            || '切换默认模型 / 第二模型（在 API 管理工具中配置）';
         $('deepseek').querySelector('span').textContent = '第二模型';
         try { on ? localStorage.setItem(ENGINE_KEY, 'deepseek') : localStorage.removeItem(ENGINE_KEY); } catch (_) {}
     }
     updateEngine();
+    window.addEventListener('reader-model-labels-changed', updateEngine);
+    for (const event of ['pointerenter', 'focus']) $('deepseek').addEventListener(event, () => window.ReaderModelLabels?.refresh());
     $('deepseek').onclick = () => {
         engine = engine === 'deepseek' ? '' : 'deepseek';
         updateEngine();
-        status(engine === 'deepseek' ? '已切到第二模型（初始为 DeepSeek）' : '已切回默认模型（初始为 GLM）');
+        const modelName = window.ReaderModelLabels?.name(activeMode, engine === 'deepseek');
+        status('已切换至' + (modelName || (engine ? '第二模型' : '默认模型')));
     };
     // 标题拖动与弹窗外点击均不会干扰画板、文件选择与 PDF 框选。
     bar.addEventListener('mousedown', e => e.preventDefault());

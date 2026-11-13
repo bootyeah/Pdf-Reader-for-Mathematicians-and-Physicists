@@ -41,7 +41,7 @@ DEFAULT_CONFIG = {
         "5. 如果图片中没有数学公式，只输出：未检测到公式"
     ),
     "proxy": "",
-    "temperature": 0.2,
+    "temperature": None,
     "timeout": 60,
     "max_side": 4096,  # 图片最长边超过该像素值时等比缩小后再上传
 }
@@ -146,16 +146,10 @@ def _post_chat(cfg, img_b64, model):
     except Exception as exc:
         raise RuntimeError(f"网络请求失败：{exc}")
     try:
-        content = data["choices"][0]["message"]["content"]
-        if isinstance(content, list):
-            content = "".join(
-                part.get("text", "") for part in content if isinstance(part, dict)
-            )
-        content = str(content).strip()
-        return content, data.get("model", "")
-    except Exception:
-        raise RuntimeError(
-            "接口响应格式异常：" + json.dumps(data, ensure_ascii=False)[:500])
+        content = api_settings.protocol.completion_text(data, allow_empty=True)
+        return content.strip(), data.get("model", "")
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
 
 
 def call_api(cfg, img_b64):
@@ -179,16 +173,8 @@ def call_api(cfg, img_b64):
 
 
 def _is_overload(exc):
-    """判断异常是否属于「模型拥堵/限流」，只有这类才值得降级重试。
-
-    智谱平台把限流类错误统一放在 HTTP 429 下，业务错误码 13xx
-    （1302 账户速率限制、1305 平台过载、1308 用量上限等）；
-    401/400 等参数或鉴权错误不降级，避免掩盖真正的配置问题。
-    """
-    if exc.http_status != 429:
-        return False
-    code = str(exc.code or "")  # 服务端可能返回数字型 code，统一转字符串
-    return code.startswith("13") and code.isdigit()
+    """暂时限流或服务故障可重试一次；参数、鉴权、额度错误不重试。"""
+    return api_settings.protocol.retryable_overload(exc.http_status, exc.code, str(exc))
 
 
 def clean_code(text):

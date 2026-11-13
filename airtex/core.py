@@ -55,7 +55,7 @@ DEFAULT_CONFIG = {
     "model": "glm-4.6v-flash",
     "fallback_model": "glm-4v-flash",
     "proxy": "",
-    "temperature": 0.2,
+    "temperature": None,
     "timeout": 60,
     "max_side": 4096,
     # ---- 服务 ----
@@ -122,13 +122,7 @@ def build_prompt(cfg, mode=MODE_PHONE):
 
     mode 只影响内置模板里「用什么写的」这句交代；用户自定义 prompt 原样使用。
     """
-    custom = str(cfg.get("prompt", "") or "").strip()
-    text = custom or _PLACEHOLDER_PROMPT.format(
-        source=_PROMPT_SOURCE[normalize_mode(mode)])
-    if cfg.get("enable_text"):
-        text += ("\n6. 图片中如果出现了非公式的文字（题干、单位、说明），请一并识别："
-                 "中文用 \\text{...} 包在公式里，独立成句的纯文字原样输出。")
-    return text
+    return api_settings.build_handwriting_prompt(cfg, normalize_mode(mode), _PLACEHOLDER_PROMPT, _PROMPT_SOURCE)
 
 
 # --------------------------------------------------------------------------
@@ -491,27 +485,15 @@ def _post_chat(cfg, img_b64, model, prompt):
     except Exception as exc:
         raise RuntimeError(f"网络请求失败：{exc}")
     try:
-        content = data["choices"][0]["message"]["content"]
-        if isinstance(content, list):  # 少数兼容实现会返回分段内容
-            content = "".join(str(part.get("text", "")) if isinstance(part, dict)
-                              else str(part) for part in content)
-        return str(content).strip(), data.get("model", "")
-    except Exception:
-        raise RuntimeError(
-            "接口响应格式异常：" + json.dumps(data, ensure_ascii=False)[:500])
+        content = api_settings.protocol.completion_text(data, allow_empty=True)
+        return content.strip(), data.get("model", "")
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
 
 
 def _is_overload(exc):
-    """只有「模型拥堵/限流」才值得降级重试。
-
-    智谱平台把限流类错误统一放在 HTTP 429 下，业务错误码 13xx
-    （1302 账户速率限制、1305 平台过载、1308 用量上限等）；
-    401/400 等参数或鉴权错误不降级，避免掩盖真正的配置问题。
-    """
-    if exc.http_status != 429:
-        return False
-    code = str(exc.code or "")
-    return code.startswith("13") and code.isdigit()
+    """暂时限流或服务故障可重试一次；参数、鉴权、额度错误不重试。"""
+    return api_settings.protocol.retryable_overload(exc.http_status, exc.code, str(exc))
 
 
 def call_api(cfg, img_b64, mode=MODE_PHONE):

@@ -14,6 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from tools.api_manager import model_protocol as protocol
 
 ROOT = Path(__file__).resolve().parents[2]
 FEATURES = {
@@ -30,45 +31,24 @@ FEATURES = {
     'formula_alt': ('公式识别 · 第二模型', '按下编辑框公式面板或独立手写白板的「第二模型」后，接口、Key、模型与调用参数（温度、超时、输出上限、思考、代理、备用模型）整组改用此项。白板使用独立段落提示词。', '视觉'),
 }
 COMMON = dict(base_url='', api_key='', key_source='', model='', fallback_model='',
-              models=[], temperature=0.2, timeout=60, max_tokens=0,
+              models=[], temperature=None, timeout=60, max_tokens=0,
               thinking='disabled', proxy='', prompt='', web_search=False)
 _LOCK = threading.RLock()
 
-THINKING_MODES = ('disabled', 'enabled', 'low', 'medium', 'high', 'max', 'omit')
-THINKING_ACTIVE_MODES = ('enabled', 'low', 'medium', 'high', 'max')
+THINKING_MODES = protocol.MODES
+THINKING_ACTIVE_MODES = protocol.ACTIVE_MODES
 
 # Google AI Studio 的 OpenAI 兼容端点；Key 走 Authorization: Bearer，与 DeepSeek 调用方式一致。
-# 针对 Gemini 深度推理模型适配优化：温度默认 1.0，超时 180s，思考模式默认 high（映射为 reasoning_effort），代理默认跟随系统代理。
+# Gemini 的温度按具体型号自动处理；超时 180s，思考默认 high，代理默认跟随系统代理。
 GEMINI_CHAT_DEFAULT = dict(COMMON, base_url='https://generativelanguage.googleapis.com/v1beta/openai',
                            model='gemini-4-argon', fallback_model='gemini-3.8-flash',
-                           temperature=1.0, timeout=180, thinking='high', proxy='system')
+                           temperature=None, timeout=180, thinking='high', proxy='system')
 # 后来新增的功能：旧 settings.json 里没有时按默认值补齐，避免整份配置因缺项被判为损坏。
 ADDED_FEATURES = {'chat_gemini': GEMINI_CHAT_DEFAULT}
 
 
 def detect_model_family(model=None, base_url=None):
-    """根据模型名称和接口地址智能识别模型系列，便于针对性适配思考参数协议。"""
-    m = str(model or '').lower().strip()
-    u = str(base_url or '').lower().strip()
-    if 'kimi' in m or 'moonshot' in m:
-        return 'kimi'
-    if 'glm' in m or 'zhipu' in m:
-        return 'glm'
-    if 'deepseek' in m:
-        return 'deepseek'
-    if 'gemini' in m:
-        return 'gemini'
-    if 'qwen' in m or 'qwq' in m:
-        return 'qwen'
-    if 'minimax' in m or 'mimo' in m:
-        return 'minimax'
-    if m.startswith(('o1', 'o3', 'gpt-5')):
-        return 'openai_reasoning'
-    if 'generativelanguage.googleapis.com' in u or 'google' in u:
-        return 'gemini'
-    if 'bigmodel.cn' in u:
-        return 'glm'
-    return 'general'
+    return protocol.capabilities(model, base_url)['family']
 
 
 def is_gemini_config(cfg, model=None):
@@ -162,12 +142,12 @@ def legacy_document():
             cfg.update(_read(path))
     base = dict(COMMON, base_url=old['DEEPSEEK_BASE_URL'], model=old['DEEPSEEK_MODEL'],
                 fallback_model=old['DEEPSEEK_FALLBACK_MODEL'], proxy=old['PROXY'], timeout=120)
-    dictionary = dict(base, api_key=old['DEEPSEEK_API_KEY'], temperature=0.3,
+    dictionary = dict(base, api_key=old['DEEPSEEK_API_KEY'],
                       thinking='disabled' if old['DEEPSEEK_DISABLE_THINKING'] else 'omit',
                       prompt=old['ENTRY_PROMPT'], web_search=old['ENABLE_WEB_SEARCH'])
     chat = dict(base, api_key=old['CHAT_API_KEY'],
                 key_source='' if old['CHAT_API_KEY'] else 'dictionary',
-                temperature=0.7, prompt=corrected_prompt(old['CHAT_SYSTEM_PROMPT']), models=['deepseek-v4-pro'])
+                prompt=corrected_prompt(old['CHAT_SYSTEM_PROMPT']), models=['deepseek-v4-pro'])
     def vision(cfg):
         return dict(COMMON, **{k: v for k, v in cfg.items() if k in COMMON})
     alt = dict(vision(image), **old['DEEPSEEK_VISION'])
@@ -185,33 +165,59 @@ def default_prompts():
     prompts = {fid: cfg.get('prompt', '') for fid, cfg in doc['features'].items()}
     if not prompts.get('chat_gemini'):
         prompts['chat_gemini'] = prompts.get('chat', '')
-    if not prompts.get('formula_handwriting'):
-        prompts['formula_handwriting'] = prompts.get('formula_image', '')
-    if not prompts.get('formula_alt'):
-        prompts['formula_alt'] = prompts.get('formula_image', '')
+    # Empty means inherit the appropriate image/PC/phone template at call time.
+    prompts['formula_handwriting'] = ''
+    prompts['formula_alt'] = ''
     return prompts
 
 
-def effective_prompt(doc, fid):
-    """获取指定功能的真实生效系统提示词（含继承共用关系解析）。"""
-    if not isinstance(doc, dict) or not isinstance(doc.get('features'), dict):
-        return ''
-    features = doc['features']
-    cfg = features.get(fid)
-    if not isinstance(cfg, dict):
-        return ''
-    own_prompt = str(cfg.get('prompt') or '').strip()
-    if own_prompt:
-        return own_prompt
+def build_handwriting_prompt(cfg, mode, template, sources):
+    text = str(cfg.get('prompt') or '').strip() or template.format(source=sources[mode])
+    if cfg.get('enable_text'):
+        text += ('\n6. 图片中如果出现了非公式的文字（题干、单位、说明），请一并识别：'
+                 '中文用 \\text{...} 包在公式里，独立成句的纯文字原样输出。')
+    return text
 
-    defaults = default_prompts()
-    if fid == 'chat_gemini':
-        chat_cfg = features.get('chat') or {}
-        return str(chat_cfg.get('prompt') or '').strip() or defaults.get('chat', '')
-    elif fid in ('formula_handwriting', 'formula_alt'):
-        img_cfg = features.get('formula_image') or {}
-        return str(img_cfg.get('prompt') or '').strip() or defaults.get('formula_image', '')
-    return defaults.get(fid, '')
+
+def prompt_preview(doc, fid, context=None):
+    """Resolve the draft with the same mode-specific rules used by OCR."""
+    features = doc['features']
+    own = str(features[fid].get('prompt') or '')
+    source = ''
+    if not fid.startswith('formula_'):
+        if fid == 'chat_gemini' and not own:
+            own = str(features['chat'].get('prompt') or '')
+            source = 'chat'
+        text = own
+        return dict(text=text, editable_text=text, source=source, readonly=False)
+    context = context or ('pc' if fid == 'formula_handwriting' else 'image')
+    if context not in ('image', 'pc', 'phone', 'whiteboard'):
+        raise ConfigError('无效的识别场景。')
+    if context == 'whiteboard':
+        text = _literals(ROOT / 'app/services/formula_service.py')['WHITEBOARD_PROMPT']
+        return dict(text=text, editable_text=text, source='独立白板固定提示词', readonly=True)
+    base_fid = 'formula_image' if context == 'image' else 'formula_handwriting'
+    native = _literals(ROOT / ('tex/latex_ocr.py' if context == 'image' else 'airtex/core.py'))
+    defaults = dict(native['DEFAULT_CONFIG'])
+    path = ROOT / ('tex' if context == 'image' else 'airtex') / 'config.json'
+    if path.exists():
+        defaults.update(json.loads(path.read_text(encoding='utf-8-sig')))
+    cfg = resolve(base_fid, defaults, doc)
+    if fid == 'formula_alt' and own:
+        cfg['prompt'] = own
+    if not own:
+        source = base_fid if fid == 'formula_alt' else '内置识别提示词'
+    if context == 'image':
+        text = cfg.get('prompt', '')
+        editable = text
+    else:
+        text = build_handwriting_prompt(cfg, context, native['_PLACEHOLDER_PROMPT'], native['_PROMPT_SOURCE'])
+        editable = build_handwriting_prompt(dict(cfg, enable_text=False), context, native['_PLACEHOLDER_PROMPT'], native['_PROMPT_SOURCE'])
+    return dict(text=text, editable_text=editable, source=source, readonly=False)
+
+
+def effective_prompt(doc, fid):
+    return prompt_preview(doc, fid)['text']
 
 
 def completion_url(base):
@@ -263,6 +269,8 @@ def validate(doc):
             raise ConfigError('思考模式无效。')
         for field, low, high in [('temperature', 0, 2), ('timeout', 1, 600), ('max_tokens', 0, 1000000)]:
             value = cfg[field]
+            if field == 'temperature' and value is None:
+                continue  # Auto: use the actual request model's official sampling policy.
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not low <= value <= high:
                 raise ConfigError('%s 必须在 %s–%s 之间。' % (field, low, high))
         if int(cfg['max_tokens']) != cfg['max_tokens']:
@@ -359,16 +367,9 @@ def public_document(doc):
         cfg['resolved_key'] = api_key_for(doc, fid)
 
         # 真实生效的提示词与共用来源标记
-        cfg['effective_prompt'] = effective_prompt(doc, fid)
-        if not str(cfg.get('prompt') or '').strip():
-            if fid == 'chat_gemini':
-                cfg['prompt_source'] = 'chat'
-            elif fid in ('formula_handwriting', 'formula_alt'):
-                cfg['prompt_source'] = 'formula_image'
-            else:
-                cfg['prompt_source'] = ''
-        else:
-            cfg['prompt_source'] = ''
+        preview = prompt_preview(doc, fid)
+        cfg['effective_prompt'] = preview['text']
+        cfg['prompt_source'] = preview['source']
     return result
 
 
@@ -408,41 +409,101 @@ def restore(expected_revision):
         return save_document(previous, expected_revision)
 
 
-def apply_parameters(payload, cfg, enable_thinking=None, model=None):
-    payload['temperature'] = cfg.get('temperature', payload.get('temperature', 0.2))
+def temperature_policy(model, thinking='disabled'):
+    """Verified model-specific rules; unknown models keep their upstream defaults.
+
+    Do not infer a fixed sampling value from a provider name or gateway URL.
+    Sources were checked on 2026-11-13; null value means omit the wire parameter.
+    """
+    m = str(model or '').strip().lower().rsplit('/', 1)[-1]
+    policy = dict(value=None, locked=False, note='未收录官方温度，自动使用服务端默认值。', source='')
+    if re.match(r'^kimi-k3(?:[.-]|$)', m):
+        policy.update(locked=True, note='官方固定为 1.0；按官方建议不发送 temperature。',
+                      source='https://platform.kimi.com/docs/guide/kimi-k3-1-pro-quickstart')
+    elif re.match(r'^glm-5\.3-flash(?:x)?(?:-|$)', m):
+        policy.update(value=1.0, note='官方推荐温度：1.0。',
+                      source='https://docs.z.ai/guides/vlm/glm-5.3-flash')
+    elif m == 'glm-4.6v-flash':
+        policy.update(value=0.8, note='官方模型卡评测推荐温度为 0.8。',
+                      source='https://huggingface.co/zai-org/GLM-4.6V-Flash#evaluation-settings')
+    elif m in ('deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-pro'):
+        if thinking != 'disabled':
+            policy.update(locked=True, note='思考模式下温度不生效，自动省略。',
+                          source='https://api-docs.deepseek.com/guides/thinking_mode/')
+        else:
+            policy.update(note='留空使用官方默认温度 1.0。',
+                          source='https://api-docs.deepseek.com/api/create-chat-completion/')
+    elif re.match(r'^gemini-(?:4(?:[.-]|$)|3\.(?:[6-9]|[1-9]\d)(?:[.-]|$))', m):
+        policy.update(locked=True, note='此模型不再使用温度参数；按官方建议不发送。',
+                      source='https://ai.google.dev/gemini-api/docs/troubleshooting')
+    elif re.match(r'^gemini-3(?:[.-]|$)', m):
+        policy.update(value=1.0, note='官方建议保持默认温度：1.0。',
+                      source='https://ai.google.dev/gemini-api/docs/troubleshooting')
+    elif re.match(r'^(?:o[134](?:-|$)|gpt-[56](?:[.-]|$))', m):
+        # GPT-5.1+ supports sampling only with explicit reasoning_effort=none.
+        adjustable = (re.match(r'^gpt-[56]\.', m) or m.startswith('gpt-6-')) and thinking == 'disabled' and protocol.capabilities(m)['can_disable']
+        if not adjustable:
+            policy.update(locked=True, note='此推理模式不支持自定义温度；不发送。',
+                          source='https://developers.openai.com/api/docs/guides/reasoning')
+    return policy
+
+
+def apply_temperature(payload, cfg, enable_thinking=None, model=None):
+    target = model or payload.get('model') or cfg.get('model')
     thinking = cfg.get('thinking', 'disabled')
+    if thinking != 'omit' and enable_thinking is not None:
+        thinking = (thinking if thinking in THINKING_ACTIVE_MODES else 'enabled') if enable_thinking else 'disabled'
+    policy = temperature_policy(target, thinking)
+    configured = cfg.get('temperature')
+    value = policy['value'] if policy['locked'] or configured is None else configured
+    if value is None:
+        payload.pop('temperature', None)
+    else:
+        payload['temperature'] = value
+    return payload
+
+
+def apply_parameters(payload, cfg, enable_thinking=None, model=None):
+    target_model = model or payload.get('model') or cfg.get('model')
+    try:
+        thinking, cap = protocol.thinking_mode(cfg, target_model, enable_thinking)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+    apply_temperature(payload, cfg, enable_thinking=enable_thinking, model=target_model)
     payload.pop('thinking', None)
     payload.pop('reasoning_effort', None)
     payload.pop('chat_template_kwargs', None)
 
-    target_model = model or payload.get('model') or (cfg or {}).get('model')
-    base_url = (cfg or {}).get('base_url')
-    family = detect_model_family(model=target_model, base_url=base_url)
-
     if thinking != 'omit':
-        active = (thinking in THINKING_ACTIVE_MODES) if enable_thinking is None else bool(enable_thinking)
-        if family in ('gemini', 'openai_reasoning'):
-            if active:
-                payload['reasoning_effort'] = thinking if thinking in ('low', 'medium', 'high') else 'high'
-            else:
+        active = thinking in THINKING_ACTIVE_MODES
+        if cap['protocol'] == 'effort':
+            if not active:
                 payload['reasoning_effort'] = 'none'
-        else:
-            # Kimi / GLM / DeepSeek / Qwen / 通用接口
-            if active:
-                payload['thinking'] = {'type': 'enabled'}
-                if thinking in ('low', 'medium', 'high', 'max'):
-                    payload['reasoning_effort'] = thinking
-                if family in ('kimi', 'glm', 'qwen'):
-                    payload['chat_template_kwargs'] = {'enable_thinking': True}
-            else:
-                payload['thinking'] = {'type': 'disabled'}
+            elif thinking != 'enabled':
+                payload['reasoning_effort'] = thinking
+            elif cap['can_disable']:
+                payload['reasoning_effort'] = 'medium' if 'medium' in cap['options'] else 'high'
+        elif cap['protocol'] == 'thinking':
+            payload['thinking'] = {'type': 'enabled' if active else 'disabled'}
+            if active and thinking != 'enabled':
+                payload['reasoning_effort'] = thinking
+        elif cap['protocol'] == 'legacy':
+            # Retain custom gateway behavior only for models without a verified profile.
+            payload['thinking'] = {'type': 'enabled' if active else 'disabled'}
+            if active and thinking != 'enabled':
+                payload['reasoning_effort'] = thinking
+            elif not active:
                 payload['reasoning_effort'] = 'none'
-                if family in ('kimi', 'glm', 'qwen', 'deepseek'):
-                    payload['chat_template_kwargs'] = {'enable_thinking': False, 'thinking': False}
-
-    if cfg.get('max_tokens', 0) > 0:
-        payload['max_tokens'] = int(cfg['max_tokens'])
+            if cap['family'] in ('kimi', 'glm', 'qwen'):
+                payload['chat_template_kwargs'] = {'enable_thinking': active}
+    protocol.apply_token_limit(payload, cfg, target_model)
     return payload
+
+
+def parameter_policy(model, base_url='', thinking='disabled'):
+    cap = protocol.capabilities(model, base_url)
+    return dict(cap, temperature=temperature_policy(model, thinking),
+                search=protocol.search_policy(model, base_url))
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):

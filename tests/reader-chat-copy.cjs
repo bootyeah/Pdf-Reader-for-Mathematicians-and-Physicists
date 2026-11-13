@@ -73,6 +73,7 @@ const stubChat = () => {
             window.__chatCopyTest.controller.enqueue(new TextEncoder().encode('data: ' + JSON.stringify(payload) + '\n\n'));
         }, payload);
         const finish = async () => {
+            await emit({ done: true });
             await page.evaluate(() => window.__chatCopyTest.controller.close());
             await page.waitForFunction(() => !document.querySelector('#ds-chat-panel.is-streaming'));
         };

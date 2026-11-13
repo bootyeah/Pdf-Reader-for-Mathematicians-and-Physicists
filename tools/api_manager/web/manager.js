@@ -12,6 +12,8 @@ if (fragment.has('token')) {
 let doc, saved, metadata = {}, selected = 'chat', hasBackup = false, busy = false;
 let defaultPrompts = {};
 let keyVisible = true, closed = false;
+let temperatureRequest = 0;
+let promptRequest = 0, parameterPolicy = null, promptReadonly = false;
 const results = new Map();
 const numeric = new Set(['temperature', 'timeout', 'max_tokens']);
 const fields = ['base_url', 'key_source', 'model', 'fallback_model', 'models', 'temperature', 'timeout', 'max_tokens', 'thinking', 'proxy', 'prompt', 'web_search'];
@@ -69,6 +71,7 @@ function lock(on) {
     });
     if (!on) {
         $('restore').disabled = !hasBackup;
+        syncPolicyControls();
         updateStatus();
     }
 }
@@ -195,101 +198,96 @@ function updateStatus() {
     }
 }
 
-function detectProviderClass(model, fid) {
-    const m = (model || '').toLowerCase().trim();
-    if (m.includes('gemini')) return 'gemini';
-    if (m.includes('kimi') || m.includes('moonshot')) return 'kimi';
-    if (m.includes('glm') || m.includes('zhipu')) return 'glm';
-    if (m.includes('deepseek')) return 'deepseek';
-    if (m.includes('qwen') || m.includes('qwq')) return 'qwen';
-    if (m.includes('minimax') || m.includes('mimo')) return 'minimax';
-    if (fid === 'chat_gemini') return 'gemini';
-    return fid && fid.startsWith('formula_') && fid !== 'formula_alt' ? 'glm' : 'deepseek';
-}
-
-const THINKING_OPTIONS_BY_PROVIDER = {
-    kimi: [
-        { value: 'disabled', label: '关闭思考 (0 Token 消耗)' },
-        { value: 'low', label: '快速思考 · Low' },
-        { value: 'high', label: '深度思考 · High' },
-        { value: 'max', label: '极致思考 · Max (天花板最高等级)' },
-        { value: 'omit', label: '不发送思考参数 (遵循默认)' }
-    ],
-    glm: [
-        { value: 'disabled', label: '关闭思考 (0 Token 消耗)' },
-        { value: 'low', label: '轻量思考 · Low' },
-        { value: 'medium', label: '均衡思考 · Medium' },
-        { value: 'high', label: '深度思考 · High' },
-        { value: 'max', label: '极致思考 · Max (最高等级)' },
-        { value: 'omit', label: '不发送思考参数 (遵循默认)' }
-    ],
-    gemini: [
-        { value: 'disabled', label: '关闭思考 (reasoning_effort: none)' },
-        { value: 'low', label: '轻量思考 · Low' },
-        { value: 'medium', label: '均衡思考 · Medium' },
-        { value: 'high', label: '深度思考 · High (官方推荐)' },
-        { value: 'omit', label: '不发送思考参数 (遵循默认)' }
-    ],
-    deepseek: [
-        { value: 'disabled', label: '关闭思考 (关闭思维链)' },
-        { value: 'enabled', label: '开启思考 · 标准 (标准思维链)' },
-        { value: 'low', label: '轻量思考 · Low (网关分级)' },
-        { value: 'high', label: '深度思考 · High (网关分级)' },
-        { value: 'max', label: '极致思考 · Max (网关最高)' },
-        { value: 'omit', label: '不发送思考参数 (遵循默认)' }
-    ],
-    general: [
-        { value: 'disabled', label: '关闭思考' },
-        { value: 'enabled', label: '开启思考 · 标准' },
-        { value: 'low', label: '轻量思考 · Low' },
-        { value: 'medium', label: '均衡思考 · Medium' },
-        { value: 'high', label: '深度思考 · High' },
-        { value: 'max', label: '极致思考 · Max' },
-        { value: 'omit', label: '不发送思考参数' }
-    ]
-};
-
-function syncThinkingOptions(provider, preferredValue) {
+function syncThinkingOptions(cap, preferredValue) {
     const select = $('thinking');
-    if (!select) return;
-    const providerKey = ['kimi', 'glm', 'gemini', 'deepseek'].includes(provider) ? provider : 'general';
-    const options = THINKING_OPTIONS_BY_PROVIDER[providerKey] || THINKING_OPTIONS_BY_PROVIDER.general;
+    const supported = cap.options.includes(preferredValue);
+    const options = supported ? cap.options : [preferredValue, ...cap.options];
+    select.replaceChildren(...options.map(value => new Option(value, value)));
+    select.value = preferredValue;
+    select.setCustomValidity(supported ? '' : '当前模型不支持 ' + preferredValue + '，请选择受支持的档位。');
+    const family = ({kimi: 'Kimi', glm: 'GLM', gemini: 'Gemini', deepseek: 'DeepSeek', openai_reasoning: 'OpenAI'})[cap.family] || cap.family;
+    $('thinking-hint').textContent = !supported ? '当前值 ' + preferredValue + ' 不受支持，请重新选择。'
+        : !cap.known ? '自定义模型 · 档位由接口决定'
+        : family + (cap.can_disable ? '' : cap.default_thinking === false ? ' · 不使用思考参数' : ' · 思考不可关闭');
+    select.title = 'disabled：关闭；enabled：开启；omit：不发送参数，使用模型默认值。';
+}
 
-    const supportedValues = options.map(o => o.value);
-    let matchedValue = preferredValue;
-    if (!supportedValues.includes(matchedValue)) {
-        if (matchedValue === 'enabled') {
-            matchedValue = (providerKey === 'gemini' || providerKey === 'kimi' || providerKey === 'glm') ? 'high' : supportedValues[0];
-        } else if (matchedValue === 'max' && providerKey === 'gemini') {
-            matchedValue = 'high';
-        } else if (matchedValue === 'medium' && providerKey === 'kimi') {
-            matchedValue = 'high';
-        } else if (matchedValue === 'low' || matchedValue === 'high') {
-            matchedValue = supportedValues.includes(matchedValue) ? matchedValue : 'disabled';
-        } else {
-            matchedValue = supportedValues.includes('disabled') ? 'disabled' : supportedValues[0];
+function syncPolicyControls() {
+    if (!doc) return;
+    const checked = !!doc.features[selected].web_search;
+    $('web_search').disabled = busy || (!parameterPolicy?.search.supported && !checked);
+    $('reset-prompt').disabled = busy || promptReadonly;
+    $('prompt').readOnly = promptReadonly;
+}
+
+async function syncTemperaturePolicy() {
+    if (!doc) return;
+    const request = ++temperatureRequest;
+    const cfg = doc.features[selected];
+    parameterPolicy = null;
+    const input = $('temperature'), hint = $('temperature-hint');
+    input.readOnly = false;
+    input.placeholder = '自动（官方推荐）';
+    hint.textContent = '留空自动跟随模型；填写数值可自定义。';
+    try {
+        const cap = await api('parameters', {model: cfg.model, base_url: cfg.base_url, thinking: cfg.thinking});
+        if (request !== temperatureRequest) return;
+        parameterPolicy = cap;
+        syncThinkingOptions(cap, cfg.thinking);
+        $('feature-category').className = 'tag tag-provider ' + cap.family;
+        $('search-hint').textContent = cap.search.note;
+        syncPolicyControls();
+        const policy = cap.temperature;
+        input.readOnly = policy.locked;
+        if (policy.value != null) input.placeholder = '自动（' + policy.value + '）';
+        hint.textContent = policy.note + (policy.locked ? '' : ' 留空自动，填写数值可自定义。');
+        if (policy.source) {
+            const link = document.createElement('a');
+            link.href = policy.source; link.target = '_blank'; link.rel = 'noopener noreferrer';
+            link.textContent = ' 官方说明';
+            hint.append(link);
         }
-    }
-
-    select.replaceChildren();
-    options.forEach(opt => {
-        select.append(new Option(opt.label, opt.value));
-    });
-
-    select.value = matchedValue;
-    if (doc && doc.features[selected]) {
-        doc.features[selected].thinking = matchedValue;
-    }
-
-    const thHint = $('thinking-hint');
-    if (thHint) {
-        if (providerKey === 'gemini') thHint.textContent = '已自动匹配 Gemini reasoning_effort 协议 (推荐 High)';
-        else if (providerKey === 'kimi') thHint.textContent = '已自动匹配 Kimi 思考参数：支持 Low / High / Max (极致思考)';
-        else if (providerKey === 'glm') thHint.textContent = '已自动匹配 GLM 思考参数：支持 Low / Medium / High / Max';
-        else if (providerKey === 'deepseek') thHint.textContent = '已自动匹配 DeepSeek 思考协议：支持标准思维链及网关分级';
-        else thHint.textContent = '自动适配对应模型思考深度协议';
+    } catch (_) {
+        if (request === temperatureRequest) hint.textContent = '留空使用自动温度；规则暂时无法读取。';
     }
 }
+
+function renderPromptContexts() {
+    const options = selected === 'formula_handwriting' ? [['pc', '电脑手写'], ['phone', '手机手写'], ['whiteboard', '独立白板']]
+        : selected === 'formula_alt' ? [['image', '图片公式'], ['pc', '电脑手写'], ['phone', '手机手写'], ['whiteboard', '独立白板']]
+        : [['image', '图片公式']];
+    $('prompt-context-field').hidden = !selected.startsWith('formula_');
+    $('prompt-context').replaceChildren(...options.map(([value, label]) => new Option(label, value)));
+}
+
+async function syncPromptPreview(fill = true) {
+    if (!doc) return;
+    const request = ++promptRequest;
+    promptReadonly = selected.startsWith('formula_') && $('prompt-context').value === 'whiteboard';
+    syncPolicyControls();
+    try {
+        const preview = await api('prompt-preview', {document: doc, feature: selected, context: $('prompt-context').value});
+        if (request !== promptRequest) return;
+        if (fill) $('prompt').value = preview.editable_text;
+        promptReadonly = preview.readonly;
+        const source = metadata[preview.source]?.[0] || preview.source;
+        $('prompt-source-tag').hidden = !source;
+        $('prompt-source-tag').textContent = source;
+        $('shared-prompt-hint').hidden = !source;
+        $('shared-prompt-text').textContent = preview.readonly ? '独立白板使用固定段落提示词，此处仅供查看。'
+            : '当前使用「' + source + '」；直接编辑将保存为此功能的专属提示词。';
+        const extra = preview.text.slice(preview.editable_text.length);
+        $('prompt-extra').textContent = extra ? '识别时还会附加：' + extra : '';
+        $('prompt-extra').hidden = !extra;
+        syncPolicyControls();
+    } catch (error) {
+        if (request !== promptRequest) return;
+        $('shared-prompt-hint').hidden = false;
+        $('shared-prompt-text').textContent = '提示词预览无法读取：' + error.message;
+    }
+}
+
+$('prompt-context').addEventListener('change', () => syncPromptPreview());
 
 function renderEditor() {
     if (!doc || !metadata[selected]) return;
@@ -301,9 +299,10 @@ function renderEditor() {
 
     const catEl = $('feature-category');
     catEl.textContent = category;
-    const pClass = detectProviderClass(cfg.model, selected);
-    catEl.className = 'tag tag-provider ' + pClass;
-    syncThinkingOptions(pClass, cfg.thinking);
+    catEl.className = 'tag tag-provider';
+    // Rendering never edits the draft, including an old unsupported value.
+    $('thinking').replaceChildren(new Option(cfg.thinking, cfg.thinking));
+    $('thinking').setCustomValidity('');
 
     // 密钥来源下拉菜单
     const keySource = $('key_source');
@@ -329,39 +328,10 @@ function renderEditor() {
         }
     });
 
-    // 提示词完整显示与共用提示
-    const promptInput = $('prompt');
-    const promptSourceTag = $('prompt-source-tag');
-    const sharedPromptHint = $('shared-prompt-hint');
-    const sharedPromptText = $('shared-prompt-text');
-
-    const ownPrompt = cfg.prompt || '';
-    const effectivePrompt = cfg.effective_prompt || defaultPrompts[selected] || '';
-    const displayPrompt = ownPrompt || effectivePrompt;
-    if (promptInput) promptInput.value = displayPrompt;
-
-    const isSharedPrompt = !ownPrompt && Boolean(effectivePrompt);
-    let promptSourceName = '';
-    if (isSharedPrompt) {
-        if (selected === 'chat_gemini') {
-            promptSourceName = metadata['chat']?.[0] || '内置对话';
-        } else if (selected === 'formula_handwriting' || selected === 'formula_alt') {
-            promptSourceName = metadata['formula_image']?.[0] || '图片公式识别';
-        }
-    }
-
-    if (promptSourceTag) {
-        promptSourceTag.hidden = !isSharedPrompt;
-        promptSourceTag.textContent = promptSourceName ? `共用自「${promptSourceName}」` : '共用提示词';
-    }
-    if (sharedPromptHint) {
-        sharedPromptHint.hidden = !isSharedPrompt;
-        if (sharedPromptText) {
-            sharedPromptText.textContent = promptSourceName
-                ? `当前共用「${promptSourceName}」的系统提示词（已完整显示，直接编辑即保存为专属提示词）`
-                : '当前共用内置系统提示词（已完整显示，直接编辑即保存为专属提示词）';
-        }
-    }
+    $('prompt').value = cfg.prompt || '';
+    promptReadonly = false;
+    renderPromptContexts();
+    syncPromptPreview();
 
     // 需求 1 重点：默认直接明文显示当前使用的 API Key！
     // 无论当前是独立 Key 还是共用 Key，输入窗口都直接呈现当前生效的真实 Key
@@ -419,6 +389,7 @@ function renderEditor() {
 
     $('remote-models').replaceChildren();
     syncConnection();
+    syncTemperaturePolicy();
     renderResult();
     updateStatus();
 }
@@ -456,13 +427,11 @@ fields.forEach(key => {
         }
         if (key === 'model') {
             renderNav();
-            const pClass = detectProviderClass(el.value, selected);
-            $('feature-category').className = 'tag tag-provider ' + pClass;
-            syncThinkingOptions(pClass, cfg.thinking);
         }
+        if (key === 'model' || key === 'thinking' || key === 'base_url') syncTemperaturePolicy();
+        if (key === 'web_search') syncPolicyControls();
         if (key === 'prompt') {
-            if ($('prompt-source-tag')) $('prompt-source-tag').hidden = true;
-            if ($('shared-prompt-hint')) $('shared-prompt-hint').hidden = true;
+            syncPromptPreview(false);
         }
         updateStatus();
     });
@@ -530,8 +499,7 @@ $('reset-prompt').onclick = () => {
     const defPrompt = defaultPrompts[selected] ?? '';
     doc.features[selected].prompt = defPrompt;
     $('prompt').value = defPrompt;
-    if ($('prompt-source-tag')) $('prompt-source-tag').hidden = true;
-    if ($('shared-prompt-hint')) $('shared-prompt-hint').hidden = true;
+    syncPromptPreview();
     updateStatus();
     notice('已恢复为该功能的内置默认提示词，保存后生效。');
 };
@@ -569,7 +537,7 @@ function renderResult() {
 
     const badge = document.createElement('span');
     badge.className = 'result-badge ' + (result.ok ? 'ok' : 'err');
-    badge.textContent = result.ok ? '✓ 连接成功' : '✕ 连接失败';
+    badge.textContent = result.ok ? (result.warning ? '已连接 · 输出未完成' : '✓ 连接成功') : '✕ 连接失败';
 
     const latency = document.createElement('span');
     latency.className = 'result-latency';
@@ -583,7 +551,7 @@ function renderResult() {
 
     const output = document.createElement('pre');
     output.className = 'result-output';
-    output.textContent = result.ok ? (result.reply || '接口已正常响应（空返回）') : (result.error || '请求遇到未知错误');
+    output.textContent = result.ok ? [result.warning, result.reply].filter(Boolean).join('\n\n') : (result.error || '请求遇到未知错误');
 
     box.append(header, modelTag, output);
 
@@ -608,7 +576,7 @@ $('test').onclick = () => {
             results.set(fid, result);
             renderResult();
             if (result.ok) {
-                notice('测试成功！耗时 ' + result.elapsed_ms + ' ms');
+                notice(result.warning || ('测试成功！耗时 ' + result.elapsed_ms + ' ms'), !!result.warning);
             } else {
                 notice('测试失败，请查看下方响应详情。', true);
             }

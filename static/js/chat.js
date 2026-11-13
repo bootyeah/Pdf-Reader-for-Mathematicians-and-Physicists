@@ -84,15 +84,17 @@
     let thinking = false;
     let apiRevision = '';
     let apiRefresh = null;
+    let restoringState = false;
     let modelThinking = {};        // 模型 → 'enabled' | 'disabled' | 'low' | 'medium' | 'high' | 'omit'（来自 /api/ai-config）
+    let modelCapabilities = {};
 
     function isThinkingModeEnabled(mode) {
-        return mode === 'enabled' || mode === 'low' || mode === 'medium' || mode === 'high' || mode === 'max';
+        return ['enabled', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(mode);
     }
 
     // 当前模型设置为 omit 时：按钮置灰、不发送，但保留用户对其他模型的开关偏好
     function thinkingAllowed() {
-        return modelThinking[model] !== 'omit';
+        return modelThinking[model] !== 'omit' && modelCapabilities[model]?.can_disable !== false;
     }
 
     function syncThinkingAvailability() {
@@ -102,8 +104,10 @@
         if (allowed) {
             setThinking(thinking);
         } else {
-            thinkingBtn.classList.remove('active');
-            thinkingBtn.title = '当前模型不使用思考开关（管理工具已设置为不发送思考参数）';
+            const mandatory = modelCapabilities[model]?.can_disable === false && modelCapabilities[model]?.default_thinking !== false;
+            thinkingBtn.classList.toggle('active', mandatory);
+            thinkingBtn.title = mandatory ? '当前模型始终开启思考，不能关闭；档位在 API Manager 中设置。'
+                : '当前使用模型默认思考设置（omit）。';
         }
     }
 
@@ -117,6 +121,7 @@
             if (!cfg.model || !Array.isArray(cfg.models)) return;
             const changed = apiRevision !== cfg.revision;
             modelThinking = cfg.model_thinking || {};
+            modelCapabilities = cfg.model_capabilities || {};
             const providers = cfg.model_provider || {};
             MODELS = [cfg.model].concat(cfg.models).filter(function (id, i, all) {
                 return typeof id === 'string' && id && all.indexOf(id) === i;
@@ -788,7 +793,7 @@
     function setThinking(on) {
         thinking = !!on;
         const mode = modelThinking[model];
-        const levelHint = (mode === 'low' || mode === 'medium' || mode === 'high' || mode === 'max') ? ' · ' + mode.toUpperCase() : '';
+        const levelHint = isThinkingModeEnabled(mode) && mode !== 'enabled' ? ' · ' + mode : '';
         thinkingBtn.classList.toggle('active', thinking);
         thinkingBtn.title = thinking
             ? '思考模式：开' + levelHint + '（回答更周密，首字更慢）'
@@ -1123,7 +1128,7 @@
     // 四、会话持久化（刷新页面后接着聊）
     // =========================================================================
     function saveState() {
-        if (!panel) return;          // 面板还没建好（初始化早期的 blur 事件）直接跳过
+        if (!panel || restoringState) return;
         try {
             const data = {
                 left: panel ? panel.style.left : '',
@@ -1136,7 +1141,7 @@
                 fontScale: fontScale,
                 // 只存纯文本历史（图片 data URL 体积太大，绝不写进 localStorage）
                 history: history.slice(-MAX_HISTORY).map(function (m) {
-                    return { role: m.role, content: getEntryText(m) };
+                    return storedEntry(m);
                 }).filter(function (m) { return m.content; })
             };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -1147,6 +1152,7 @@
         let data = null;
         try { data = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (e) { data = null; }
         if (!data) return;
+        restoringState = true;
 
         if (data.width) panel.style.width = data.width;
         if (data.height) panel.style.height = data.height;
@@ -1170,7 +1176,8 @@
         if (Array.isArray(data.history) && data.history.length) {
             clearBody();
             data.history.forEach(function (m) {
-                const entry = { role: m.role, content: m.content };
+                if (!['user', 'assistant'].includes(m.role) || typeof m.content !== 'string') return;
+                const entry = storedEntry(m);
                 history.push(entry);
                 if (m.role === 'user') {
                     const userEl = userMessageEl(m.content, []);
@@ -1186,6 +1193,17 @@
             });
             scrollToBottom(true);
         }
+        restoringState = false;
+    }
+
+    function storedEntry(m) {
+        const entry = { role: m.role, content: typeof m.content === 'string' ? m.content : getEntryText(m) };
+        if (m.role === 'assistant') {
+            for (const key of ['reasoning_content', '_reader_model']) {
+                if (typeof m[key] === 'string') entry[key] = m[key];
+            }
+        }
+        return entry;
     }
 
     // =========================================================================
@@ -1780,6 +1798,8 @@
             alive: true,
             text: '',
             reasoning: '',
+            completed: false,
+            model: model,
             renderQueued: false
         }, el);
         setStreaming(true);
@@ -1798,7 +1818,7 @@
                     messages: history,
                     model: model,
                     stream: true,
-                    thinking: thinking && thinkingAllowed()
+                    thinking: thinkingAllowed() ? thinking : undefined
                 })
             });
 
@@ -1812,6 +1832,8 @@
             }
 
             await consumeStream(resp, state);
+            if (!state.completed) throw new Error('连接提前结束，回答未完成，请重试。');
+            if (!state.text.trim()) throw new Error('模型未返回正文，请检查输出上限后重试。');
         } catch (err) {
             if (err && err.name === 'AbortError') {
                 // 用户主动停止：保留已生成的内容，补一句「已停止」
@@ -1843,12 +1865,13 @@
             abortController = null;
             // 流式结束按「最终态」再画一次：半途截断的 TikZ 会从占位符换成可折叠的源码块
             if (state.text && !settled) paintMessageBody(state.bodyEl, state.text, {});
-            if (!failed && state.text) {
-                const assistantEntry = { role: 'assistant', content: state.text };
+            if (!failed && state.completed && state.text) {
+                const assistantEntry = { role: 'assistant', content: state.text,
+                    reasoning_content: state.reasoning, _reader_model: state.model };
                 msgEntryMap.set(el.wrap, assistantEntry);
                 history.push(assistantEntry);
                 saveState();
-            } else if (!failed && !state.text && el.wrap.isConnected) {
+            } else if (!failed && !settled && !state.text && el.wrap.isConnected) {
                 el.wrap.remove();      // 空回答不留空气泡
             }
             scrollToBottom(true);
@@ -1891,6 +1914,7 @@
                     handleSseLine(line, state);
                 }
             }
+            buffer += decoder.decode();
             if (buffer) handleSseLine(buffer.replace(/\r$/, ''), state);
         } catch (err) {
             // 出错（含用户点「停止」）时主动断开连接，别让上游继续生成
@@ -1909,12 +1933,15 @@
         if (!line || line.charAt(0) === ':') return;
         if (line.indexOf('data:') !== 0) return;
         const payload = line.slice(5).trim();
-        if (!payload || payload === '[DONE]') return;
+        if (!payload) return;
+        if (payload === '[DONE]') { state.completed = true; return; }
 
         let obj;
-        try { obj = JSON.parse(payload); } catch (e) { return; }
+        try { obj = JSON.parse(payload); } catch (e) { throw new Error('收到无法解析的回答数据，请重试。'); }
 
         if (obj.error) throw new Error(obj.error);
+        if (obj.done) state.completed = true;
+        if (typeof obj.model === 'string') state.model = obj.model;
         if (obj.reasoning) {
             state.reasoning += obj.reasoning;
             streamTick(state);

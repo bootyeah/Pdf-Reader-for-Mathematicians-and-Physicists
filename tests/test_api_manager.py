@@ -24,6 +24,7 @@ import server
 
 class Upstream(BaseHTTPRequestHandler):
     calls = []
+    overrides = {}
     def log_message(self, *_):
         pass
     def do_GET(self):
@@ -32,7 +33,13 @@ class Upstream(BaseHTTPRequestHandler):
     def do_POST(self):
         data = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         self.calls.append({'path': self.path, 'auth': self.headers.get('Authorization'), 'body': data})
-        if data['model'] in ('denied', 'busy'):
+        if data['model'] in self.overrides:
+            response = self.overrides[data['model']]
+            self.send_response(response.get('status', 200))
+            self.send_header('Content-Type', 'text/event-stream' if 'sse' in response else 'application/json')
+            self.end_headers()
+            self.wfile.write(response['sse'].encode() if 'sse' in response else json.dumps(response['json']).encode())
+        elif data['model'] in ('denied', 'busy'):
             self.send_response(401 if data['model'] == 'denied' else 429)
             self.end_headers()
             self.wfile.write(json.dumps({'error': {'message': self.headers.get('Authorization')}}).encode())
@@ -82,6 +89,7 @@ class ManagerTests(unittest.TestCase):
         self.fx = Fixture()
         self.addCleanup(self.fx.close)
         Upstream.calls.clear()
+        Upstream.overrides.clear()
 
     def request(self, path, data=None, manager=False, headers=None, method=None):
         base = self.fx.manager.origin if manager else 'http://127.0.0.1:%s' % self.fx.reader.server_port
@@ -225,6 +233,87 @@ class ManagerTests(unittest.TestCase):
             self.assertEqual(req['body']['messages'][0]['content'], 'prompt ' + fid)
             self.assertEqual(req['body']['thinking'], {'type': 'enabled'})
 
+    def test_automatic_temperature_follows_actual_model_across_ai_paths(self):
+        self.update('chat', model='GLM-5.3-Flash', models=['Kimi-K3.1-Pro'], temperature=None, thinking='high')
+        message = {'messages': [{'role': 'user', 'content': 'hello'}]}
+        for model, expected in [('GLM-5.3-Flash', 1.0), ('Kimi-K3.1-Pro', None)]:
+            status, _ = self.request('/api/chat', dict(message, model=model))
+            self.assertEqual(status, 200)
+            self.assertEqual(Upstream.calls[-1]['body'].get('temperature'), expected)
+            if expected is None:
+                self.assertNotIn('temperature', Upstream.calls[-1]['body'])
+        # A fallback must get its own recommendation, not retain the primary's temperature.
+        self.update('chat', model='busy', fallback_model='GLM-5.3-Flash', temperature=None)
+        status, _ = self.request('/api/chat', dict(message, stream=True))
+        self.assertEqual(status, 200)
+        self.assertEqual(Upstream.calls[-1]['body']['temperature'], 1.0)
+        self.update('chat', fallback_model='gemini-4-argon', temperature=0.3)
+        status, _ = self.request('/api/chat', message)
+        self.assertEqual(status, 200)
+        self.assertNotIn('temperature', Upstream.calls[-1]['body'])
+        for mode, fid in [('word', 'dictionary'), ('sentence', 'translation')]:
+            self.update(fid, model='GLM-5.3-Flash', temperature=None)
+            status, _ = self.request('/api/translate', {'text': 'example', 'mode': mode})
+            self.assertEqual(status, 200)
+            self.assertEqual(Upstream.calls[-1]['body']['temperature'], 1.0)
+        for fid in ('formula_image', 'formula_handwriting', 'formula_alt'):
+            self.update(fid, model='GLM-5.3-Flash', temperature=None)
+        stroke = {'w': 200, 'h': 100, 'strokes': [{'k': 'pen', 'w': 4, 'p': [[10, 10], [100, 70]]}]}
+        for kind, engine in [('image', ''), ('handwriting', ''), ('image', 'deepseek')]:
+            status, _ = self.request('/api/formula/recognize', {
+                'kind': kind, 'engine': engine, 'image': api_manager.test_image(), 'doc': stroke})
+            self.assertEqual(status, 200)
+            self.assertEqual(Upstream.calls[-1]['body']['temperature'], 1.0)
+        for model in ('Kimi-K3.1-Pro', 'gemini-4-argon', 'gemini-3.8-flash'):
+            self.update('chat', model=model, fallback_model='', temperature=0.2)
+            doc = settings.public_document(settings.load_document())
+            status, result = self.request('/api/test', {'feature': 'chat', 'document': doc}, manager=True)
+            self.assertEqual(status, 200)
+            self.assertTrue(result['ok'])
+            self.assertNotIn('temperature', Upstream.calls[-1]['body'])
+
+    def test_formula_model_labels_hot_reload_without_resetting_chat_revision(self):
+        status, initial = self.request('/api/ai-config')
+        self.assertEqual(status, 200)
+        self.assertEqual(initial['formula_models']['formula_alt'], 'model-formula_alt')
+        self.update('formula_alt', model='Kimi-K3.1-Pro')
+        status, updated = self.request('/api/ai-config')
+        self.assertEqual(status, 200)
+        self.assertEqual(updated['formula_models']['formula_alt'], 'Kimi-K3.1-Pro')
+        self.assertEqual(updated['revision'], initial['revision'])
+        self.assertEqual(set(updated['formula_models']), {'formula_image', 'formula_handwriting', 'formula_alt'})
+
+    def test_temperature_policy_validation_and_manual_values(self):
+        doc = settings.load_document()
+        doc['features']['chat']['temperature'] = None
+        settings.validate(doc)
+        for bad in (True, float('nan'), -1, 2.1, 'auto'):
+            doc['features']['chat']['temperature'] = bad
+            with self.assertRaises(settings.ConfigError):
+                settings.validate(doc)
+        for model, configured, thinking, expected in [
+            ('GLM-5.3-Flash', None, 'max', 1.0),
+            ('GLM-5.3-Flash', 0, 'max', 0),
+            ('private-model', None, 'omit', None),
+            ('private-model', 0.35, 'omit', 0.35),
+            ('Kimi-K3.1-Pro', 0.2, 'max', None),
+            ('gemini-4-argon', 0.2, 'high', None),
+            ('gemini-3.8-flash', None, 'high', None),
+            ('gemini-3.1-pro-preview', None, 'high', 1.0),
+            ('gpt-5', 0.2, 'high', None),
+            ('gpt-5.4', 0.2, 'high', None),
+            ('gpt-5.4', 0.2, 'disabled', 0.2),
+        ]:
+            with self.subTest(model=model, configured=configured, thinking=thinking):
+                payload = settings.apply_parameters({'model': model, 'temperature': 0.7}, {
+                    'temperature': configured, 'thinking': thinking})
+                self.assertEqual(payload.get('temperature'), expected)
+                if expected is None:
+                    self.assertNotIn('temperature', payload)
+        status, policy = self.request('/api/temperature', {'model': 'GLM-5.3-Flash', 'thinking': 'max'}, manager=True)
+        self.assertEqual(status, 200)
+        self.assertEqual(policy['value'], 1.0)
+
     def test_all_formula_paths_and_live_phone_refresh(self):
         image = api_manager.test_image()
         doc = {'w': 200, 'h': 100, 'strokes': [{'k': 'pen', 'w': 4, 'p': [[10, 10], [100, 70]]}]}
@@ -255,39 +344,26 @@ class ManagerTests(unittest.TestCase):
         self.assertEqual(Upstream.calls[-1]['body']['model'], 'alt-after-save')
 
     def test_thinking_mode_adaptation_for_kimi_glm_gemini_and_deepseek(self):
-        # 1. Kimi 模型：设置 low/high/max 时，thinking.type 必须是合法的 enabled，同时附加对应 reasoning_effort
         p = settings.apply_parameters({'model': 'Kimi-K3.1-Pro'}, {'thinking': 'low'})
-        self.assertEqual(p['thinking']['type'], 'enabled')
         self.assertEqual(p['reasoning_effort'], 'low')
-        self.assertEqual(p['chat_template_kwargs'], {'enable_thinking': True})
-
-        p_max = settings.apply_parameters({'model': 'Kimi-K3.1-Pro'}, {'thinking': 'max'})
-        self.assertEqual(p_max['thinking']['type'], 'enabled')
-        self.assertEqual(p_max['reasoning_effort'], 'max')
-
-        # 2. Kimi 模型：设置 disabled 时，彻底关闭思考
-        p_off = settings.apply_parameters({'model': 'Kimi-K3.1-Pro'}, {'thinking': 'disabled'})
-        self.assertEqual(p_off['thinking']['type'], 'disabled')
-        self.assertEqual(p_off['reasoning_effort'], 'none')
-        self.assertEqual(p_off['chat_template_kwargs'], {'enable_thinking': False, 'thinking': False})
-
-        # 3. Gemini 模型：只发送 reasoning_effort，不发送 thinking 字典，max 映射为 high
+        self.assertNotIn('thinking', p)
+        self.assertNotIn('chat_template_kwargs', p)
         p_gemini = settings.apply_parameters({'model': 'gemini-4-argon'}, {'thinking': 'high'})
         self.assertEqual(p_gemini['reasoning_effort'], 'high')
         self.assertNotIn('thinking', p_gemini)
-
-        p_gemini_max = settings.apply_parameters({'model': 'gemini-4-argon'}, {'thinking': 'max'})
-        self.assertEqual(p_gemini_max['reasoning_effort'], 'high')
-
-        # 4. GLM 模型：分级思考平滑适配 (包含 max)
-        p_glm = settings.apply_parameters({'model': 'GLM-5.3-Flash'}, {'thinking': 'medium'})
+        p_glm = settings.apply_parameters({'model': 'GLM-5.3-Flash'}, {'thinking': 'max'})
         self.assertEqual(p_glm['thinking']['type'], 'enabled')
-        self.assertEqual(p_glm['reasoning_effort'], 'medium')
-
-        p_glm_max = settings.apply_parameters({'model': 'GLM-5.3-Flash'}, {'thinking': 'max'})
-        self.assertEqual(p_glm_max['reasoning_effort'], 'max')
-
-        # 5. omit 模式：不发送任何思考参数
+        self.assertEqual(p_glm['reasoning_effort'], 'max')
+        for model, unsupported in [('Kimi-K3.1-Pro', 'disabled'), ('GLM-5.3-Flash', 'medium'),
+                                   ('GLM-5.3-Flash', 'disabled'), ('gemini-4-argon', 'max'),
+                                   ('gemini-4-argon', 'disabled'), ('gpt-5', 'max')]:
+            with self.subTest(model=model, mode=unsupported), self.assertRaises(settings.ConfigError):
+                settings.apply_parameters({'model': model}, {'thinking': unsupported})
+        for model, level in [('gpt-5', 'minimal'), ('gpt-5.4', 'xhigh'), ('gpt-6-astra', 'max')]:
+            p = settings.apply_parameters({'model': model}, {'thinking': level, 'max_tokens': 77})
+            self.assertEqual(p['reasoning_effort'], level)
+            self.assertEqual(p['max_completion_tokens'], 77)
+            self.assertNotIn('max_tokens', p)
         p_omit = settings.apply_parameters({'model': 'Kimi-K3.1-Pro'}, {'thinking': 'omit'})
         self.assertNotIn('thinking', p_omit)
         self.assertNotIn('reasoning_effort', p_omit)
@@ -307,10 +383,155 @@ class ManagerTests(unittest.TestCase):
         self.assertEqual(feats['chat_gemini']['effective_prompt'], 'Master Assistant Prompt')
         self.assertEqual(feats['chat_gemini']['prompt_source'], 'chat')
 
-        # formula_handwriting 与 formula_alt 留空时共用 formula_image 的生效提示词
+        # Handwriting keeps its native mode-aware prompt; the alternate image path inherits image.
         self.assertTrue(bool(feats['formula_handwriting']['effective_prompt']))
-        self.assertEqual(feats['formula_handwriting']['prompt_source'], 'formula_image')
+        self.assertEqual(feats['formula_handwriting']['prompt_source'], '内置识别提示词')
+        self.assertIn('电脑', feats['formula_handwriting']['effective_prompt'])
         self.assertEqual(feats['formula_alt']['prompt_source'], 'formula_image')
+
+    def test_prompt_preview_matches_image_pc_phone_and_whiteboard_requests(self):
+        from airtex import core
+        self.update('formula_image', prompt='CUSTOM_IMAGE_PROMPT')
+        self.update('formula_handwriting', prompt='')
+        self.update('formula_alt', prompt='')
+        draft = settings.public_document(settings.load_document())
+        draft['features']['formula_image']['prompt'] = 'UNSAVED_IMAGE_PROMPT'
+        status, preview = self.request('/api/prompt-preview', {
+            'document': draft, 'feature': 'formula_alt', 'context': 'image'}, manager=True)
+        self.assertEqual(status, 200)
+        self.assertEqual(preview['text'], 'UNSAVED_IMAGE_PROMPT')
+        stroke = {'w': 200, 'h': 100, 'strokes': [{'k': 'pen', 'w': 4, 'p': [[10, 10], [100, 70]]}]}
+        saved = settings.load_document()
+        for fid, engine in [('formula_handwriting', ''), ('formula_alt', 'deepseek')]:
+            for context, kind, purpose in [('image', 'image', ''), ('pc', 'handwriting', ''), ('whiteboard', 'handwriting', 'whiteboard')]:
+                if fid == 'formula_handwriting' and context == 'image':
+                    continue
+                preview = settings.prompt_preview(saved, fid, context)
+                status, result = self.request('/api/formula/recognize', {
+                    'kind': kind, 'engine': engine, 'purpose': purpose, 'image': api_manager.test_image(), 'doc': stroke})
+                self.assertEqual(status, 200, result)
+                sent = Upstream.calls[-1]['body']['messages'][0]['content'][0]['text']
+                self.assertEqual(preview['text'], sent)
+            cfg = formula_bridge._config('handwriting')
+            cfg = formula_bridge._apply_engine(cfg, engine, settings.resolve('formula_alt', {}))
+            self.assertEqual(settings.prompt_preview(saved, fid, 'phone')['text'], core.build_prompt(cfg, 'phone'))
+
+    def test_kimi_history_survives_validation_and_is_filtered_on_model_switch_and_fallback(self):
+        self.update('chat', model='Kimi-K3.1-Pro', models=['GLM-5.3-Flash'], thinking='high', max_tokens=700)
+        messages = [{'role': 'user', 'content': 'one'},
+                    {'role': 'assistant', 'content': ' answer \n', 'reasoning_content': ' preserved reasoning \n', '_reader_model': 'Kimi-K3.1-Pro'},
+                    {'role': 'user', 'content': 'two'}]
+        for model, keep in [('Kimi-K3.1-Pro', True), ('GLM-5.3-Flash', False)]:
+            status, result = self.request('/api/chat', {'messages': messages, 'model': model})
+            self.assertEqual(status, 200, result)
+            sent = Upstream.calls[-1]['body']['messages'][2]
+            self.assertEqual(sent['content'], ' answer \n')
+            self.assertEqual('reasoning_content' in sent, keep)
+            self.assertNotIn('_reader_model', sent)
+            if keep:
+                self.assertEqual(sent['reasoning_content'], messages[1]['reasoning_content'])
+                self.assertEqual(Upstream.calls[-1]['body']['max_completion_tokens'], 700)
+                self.assertNotIn('max_tokens', Upstream.calls[-1]['body'])
+        Upstream.overrides['Kimi-K3.1-Pro'] = {'status': 503, 'json': {'error': {'code': 'overloaded'}}}
+        self.update('chat', fallback_model='GLM-5.3-Flash')
+        status, result = self.request('/api/chat', {'messages': messages})
+        self.assertEqual(status, 200)
+        self.assertEqual(result['model'], 'GLM-5.3-Flash')
+        self.assertNotIn('reasoning_content', Upstream.calls[-1]['body']['messages'][2])
+        self.assertEqual(Upstream.calls[-1]['body']['max_tokens'], 700)
+        self.assertNotIn('max_completion_tokens', Upstream.calls[-1]['body'])
+
+    def test_stream_checks_finish_reasons_empty_body_and_incomplete_eof(self):
+        self.update('chat', model='stream-test')
+        def event(obj):
+            return 'data: ' + json.dumps(obj) + '\n\n'
+        delta = event({'choices': [{'delta': {'content': 'partial answer'}}]})
+        for suffix, expected in [
+            (event({'choices': [{'delta': {}, 'finish_reason': 'length'}]}), 'token'),
+            ('', '提前结束'),
+            (event({'choices': [{'delta': {'refusal': 'refused'}, 'finish_reason': 'stop'}]}), '拒绝'),
+            (event({'choices': [{'delta': {'tool_calls': [{'id': 'a'}]}, 'finish_reason': 'tool_calls'}]}), '工具调用'),
+            ('data: malformed\n\n', '解析'),
+        ]:
+            Upstream.overrides['stream-test'] = {'sse': delta + suffix}
+            status, raw = self.request('/api/chat', {'messages': [{'role': 'user', 'content': 'test'}], 'stream': True})
+            self.assertEqual(status, 200)
+            self.assertIn(expected, raw.decode())
+            self.assertNotIn(b'"done": true', raw)
+        Upstream.overrides['stream-test'] = {'sse': event({'choices': [{'delta': {'reasoning_content': 'thinking'}}]}) + 'data: [DONE]\n\n'}
+        _, raw = self.request('/api/chat', {'messages': [{'role': 'user', 'content': 'test'}], 'stream': True})
+        self.assertIn('未返回正文', raw.decode())
+        self.assertNotIn(b'"done": true', raw)
+        Upstream.overrides['stream-test'] = {'sse': delta + event({'choices': [{'delta': {}, 'finish_reason': 'stop'}]}) + event({'choices': [], 'usage': {'completion_tokens': 17}}) + 'data: [DONE]\n\n'}
+        _, raw = self.request('/api/chat', {'messages': [{'role': 'user', 'content': 'test'}], 'stream': True})
+        self.assertIn(b'"completion_tokens": 17', raw)
+        self.assertIn(b'"done": true', raw)
+
+    def test_probe_omit_uses_reasoning_budget_and_reports_incomplete_separately(self):
+        self.update('chat', model='Kimi-K3.1-Pro', thinking='omit', max_tokens=0)
+        Upstream.overrides['Kimi-K3.1-Pro'] = {'json': {'choices': [{'message': {'content': None, 'reasoning_content': 'thinking'}, 'finish_reason': 'length'}]}}
+        for configured, expected in [(0, 4096), (96, 96)]:
+            self.update('chat', max_tokens=configured)
+            status, result = self.request('/api/test', {'feature': 'chat', 'document': settings.public_document(settings.load_document())}, manager=True)
+            self.assertEqual(status, 200)
+            self.assertTrue(result['ok'])
+            self.assertTrue(result['connected'])
+            self.assertFalse(result['complete'])
+            self.assertIn(str(expected), result['warning'])
+            self.assertNotIn('关闭思考', result['warning'])
+            self.assertEqual(Upstream.calls[-1]['body']['max_completion_tokens'], expected)
+            self.assertNotIn('max_tokens', Upstream.calls[-1]['body'])
+
+    def test_unsupported_search_fails_before_request_without_offline_retry(self):
+        for fid, path, body in [('chat', '/api/chat', {'messages': [{'role': 'user', 'content': 'test'}]}),
+                                ('translation', '/api/translate', {'text': 'test', 'mode': 'sentence'})]:
+            self.update(fid, model='Kimi-K3.1-Pro', thinking='high', web_search=True, fallback_model='some-fallback')
+            count = len(Upstream.calls)
+            status, result = self.request(path, body)
+            self.assertEqual(status, 502)
+            self.assertIn('联网搜索', result['error'])
+            self.assertEqual(len(Upstream.calls), count)
+        supported = dict(model='GLM-5.3-Flash', base_url='https://open.bigmodel.cn/api/paas/v4', web_search=True)
+        self.assertEqual(settings.protocol.apply_search({}, supported)['tools'], [{'type': 'web_search', 'web_search': {'enable': True}}])
+        for url in ['https://gateway.example/v1', 'https://api.z.ai/api/coding/paas/v4']:
+            with self.assertRaises(ValueError):
+                settings.protocol.apply_search({}, dict(supported, base_url=url))
+
+    def test_chat_and_translation_reject_incomplete_answers_and_do_not_retry_quota(self):
+        for fid, path, body in [('chat', '/api/chat', {'messages': [{'role': 'user', 'content': 'test'}]}),
+                                ('translation', '/api/translate', {'text': 'test', 'mode': 'sentence'})]:
+            self.update(fid, model='reply-test', fallback_model='unused-fallback')
+            for content, reason in [(None, 'stop'), ('partial', 'length'), ('', 'stop')]:
+                Upstream.overrides['reply-test'] = {'json': {'choices': [{'message': {'content': content}, 'finish_reason': reason}]}}
+                count = len(Upstream.calls)
+                status, result = self.request(path, body)
+                self.assertEqual(status, 502)
+                self.assertFalse(result['ok'])
+                self.assertEqual(len(Upstream.calls), count + 1)
+            Upstream.overrides['reply-test'] = {'status': 429, 'json': {'error': {'code': 'insufficient_quota', 'message': 'quota exhausted'}}}
+            count = len(Upstream.calls)
+            status, result = self.request(path, body)
+            self.assertEqual(status, 502)
+            self.assertEqual(len(Upstream.calls), count + 1)
+
+    def test_ocr_response_validation_and_bounded_overload_fallback(self):
+        stroke = {'w': 200, 'h': 100, 'strokes': [{'k': 'pen', 'w': 4, 'p': [[10, 10], [100, 70]]}]}
+        for kind, fid in [('image', 'formula_image'), ('handwriting', 'formula_handwriting')]:
+            self.update(fid, model='ocr-test', fallback_model='ocr-fallback')
+            body = {'kind': kind, 'image': api_manager.test_image(), 'doc': stroke}
+            for status, code, retry in [(429, '', True), (503, '', True), (401, '', False), (429, '1308', False), (429, 'insufficient_quota', False)]:
+                Upstream.overrides['ocr-test'] = {'status': status, 'json': {'error': {'code': code, 'message': 'test error'}}}
+                count = len(Upstream.calls)
+                _, result = self.request('/api/formula/recognize', body)
+                self.assertEqual(result['ok'], retry, (kind, status, code, result))
+                self.assertEqual(len(Upstream.calls) - count, 2 if retry else 1)
+            for content, reason in [(None, 'stop'), (None, 'length'), ('$partial$', 'length'), (None, 'content_filter')]:
+                Upstream.overrides['ocr-test'] = {'json': {'choices': [{'message': {'content': content}, 'finish_reason': reason}]}}
+                count = len(Upstream.calls)
+                _, result = self.request('/api/formula/recognize', body)
+                self.assertFalse(result['ok'])
+                self.assertNotIn('None', result['error'])
+                self.assertEqual(len(Upstream.calls), count + 1)
 
 
 if __name__ == '__main__':

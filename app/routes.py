@@ -52,15 +52,23 @@ def handle_ai_config(handler):
         # 其他供应商（Gemini）的模型并入菜单末尾；model_thinking / model_provider 供前端按模型切换思考按钮与说明。
         public['model_thinking'] = {}
         public['model_provider'] = {}
+        public['model_capabilities'] = {}
         for fid, item in providers:
             for mid in [item['model']] + item.get('models', []):
                 if mid in public['model_thinking']:
                     continue
                 public['model_thinking'][mid] = item['thinking']
                 public['model_provider'][mid] = fid
+                public['model_capabilities'][mid] = api_settings.protocol.capabilities(mid, item['base_url'])
                 if fid != 'chat':
                     public['models'] = public['models'] + [mid]
         public['revision'] = hashlib.sha256(json.dumps(public, sort_keys=True).encode()).hexdigest()[:16]
+        # Formula labels do not affect the chat revision or reset its selected model.
+        document = api_settings.load_document() or api_settings.legacy_document()
+        public['formula_models'] = {
+            fid: document['features'][fid]['model']
+            for fid in ('formula_image', 'formula_handwriting', 'formula_alt')
+        }
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json; charset=utf-8')
         handler.send_header('Cache-Control', 'no-store')
@@ -290,7 +298,7 @@ def handle_chat(handler):
 
     cfg, model = _chat_config_for(handler, req_data.get('model'))
     handler._active_chat_config = cfg
-    thinking = bool(req_data.get('thinking', cfg['thinking'] in api_settings.THINKING_ACTIVE_MODES))
+    thinking = req_data.get('thinking') if isinstance(req_data.get('thinking'), bool) else None
     try:
         temperature = float(req_data.get('temperature', cfg['temperature']))
         if not math.isfinite(temperature):

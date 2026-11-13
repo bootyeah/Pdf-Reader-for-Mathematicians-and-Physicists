@@ -4,7 +4,7 @@
   "model": "glm-4.6v-flash",
   "fallback_model": "glm-4v-flash",
   "proxy": "",
-  "temperature": 0.2,
+  "temperature": null,
   "timeout": 60,
   "max_side": 4096,
   "host": "0.0.0.0",
