@@ -304,6 +304,11 @@ class ManagerTests(unittest.TestCase):
             ('gpt-5', 0.2, 'high', None),
             ('gpt-5.4', 0.2, 'high', None),
             ('gpt-5.4', 0.2, 'disabled', 0.2),
+            ('DeepSeek-V4.1-Flash', 0.3, 'max', None),
+            ('DeepSeek-V4.1-Flash', None, 'disabled', None),
+            ('DeepSeek-V4.1-Flash', 0.3, 'disabled', 0.3),
+            ('deepseek-chat', 0.3, 'omit', 0.3),
+            ('deepseek-chat', 0.3, 'high', None),
         ]:
             with self.subTest(model=model, configured=configured, thinking=thinking):
                 payload = settings.apply_parameters({'model': model, 'temperature': 0.7}, {
@@ -355,9 +360,20 @@ class ManagerTests(unittest.TestCase):
         p_glm = settings.apply_parameters({'model': 'GLM-5.3-Flash'}, {'thinking': 'max'})
         self.assertEqual(p_glm['thinking']['type'], 'enabled')
         self.assertEqual(p_glm['reasoning_effort'], 'max')
+        p_ds = settings.apply_parameters({'model': 'DeepSeek-V4.1-Flash'}, {'thinking': 'max', 'temperature': 0.5})
+        self.assertEqual(p_ds['thinking'], {'type': 'enabled'})
+        self.assertEqual(p_ds['reasoning_effort'], 'max')
+        self.assertNotIn('temperature', p_ds)
+        self.assertNotIn('chat_template_kwargs', p_ds)
+        p_ds_off = settings.apply_parameters({'model': 'DeepSeek-V4.1-Flash'}, {'thinking': 'max', 'temperature': 0.5}, enable_thinking=False)
+        self.assertEqual(p_ds_off['thinking'], {'type': 'disabled'})
+        self.assertEqual(p_ds_off['temperature'], 0.5)
+        self.assertNotIn('reasoning_effort', p_ds_off)
+        self.assertNotIn('chat_template_kwargs', p_ds_off)
         for model, unsupported in [('Kimi-K3.1-Pro', 'disabled'), ('GLM-5.3-Flash', 'medium'),
                                    ('GLM-5.3-Flash', 'disabled'), ('gemini-4-argon', 'max'),
-                                   ('gemini-4-argon', 'disabled'), ('gpt-5', 'max')]:
+                                   ('gemini-4-argon', 'disabled'), ('gpt-5', 'max'),
+                                   ('DeepSeek-V4.1-Flash', 'medium'), ('DeepSeek-V4.1-Flash', 'minimal')]:
             with self.subTest(model=model, mode=unsupported), self.assertRaises(settings.ConfigError):
                 settings.apply_parameters({'model': model}, {'thinking': unsupported})
         for model, level in [('gpt-5', 'minimal'), ('gpt-5.4', 'xhigh'), ('gpt-6-astra', 'max')]:
@@ -482,6 +498,22 @@ class ManagerTests(unittest.TestCase):
             self.assertNotIn('关闭思考', result['warning'])
             self.assertEqual(Upstream.calls[-1]['body']['max_completion_tokens'], expected)
             self.assertNotIn('max_tokens', Upstream.calls[-1]['body'])
+        self.update('chat', model='DeepSeek-V4.1-Flash', thinking='omit', max_tokens=0)
+        Upstream.overrides['DeepSeek-V4.1-Flash'] = {'json': {'choices': [{'message': {'content': None, 'reasoning_content': 'thinking'}, 'finish_reason': 'length'}]}}
+        status, result = self.request('/api/test', {'feature': 'chat', 'document': settings.public_document(settings.load_document())}, manager=True)
+        self.assertEqual(status, 200)
+        self.assertTrue(result['ok'])
+        self.assertTrue(result['connected'])
+        self.assertFalse(result['complete'])
+        self.assertIn('4096', result['warning'])
+        self.assertEqual(Upstream.calls[-1]['body']['max_tokens'], 4096)
+        self.assertNotIn('max_completion_tokens', Upstream.calls[-1]['body'])
+        self.update('chat', model='deepseek-chat', thinking='omit', max_tokens=0)
+        status, result = self.request('/api/test', {'feature': 'chat', 'document': settings.public_document(settings.load_document())}, manager=True)
+        self.assertEqual(status, 200)
+        self.assertTrue(result['ok'])
+        self.assertTrue(result['complete'])
+        self.assertEqual(Upstream.calls[-1]['body']['max_tokens'], 256)
 
     def test_unsupported_search_fails_before_request_without_offline_retry(self):
         for fid, path, body in [('chat', '/api/chat', {'messages': [{'role': 'user', 'content': 'test'}]}),

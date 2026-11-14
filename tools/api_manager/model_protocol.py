@@ -33,8 +33,10 @@ def capabilities(model, base_url=''):
         known('glm', 'thinking', ('low', 'high', 'max'), False)
     elif re.match(r'^glm-4\.[567](?:v)?(?:-|$)', m):
         known('glm', 'thinking')
-    elif m in ('deepseek-flash', 'deepseek-v4-pro', 'deepseek-v4-flash'):
+    elif re.match(r'^deepseek-(?:(?:v4(?:\.\d+)?-)?(?:flash|pro)|v4(?:\.\d+)?)(?:-|$)', m):
         known('deepseek', 'thinking', ('low', 'high', 'max'))
+    elif m in ('deepseek-chat', 'deepseek-reasoner') or re.match(r'^deepseek-v3\.2(?:-|$)', m):
+        known('deepseek', 'thinking', ('low', 'high', 'max'), default=(m != 'deepseek-chat'))
     elif m.startswith('gemini-'):
         mandatory = bool(re.match(r'^gemini-[34](?:[.-]|$)', m) or m.startswith('gemini-2.5-pro'))
         levels = ('low', 'high') if re.match(r'^gemini-3(?:\.1)?-pro', m) else ('low', 'medium', 'high')

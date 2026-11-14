@@ -426,8 +426,11 @@ def temperature_policy(model, thinking='disabled'):
     elif m == 'glm-4.6v-flash':
         policy.update(value=0.8, note='官方模型卡评测推荐温度为 0.8。',
                       source='https://huggingface.co/zai-org/GLM-4.6V-Flash#evaluation-settings')
-    elif m in ('deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-pro'):
-        if thinking != 'disabled':
+    elif re.match(r'^deepseek-(?:(?:v4(?:\.\d+)?-)?(?:flash|pro)|v4(?:\.\d+)?|chat|reasoner|v3\.2)(?:-|$)', m):
+        is_thinking = thinking in THINKING_ACTIVE_MODES or (
+            thinking == 'omit' and protocol.capabilities(m)['default_thinking']
+        )
+        if is_thinking:
             policy.update(locked=True, note='思考模式下温度不生效，自动省略。',
                           source='https://api-docs.deepseek.com/guides/thinking_mode/')
         else:
