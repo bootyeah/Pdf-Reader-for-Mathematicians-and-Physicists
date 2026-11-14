@@ -273,11 +273,11 @@
         }
 
         // 正文文本块与旁侧预览共用同一套红色竖线 / 公式红框样式。
-        function paintVirtualCursor(cursor, rect, isText, origin = { left: 0, top: 0 }) {
+        function paintVirtualCursor(cursor, rect, isText, origin = { left: 0, top: 0 }, minHeight = 14) {
             cursor.style.left = `${rect.left - origin.left - (isText ? 0 : 2)}px`;
             cursor.style.top = `${rect.top - origin.top - (isText ? 0 : 2)}px`;
             cursor.style.width = isText ? '2px' : `${rect.width + 4}px`;
-            cursor.style.height = `${isText ? Math.max(rect.height, 14) : rect.height + 4}px`;
+            cursor.style.height = `${isText ? Math.max(rect.height, minHeight) : rect.height + 4}px`;
             cursor.style.backgroundColor = isText ? 'rgba(239, 68, 68, 0.7)' : 'rgba(239, 68, 68, 0.1)';
             cursor.style.border = isText ? 'none' : '1.5px dashed rgba(239, 68, 68, 0.6)';
             cursor.style.boxShadow = isText ? '0 0 4px rgba(239, 68, 68, 0.5)' : 'none';
@@ -389,10 +389,12 @@
         window.syncVirtualCursor = function() {
             if (cursorSyncFrameId) cancelAnimationFrame(cursorSyncFrameId);
             cursorSyncFrameId = null;
+            let vCursor = document.getElementById('virtual-cursor');
+            let vInnerCursor = document.getElementById('virtual-inner-cursor');
             // 1. 如果退出了编辑模式，彻底清理光标并终止调度
             if (!state.isEditingNote) {
-                const vCursor = document.getElementById('virtual-cursor');
                 if (vCursor) vCursor.style.display = 'none';
+                if (vInnerCursor) vInnerCursor.style.display = 'none';
                 return;
             }
 
@@ -402,11 +404,11 @@
 
             // 2. 只取「当前正在编辑的文本块」里的幻影节点，其它块的一律不算数
             const phantom = phantomCursorIn(phantomMemo.div);
-            let vCursor = document.getElementById('virtual-cursor');
 
             // 3. 如果因为防抖延迟暂时没找到节点，先隐藏光标，等待渲染完成再同步
             if (!phantom) {
                 if (vCursor) vCursor.style.display = 'none';
+                if (vInnerCursor) vInnerCursor.style.display = 'none';
                 return;
             }
 
@@ -418,8 +420,29 @@
                 document.body.appendChild(vCursor);
             }
 
+            const isBlock = phantom.id === 'phantom-cursor-block';
             vCursor.style.display = 'block';
-            paintVirtualCursor(vCursor, phantom.getBoundingClientRect(), phantom.id === 'phantom-cursor');
+            paintVirtualCursor(vCursor, phantom.getBoundingClientRect(), !isBlock);
+
+            if (!isBlock) {
+                if (vInnerCursor) vInnerCursor.style.display = 'none';
+                return;
+            }
+            if (phantomMemo.text === els.noteInput.value && typeof window.formulaCursorRect === 'function') {
+                const innerRect = window.formulaCursorRect(phantom, els.noteInput.value, els.noteInput.selectionStart ?? 0);
+                if (innerRect) {
+                    if (!vInnerCursor) {
+                        vInnerCursor = document.createElement('div');
+                        vInnerCursor.id = 'virtual-inner-cursor';
+                        vInnerCursor.className = 'fixed pointer-events-none z-[100]';
+                        document.body.appendChild(vInnerCursor);
+                    }
+                    vInnerCursor.style.display = 'block';
+                    paintVirtualCursor(vInnerCursor, innerRect, true, { left: 0, top: 0 }, 6);
+                } else if (vInnerCursor) {
+                    vInnerCursor.style.display = 'none';
+                }
+            }
         };
 
         function scheduleVirtualCursorSync() {

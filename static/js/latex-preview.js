@@ -14,7 +14,11 @@
         const cursor = document.createElement('div');
         cursor.className = 'latex-preview-cursor';
         cursor.setAttribute('aria-hidden', 'true');
-        viewport.append(body, cursor);
+        const innerCursor = document.createElement('div');
+        innerCursor.className = 'latex-preview-inner-cursor';
+        innerCursor.setAttribute('aria-hidden', 'true');
+        innerCursor.hidden = true;
+        viewport.append(body, cursor, innerCursor);
         panel.append(viewport);
         document.body.appendChild(panel);
         // 预览与所依附的小窗（如文本编辑框）保持同一层级、一起置顶。
@@ -93,20 +97,59 @@
         function syncCursor() {
             const phantom = body.querySelector('#latex-preview-phantom, #latex-preview-phantom-block');
             cursor.hidden = !phantom;
-            if (!phantom) return;
+            if (!phantom) {
+                innerCursor.hidden = true;
+                return;
+            }
+            const isBlock = phantom.id === 'latex-preview-phantom-block';
             let rect = phantom.getBoundingClientRect();
+            let innerRect = isBlock && typeof window.formulaCursorRect === 'function'
+                ? window.formulaCursorRect(phantom, lastText, lastCursor)
+                : null;
             const visible = body.getBoundingClientRect();
             const layout = Math.round(rect.top - visible.top + body.scrollTop);
             if (layout !== lastLayout) followCursor = true;
             lastLayout = layout;
             if (followCursor) {
                 const margin = parseFloat(getComputedStyle(body).paddingTop) + 8;
-                if (rect.top < visible.top + margin) body.scrollTop -= visible.top + margin - rect.top;
-                else if (rect.bottom > visible.bottom - margin) body.scrollTop += rect.bottom - visible.bottom + margin;
-                rect = phantom.getBoundingClientRect();
+                const focus = innerRect || rect;
+                let scrolled = false;
+                if (focus.top < visible.top + margin) {
+                    body.scrollTop -= visible.top + margin - focus.top;
+                    scrolled = true;
+                } else if (focus.top + focus.height > visible.bottom - margin) {
+                    body.scrollTop += (focus.top + focus.height) - (visible.bottom - margin);
+                    scrolled = true;
+                }
+                if (innerRect) {
+                    const kd = phantom.querySelector('.katex-display');
+                    if (kd && kd.scrollWidth > kd.clientWidth) {
+                        const kr = kd.getBoundingClientRect();
+                        if (innerRect.left < kr.left + 8) {
+                            kd.scrollLeft -= kr.left + 8 - innerRect.left;
+                            scrolled = true;
+                        } else if (innerRect.left > kr.right - 8) {
+                            kd.scrollLeft += innerRect.left - (kr.right - 8);
+                            scrolled = true;
+                        }
+                    }
+                }
+                if (scrolled) {
+                    rect = phantom.getBoundingClientRect();
+                    if (isBlock && typeof window.formulaCursorRect === 'function') {
+                        innerRect = window.formulaCursorRect(phantom, lastText, lastCursor);
+                    }
+                }
                 followCursor = false;
             }
-            paintVirtualCursor(cursor, rect, phantom.id === 'latex-preview-phantom', viewport.getBoundingClientRect());
+            const origin = viewport.getBoundingClientRect();
+            paintVirtualCursor(cursor, rect, !isBlock, origin);
+            if (innerRect) {
+                innerCursor.hidden = false;
+                paintVirtualCursor(innerCursor, innerRect, true, origin, 6);
+            } else {
+                innerCursor.hidden = true;
+            }
         }
         function update() {
             clearTimeout(timer);

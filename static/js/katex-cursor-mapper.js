@@ -75,9 +75,14 @@
     }
 
     // KaTeX reuses singleton AST leaves (e.g. consecutive primes in f''), so each node gets its own info wrapper.
-    function buildKatexAstInfo(node, texLen, tainted) {
+    function buildKatexAstInfo(node, texLen, tainted, literalError) {
         if (!node || typeof node !== 'object') return null;
         const selfTainted = tainted || node.type === 'htmlmathml';
+        const isErrorColorText = Boolean(
+            node.type === 'color' && !node.loc && node.color === '#cc0000'
+            && Array.isArray(node.body) && node.body.length === 1 && node.body[0] && node.body[0].type === 'text'
+        );
+        const childLiteralError = Boolean(literalError || isErrorColorText);
         const loc = !selfTainted && node.loc && typeof node.loc.start === 'number' && typeof node.loc.end === 'number'
             && node.loc.start >= 0 && node.loc.end <= texLen && node.loc.start <= node.loc.end
             ? { start: node.loc.start, end: node.loc.end }
@@ -86,7 +91,7 @@
         let rawMax = -1;
         const children = [];
         for (const spec of getKatexNodeSpecs(node)) {
-            const childInfo = buildKatexAstInfo(spec.node, texLen, selfTainted);
+            const childInfo = buildKatexAstInfo(spec.node, texLen, selfTainted, childLiteralError);
             if (!childInfo) continue;
             children.push({ role: spec.role, info: childInfo });
             if (childInfo.rawMax >= 0) {
@@ -108,16 +113,26 @@
             rawMax: rawMin <= rawMax ? rawMax : -1,
             children,
             byRole,
+            literalError: Boolean(literalError && !loc),
             start: 0,
             end: 0,
-            mhchem: null
+            mhchem: null,
+            innerStart: null,
+            innerEnd: null,
+            cellRange: null
         };
     }
 
-    function findTokenInKatexGap(tex, start, end, node) {
+    function findTokenInKatexGap(tex, start, end, node, literalError) {
         let s = start;
         while (s < end && /\s/.test(tex[s])) s += 1;
         if (s >= end) return { start: Math.min(start, tex.length), end: Math.min(start, tex.length) };
+        if (literalError && node && node.text) {
+            const idx = tex.indexOf(node.text, s);
+            if (idx !== -1 && idx + node.text.length <= end) {
+                return { start: idx, end: idx + node.text.length };
+            }
+        }
         if (node.type === 'textord' && node.text === '\\prime') {
             const tickIdx = tex.indexOf("'", s);
             if (tickIdx !== -1 && tickIdx < end) return { start: tickIdx, end: tickIdx + 1 };
@@ -157,7 +172,9 @@
                 }
             }
             const isExpandedMhchem = Boolean(
-                info.node.type === 'ordgroup' && info.node.loc && info.node.loc.end > tex.length
+                info.node.type === 'ordgroup' && info.node.loc
+                && (info.node.loc.end > tex.length
+                    || (info.node.loc.lexer && info.node.loc.lexer.input !== tex))
             );
             const sliceOffset = tex.slice(cursor, nextBound).search(/\\(?:ce|pu)\s*\{/);
             const mh = isExpandedMhchem && sliceOffset !== -1
@@ -182,19 +199,84 @@
         }
     }
 
+    /** Compute exact source [start, end] ranges for each row/col cell in a TeX array/matrix environment. */
+    function computeArrayCellRanges(tex, start, end) {
+        const rows = [];
+        const slice = tex.slice(start, end);
+        const beginM = slice.match(/^\s*\\begin\s*\{[^}]+\}(?:\s*\[[^\]]*\])?(?:\s*\{[^}]*\})?/);
+        const endM = slice.match(/\\end\s*\{[^}]+\}\s*$/);
+        const bodyStart = start + (beginM ? beginM[0].length : 0);
+        const bodyEnd = endM ? end - endM[0].length : end;
+        let depth = 0;
+        let envDepth = 0;
+        let curRow = [];
+        let cellStart = bodyStart;
+        for (let i = bodyStart; i < bodyEnd;) {
+            const ch = tex[i];
+            if (ch === '\\') {
+                if (envDepth === 0 && depth === 0 && tex[i + 1] === '\\') {
+                    curRow.push([cellStart, i]);
+                    rows.push(curRow);
+                    curRow = [];
+                    i += 2;
+                    const opt = tex.slice(i, bodyEnd).match(/^\s*\[[^\]]*\]/);
+                    if (opt) i += opt[0].length;
+                    cellStart = i;
+                    continue;
+                }
+                const cmdM = tex.slice(i, bodyEnd).match(/^\\(begin|end|cr)\b/);
+                if (cmdM) {
+                    if (cmdM[1] === 'begin') envDepth += 1;
+                    else if (cmdM[1] === 'end' && envDepth > 0) envDepth -= 1;
+                    else if (cmdM[1] === 'cr' && envDepth === 0 && depth === 0) {
+                        curRow.push([cellStart, i]);
+                        rows.push(curRow);
+                        curRow = [];
+                        i += cmdM[0].length;
+                        cellStart = i;
+                        continue;
+                    }
+                }
+                const tokM = tex.slice(i, bodyEnd).match(/^\\(?:[a-zA-Z]+|.)/);
+                i += tokM ? tokM[0].length : 1;
+                continue;
+            }
+            if (ch === '{') depth += 1;
+            else if (ch === '}' && depth > 0) depth -= 1;
+            else if (ch === '&' && depth === 0 && envDepth === 0) {
+                curRow.push([cellStart, i]);
+                cellStart = i + 1;
+            }
+            i += 1;
+        }
+        curRow.push([cellStart, bodyEnd]);
+        rows.push(curRow);
+        return rows;
+    }
+
     function assignKatexNodeSpan(info, left, right, tex, mhSpans) {
         const node = info.node;
         const direct = info.direct && info.direct.start >= left && info.direct.end <= right
             ? { start: info.direct.start, end: trimKatexCommandSpace(tex, info.direct.start, info.direct.end) }
             : null;
         if (node.type === 'htmlmathml') {
-            const tok = findTokenInKatexGap(tex, left, right, node);
+            const tok = findTokenInKatexGap(tex, left, right, node, info.literalError);
             info.start = tok.start;
             info.end = tok.end;
             return;
         }
         if (!info.children.length) {
-            const sp = direct || findTokenInKatexGap(tex, left, right, node);
+            const sp = direct || findTokenInKatexGap(tex, left, right, node, info.literalError);
+            if (!direct && node.type === 'text') {
+                const braceM = tex.slice(sp.end, right).match(/^\s*\{\s*\}/);
+                if (braceM) {
+                    const openIdx = sp.end + braceM[0].indexOf('{');
+                    const closeIdx = sp.end + braceM[0].lastIndexOf('}');
+                    info.innerStart = openIdx + 1;
+                    info.innerEnd = closeIdx;
+                    sp.end += braceM[0].length;
+                }
+            }
             info.start = sp.start;
             info.end = sp.end;
             return;
@@ -242,6 +324,17 @@
         }
         info.start = direct ? direct.start : adjStart;
         info.end = direct ? direct.end : adjEnd;
+        if (node.type === 'array' && Array.isArray(node.body)) {
+            const arrStart = Math.min(info.start, left);
+            const arrEnd = Math.max(info.end, right);
+            const cellRanges = computeArrayCellRanges(tex, arrStart, arrEnd);
+            node.body.forEach((row, r) => row.forEach((_, c) => {
+                const cellInfo = info.byRole[`cell:${r}:${c}`];
+                if (cellInfo && cellRanges[r] && cellRanges[r][c]) {
+                    cellInfo.cellRange = cellRanges[r][c];
+                }
+            }));
+        }
     }
 
     function isKatexLineRow(rowEl) {
@@ -370,8 +463,77 @@
                     expand(n);
                 }
                 return null;
+            },
+            /** Peek/consume an inline empty leaf placeholder (e.g. `<span class="mord text"></span>`) without touching sibling glyphs. */
+            consumeEmptyInline() {
+                const saved = stack.map(item => ({ node: item.node, pos: item.pos }));
+                while (stack.length) {
+                    const top = stack[stack.length - 1];
+                    const n = top.node;
+                    if (n.nodeType === Node.TEXT_NODE) {
+                        if (top.pos >= n.data.length) { stack.pop(); continue; }
+                        if (n.data.codePointAt(top.pos) === 0x200b) { top.pos += 1; continue; }
+                        break;
+                    }
+                    if (n.nodeType !== Node.ELEMENT_NODE || isSkippedKatexDom(n) || n.classList.contains('nulldelimiter')) {
+                        stack.pop();
+                        continue;
+                    }
+                    const cl = n.classList;
+                    if (!n.childElementCount && !n.textContent
+                        && !cl.contains('frac-line') && !cl.contains('overline-line')
+                        && !cl.contains('underline-line') && !cl.contains('fbox')) {
+                        stack.pop();
+                        return n;
+                    }
+                    if ((!n.textContent && !n.querySelector('svg')) || cl.contains('base')) {
+                        stack.pop();
+                        expand(n);
+                        continue;
+                    }
+                    break;
+                }
+                stack.length = 0;
+                for (const item of saved) stack.push(item);
+                return null;
             }
         };
+    }
+
+    function isDecorOnlyKatexEl(el) {
+        const cl = el.classList;
+        return cl.contains('pstrut') || cl.contains('strut') || cl.contains('vlist-s')
+            || cl.contains('frac-line') || cl.contains('overline-line') || cl.contains('underline-line')
+            || cl.contains('fbox') || cl.contains('nulldelimiter') || cl.contains('hide-tail')
+            || cl.contains('accent-body');
+    }
+
+    /** Pick the innermost empty DOM slot placeholder inside a compound slot element list. */
+    function findEmptySlotElement(rootEls) {
+        let best = null;
+        function walk(el) {
+            if (!el || el.nodeType !== Node.ELEMENT_NODE || isDecorOnlyKatexEl(el)) return false;
+            if (el.tagName === 'svg' || el.tagName === 'SVG') return false;
+            if (!el.childElementCount && !el.textContent) {
+                best = el;
+                return true;
+            }
+            for (const ch of el.children) {
+                if (walk(ch)) return true;
+            }
+            if (!best && !el.textContent && !el.querySelector('svg')) best = el;
+            return false;
+        }
+        for (const root of rootEls) {
+            if (walk(root)) return best;
+        }
+        return best;
+    }
+
+    function hasRecordedSlot(info) {
+        if (!info) return false;
+        if (info._slotEl) return true;
+        return info.children.some(c => hasRecordedSlot(c.info));
     }
 
     function alignKatexMhchem(el, mhchem, tex, entries) {
@@ -416,17 +578,38 @@
         }
     }
 
-    function alignKatexSequence(infoList, rootEls, entries, tex) {
+    function alignKatexSequence(infoList, rootEls, entries, tex, trackSlots) {
         const stream = createKatexDomStream(rootEls);
-        for (const info of infoList) alignKatexNode(info, stream, entries, tex);
+        for (const info of infoList) alignKatexNode(info, stream, entries, tex, trackSlots);
     }
 
-    function alignKatexNode(info, stream, entries, tex) {
+    function alignKatexNode(info, stream, entries, tex, trackSlots) {
+        const before = entries.length;
+        alignKatexNodeInner(info, stream, entries, tex, trackSlots);
+        if (trackSlots) {
+            info._entryStart = before;
+            info._entryEnd = entries.length;
+        }
+    }
+
+    function alignKatexNodeInner(info, stream, entries, tex, trackSlots) {
         const node = info.node;
         if (!node || node.type === 'kern' || node.type === 'cr') return;
+        const alignSlot = (childInfo, roleEls) => {
+            if (!childInfo || !roleEls || !roleEls.length) return;
+            const before = entries.length;
+            alignKatexSequence([childInfo], roleEls, entries, tex, trackSlots);
+            if (trackSlots && entries.length === before && !hasRecordedSlot(childInfo)) {
+                childInfo._slotEl = findEmptySlotElement(roleEls);
+            }
+        };
         if (info.mhchem) {
             const el = stream.consumeWholeElement(n => n.classList.contains('mord'));
-            if (el) alignKatexMhchem(el, info.mhchem, tex, entries);
+            if (el) {
+                const before = entries.length;
+                alignKatexMhchem(el, info.mhchem, tex, entries);
+                if (trackSlots && entries.length === before) info._slotEl = el;
+            }
             return;
         }
         if (node.type === 'supsub') {
@@ -436,30 +619,30 @@
             const rows = getKatexDirectVlistRows(target);
             if (target.classList.contains('op-limits')) {
                 let idx = 0;
-                if (info.byRole.sub && rows[idx]) alignKatexSequence([info.byRole.sub], [rows[idx++]], entries, tex);
-                if (info.byRole.base && rows[idx]) alignKatexSequence([info.byRole.base], [rows[idx++]], entries, tex);
-                if (info.byRole.sup && rows[idx]) alignKatexSequence([info.byRole.sup], [rows[idx++]], entries, tex);
+                if (info.byRole.sub && rows[idx]) alignSlot(info.byRole.sub, [rows[idx++]]);
+                if (info.byRole.base && rows[idx]) alignSlot(info.byRole.base, [rows[idx++]]);
+                if (info.byRole.sup && rows[idx]) alignSlot(info.byRole.sup, [rows[idx++]]);
                 return;
             }
             if (target.classList.contains('mover') || target.classList.contains('munder')) {
                 if (target.classList.contains('mover')) {
-                    if (info.byRole.base && rows[0]) alignKatexSequence([info.byRole.base], [rows[0]], entries, tex);
-                    if (info.byRole.sup && rows[1]) alignKatexSequence([info.byRole.sup], [rows[1]], entries, tex);
+                    if (info.byRole.base && rows[0]) alignSlot(info.byRole.base, [rows[0]]);
+                    if (info.byRole.sup && rows[1]) alignSlot(info.byRole.sup, [rows[1]]);
                 } else {
-                    if (info.byRole.sub && rows[0]) alignKatexSequence([info.byRole.sub], [rows[0]], entries, tex);
-                    if (info.byRole.base && rows[1]) alignKatexSequence([info.byRole.base], [rows[1]], entries, tex);
+                    if (info.byRole.sub && rows[0]) alignSlot(info.byRole.sub, [rows[0]]);
+                    if (info.byRole.base && rows[1]) alignSlot(info.byRole.base, [rows[1]]);
                 }
                 return;
             }
             const targetChildren = Array.from(target.children || []);
             const msupsub = targetChildren.find(c => c.classList.contains('msupsub'));
             const baseEls = targetChildren.filter(c => c !== msupsub);
-            if (info.byRole.base) alignKatexSequence([info.byRole.base], baseEls, entries, tex);
+            if (info.byRole.base) alignSlot(info.byRole.base, baseEls);
             if (msupsub) {
                 const subSupRows = getKatexDirectVlistRows(msupsub);
                 let idx = 0;
-                if (info.byRole.sub && subSupRows[idx]) alignKatexSequence([info.byRole.sub], [subSupRows[idx++]], entries, tex);
-                if (info.byRole.sup && subSupRows[idx]) alignKatexSequence([info.byRole.sup], [subSupRows[idx++]], entries, tex);
+                if (info.byRole.sub && subSupRows[idx]) alignSlot(info.byRole.sub, [subSupRows[idx++]]);
+                if (info.byRole.sup && subSupRows[idx]) alignSlot(info.byRole.sup, [subSupRows[idx++]]);
             }
             return;
         }
@@ -471,8 +654,8 @@
             const mclose = parentChildren.find(c => c.classList.contains('mclose') && !c.classList.contains('nulldelimiter'));
             if (mopen) entries.push({ kind: 'el', el: mopen, start: info.start, end: info.start + 1 });
             const rows = getKatexDirectVlistRows(match.target).filter(r => !isKatexLineRow(r));
-            if (info.byRole.denom && rows[0]) alignKatexSequence([info.byRole.denom], [rows[0]], entries, tex);
-            if (info.byRole.numer && rows[1]) alignKatexSequence([info.byRole.numer], [rows[1]], entries, tex);
+            if (info.byRole.denom && rows[0]) alignSlot(info.byRole.denom, [rows[0]]);
+            if (info.byRole.numer && rows[1]) alignSlot(info.byRole.numer, [rows[1]]);
             if (mclose) entries.push({ kind: 'el', el: mclose, start: Math.max(info.start, info.end - 1), end: info.end });
             return;
         }
@@ -480,10 +663,10 @@
             const match = stream.consumeCompound('sqrt');
             if (!match) return;
             const rootEl = Array.from(match.target.children || []).find(c => c.classList.contains('root'));
-            if (info.byRole.index && rootEl) alignKatexSequence([info.byRole.index], [rootEl], entries, tex);
+            if (info.byRole.index && rootEl) alignSlot(info.byRole.index, [rootEl]);
             const rows = getKatexDirectVlistRows(match.target);
             const bodyRow = rows.find(r => r.classList.contains('svg-align')) || rows[0];
-            if (info.byRole.body && bodyRow) alignKatexSequence([info.byRole.body], [bodyRow], entries, tex);
+            if (info.byRole.body && bodyRow) alignSlot(info.byRole.body, [bodyRow]);
             const sqrtIcon = rows.find(r => !r.classList.contains('svg-align'));
             if (sqrtIcon) entries.push({ kind: 'fallbackEl', el: sqrtIcon, start: info.start, end: info.start });
             return;
@@ -492,8 +675,8 @@
             const match = stream.consumeCompound('xArrow');
             if (!match) return;
             const rows = getKatexDirectVlistRows(match.target).filter(r => !r.classList.contains('svg-align'));
-            if (info.byRole.body && rows[0]) alignKatexSequence([info.byRole.body], [rows[0]], entries, tex);
-            if (info.byRole.below && rows[1]) alignKatexSequence([info.byRole.below], [rows[1]], entries, tex);
+            if (info.byRole.body && rows[0]) alignSlot(info.byRole.body, [rows[0]]);
+            if (info.byRole.below && rows[1]) alignSlot(info.byRole.below, [rows[1]]);
             return;
         }
         if (node.type === 'accent' || node.type === 'accentUnder') {
@@ -502,21 +685,21 @@
             const rows = getKatexDirectVlistRows(match.target).filter(
                 r => !r.classList.contains('accent-body') && !r.classList.contains('svg-align') && !r.querySelector('.accent-body')
             );
-            if (info.byRole.base && rows[0]) alignKatexSequence([info.byRole.base], [rows[0]], entries, tex);
+            if (info.byRole.base && rows[0]) alignSlot(info.byRole.base, [rows[0]]);
             return;
         }
         if (node.type === 'horizBrace') {
             const match = stream.consumeCompound('horizBrace');
             if (!match) return;
             const rows = getKatexDirectVlistRows(match.target).filter(r => !r.classList.contains('svg-align'));
-            if (info.byRole.base && rows[0]) alignKatexSequence([info.byRole.base], [rows[0]], entries, tex);
+            if (info.byRole.base && rows[0]) alignSlot(info.byRole.base, [rows[0]]);
             return;
         }
         if (node.type === 'overline' || node.type === 'underline') {
             const match = stream.consumeCompound(node.type);
             if (!match) return;
             const rows = getKatexDirectVlistRows(match.target).filter(r => !isKatexLineRow(r));
-            if (info.byRole.body && rows[0]) alignKatexSequence([info.byRole.body], [rows[0]], entries, tex);
+            if (info.byRole.body && rows[0]) alignSlot(info.byRole.body, [rows[0]]);
             return;
         }
         if (node.type === 'enclose') {
@@ -526,14 +709,14 @@
             const rows = box ? [box] : getKatexDirectVlistRows(match.target).filter(
                 r => !r.classList.contains('svg-align') && !Array.from(r.children || []).some(c => c.classList.contains('fbox'))
             );
-            if (info.byRole.body && rows[0]) alignKatexSequence([info.byRole.body], [rows[0]], entries, tex);
+            if (info.byRole.body && rows[0]) alignSlot(info.byRole.body, [rows[0]]);
             return;
         }
         if (node.type === 'raisebox') {
             const match = stream.consumeCompound('raisebox');
             if (!match) return;
             const rows = getKatexDirectVlistRows(match.target);
-            if (info.byRole.body && rows[0]) alignKatexSequence([info.byRole.body], [rows[0]], entries, tex);
+            if (info.byRole.body && rows[0]) alignSlot(info.byRole.body, [rows[0]]);
             return;
         }
         if (node.type === 'leftright') {
@@ -546,7 +729,7 @@
             if (ch[0] && !ch[0].classList.contains('nulldelimiter')) {
                 entries.push({ kind: 'el', el: ch[0], start: info.start, end: info.start + (openTok ? openTok[0].length : 0) });
             }
-            alignKatexSequence(info.children.map(c => c.info), innerEls, entries, tex);
+            alignKatexSequence(info.children.map(c => c.info), innerEls, entries, tex, trackSlots);
             if (ch[ch.length - 1] && !ch[ch.length - 1].classList.contains('nulldelimiter')) {
                 entries.push({ kind: 'el', el: ch[ch.length - 1], start: info.end - (closeTok ? closeTok[0].length : 0), end: info.end });
             }
@@ -562,7 +745,7 @@
                 const domCell = colRows[c]?.[r];
                 if (!cellInfo || !domCell) return;
                 const prevCount = entries.length;
-                alignKatexSequence([cellInfo], [domCell], entries, tex);
+                alignSlot(cellInfo, [domCell]);
                 if (entries.length === prevCount) {
                     entries.push({ kind: 'fallbackEl', el: domCell, start: cellInfo.start, end: cellInfo.end });
                 }
@@ -587,14 +770,28 @@
         }
         if (node.type === 'phantom') {
             const hidden = [];
-            for (const c of info.children) alignKatexNode(c.info, stream, hidden, tex);
+            for (const c of info.children) alignKatexNode(c.info, stream, hidden, tex, false);
             return;
         }
         if (info.children.length) {
-            for (const c of info.children) alignKatexNode(c.info, stream, entries, tex);
+            const before = entries.length;
+            for (const c of info.children) alignKatexNode(c.info, stream, entries, tex, trackSlots);
+            if (trackSlots && entries.length === before && !hasRecordedSlot(info)) {
+                const emptyEl = stream.consumeEmptyInline();
+                if (emptyEl) info._slotEl = emptyEl;
+            }
             return;
         }
-        if (node.type === 'ordgroup') return;
+        if (node.type === 'ordgroup' || (trackSlots && (
+            node.type === 'text' || node.type === 'styling' || node.type === 'font'
+            || node.type === 'color' || node.type === 'sizing' || node.type === 'mclass'
+        ))) {
+            if (trackSlots) {
+                const emptyEl = stream.consumeEmptyInline();
+                if (emptyEl) info._slotEl = emptyEl;
+            }
+            return;
+        }
         const g = stream.consumeGlyph();
         if (g) entries.push({ ...g, start: info.start, end: info.end });
     }
@@ -807,6 +1004,515 @@
         return Math.min(best.offset, source.length);
     }
 
+    const MATH_BLOCK_REGEX = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\(.*?\\\)|\$[^$\n]*?\$)/g;
+
+    /** Find the math delimiter block matching `injectPhantomCursor` around `cursorOffset`. */
+    function findMathBlockAtCursor(source, cursorOffset) {
+        if (!source) return null;
+        MATH_BLOCK_REGEX.lastIndex = 0;
+        let match;
+        while ((match = MATH_BLOCK_REGEX.exec(source)) !== null) {
+            const start = match.index;
+            const raw = match[0];
+            const end = start + raw.length;
+            if (cursorOffset >= start && cursorOffset <= end) {
+                let openLen = 1;
+                let closeLen = 1;
+                let displayMode = false;
+                if (raw.startsWith('$$')) {
+                    openLen = 2;
+                    closeLen = raw.length >= 4 && raw.endsWith('$$') ? 2 : 0;
+                    displayMode = true;
+                } else if (raw.startsWith('\\[')) {
+                    openLen = 2;
+                    closeLen = raw.endsWith('\\]') ? 2 : 0;
+                    displayMode = true;
+                } else if (raw.startsWith('\\(')) {
+                    openLen = 2;
+                    closeLen = raw.endsWith('\\)') ? 2 : 0;
+                }
+                return { start, end, raw, openLen, closeLen, displayMode };
+            }
+        }
+        return null;
+    }
+
+    function getElementZoomScale(el) {
+        const host = el && el.closest ? (el.closest('.text-annotation') || el.closest('.katex') || el) : el;
+        if (host && host.offsetHeight > 0) {
+            const ratio = host.getBoundingClientRect().height / host.offsetHeight;
+            if (ratio > 0.05 && Number.isFinite(ratio)) return ratio;
+        }
+        return 1;
+    }
+
+    function baselineRectForContainer(el, displayMode, fallbackEl) {
+        const target = el || fallbackEl;
+        if (!target) return null;
+        const rect = target.getBoundingClientRect();
+        const cs = getComputedStyle(target);
+        const scale = getElementZoomScale(target);
+        const fs = (parseFloat(cs.fontSize) || 18) * scale;
+        if (rect.height > 1 && (rect.height <= fs * 1.85 || (!displayMode && rect.height <= fs * 2.2))) {
+            return { left: rect.left, right: rect.right, top: rect.top, width: rect.width, height: rect.height };
+        }
+        if (rect.height > 1) {
+            const h = Math.max(fs * 1.3, 12 * scale);
+            const mid = (rect.top + rect.bottom) / 2;
+            return { left: rect.left, right: rect.right, top: mid - h / 2, width: rect.width, height: h };
+        }
+        const hostRect = (fallbackEl || target).getBoundingClientRect();
+        const left = displayMode && hostRect.width > 0 ? hostRect.left + hostRect.width / 2 : rect.left;
+        const h = Math.max(fs * 1.15, 10 * scale);
+        return { left, right: left, top: rect.top - fs * 0.9, width: 0, height: h };
+    }
+
+    /** Compute caret rect for an empty KaTeX container slot (handles vlist 0-height, sqrt paddingLeft, and zoom). */
+    function emptySlotCaretRect(slotEl) {
+        if (!slotEl) return null;
+        const rect = slotEl.getBoundingClientRect();
+        const cs = getComputedStyle(slotEl);
+        const scale = getElementZoomScale(slotEl);
+        const padLeft = (parseFloat(cs.paddingLeft) || 0) * scale;
+        const left = rect.left + padLeft;
+        if (rect.height > 1) {
+            return { left, right: left, top: rect.top, width: 0, height: rect.height };
+        }
+        const fs = (parseFloat(cs.fontSize) || 18) * scale;
+        const height = Math.max(fs * 1.15, 7 * scale);
+        const top = rect.top - fs * 0.9;
+        return { left, right: left, top, width: 0, height };
+    }
+
+    function findFirstSlotInSubtree(info) {
+        if (!info) return null;
+        if (info._slotEl) return info._slotEl;
+        for (const c of info.children) {
+            const s = findFirstSlotInSubtree(c.info);
+            if (s) return s;
+        }
+        return null;
+    }
+
+    function entryClientRect(entry) {
+        if (!entry) return null;
+        if (entry.kind === 'char' && entry.textNode) {
+            const len = entry.textNode.data.length;
+            const s = Math.max(0, Math.min(len, entry.charStart));
+            const e = Math.max(s, Math.min(len, entry.charEnd));
+            const range = document.createRange();
+            range.setStart(entry.textNode, s);
+            range.setEnd(entry.textNode, e);
+            const r = range.getBoundingClientRect();
+            if (r.width > 0 || r.height > 0) return r;
+            if (entry.textNode.parentElement) return entry.textNode.parentElement.getBoundingClientRect();
+        }
+        if (entry.el) return entry.el.getBoundingClientRect();
+        return null;
+    }
+
+    /** Compute a text-offset caret rect via Range inside raw unrendered math or `.katex-error`. */
+    function caretAtRangeOffset(containerEl, offset, expectedLen, fallbackRect) {
+        if (!containerEl) return null;
+        const nodes = [];
+        let total = 0;
+        const walker = document.createTreeWalker(containerEl, NodeFilter.SHOW_TEXT);
+        let tn;
+        while ((tn = walker.nextNode())) {
+            nodes.push({ node: tn, start: total, end: total + tn.data.length });
+            total += tn.data.length;
+        }
+        if (!nodes.length) {
+            return {
+                left: fallbackRect.left,
+                top: fallbackRect.top,
+                height: Math.max(fallbackRect.height, 14)
+            };
+        }
+        const scaled = expectedLen > 0 && total !== expectedLen
+            ? Math.round((Math.max(0, Math.min(expectedLen, offset)) / expectedLen) * total)
+            : offset;
+        const clamped = Math.max(0, Math.min(total, scaled));
+        let chosen = nodes[nodes.length - 1];
+        for (const item of nodes) {
+            if (clamped <= item.end) {
+                chosen = item;
+                break;
+            }
+        }
+        const local = Math.max(0, Math.min(chosen.node.data.length, clamped - chosen.start));
+        const range = document.createRange();
+        range.setStart(chosen.node, local);
+        range.collapse(true);
+        const r = range.getBoundingClientRect();
+        if (r.height > 0) return { left: r.left, top: r.top, height: r.height };
+        return {
+            left: r.left || fallbackRect.left,
+            top: fallbackRect.top,
+            height: Math.max(fallbackRect.height, 14)
+        };
+    }
+
+    function unionRectBoxes(boxes) {
+        let left = Infinity;
+        let top = Infinity;
+        let right = -Infinity;
+        let bottom = -Infinity;
+        for (const r of boxes) {
+            if (!r) continue;
+            if (r.left < left) left = r.left;
+            if (r.top < top) top = r.top;
+            if ((r.right != null ? r.right : r.left + r.width) > right) {
+                right = r.right != null ? r.right : r.left + r.width;
+            }
+            if ((r.bottom != null ? r.bottom : r.top + r.height) > bottom) {
+                bottom = r.bottom != null ? r.bottom : r.top + r.height;
+            }
+        }
+        if (left === Infinity) return null;
+        return { left, right, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+    }
+
+    function infoVisualBox(info, entries) {
+        if (!info) return null;
+        if (info._entryEnd > info._entryStart) {
+            const rects = [];
+            for (let i = info._entryStart; i < info._entryEnd; i += 1) {
+                const r = entryClientRect(entries[i]);
+                if (r && (r.width > 0 || r.height > 0)) rects.push(r);
+            }
+            const u = unionRectBoxes(rects);
+            if (u) return u;
+        }
+        const slotEl = findFirstSlotInSubtree(info);
+        if (slotEl) return emptySlotCaretRect(slotEl);
+        return null;
+    }
+
+    function isCompoundKatexType(type) {
+        return type === 'supsub' || type === 'genfrac' || type === 'sqrt' || type === 'xArrow'
+            || type === 'accent' || type === 'accentUnder' || type === 'horizBrace'
+            || type === 'overline' || type === 'underline' || type === 'enclose'
+            || type === 'raisebox' || type === 'array' || type === 'leftright';
+    }
+
+    function baselineForSequence(seqInfos, entries, fallbackBox) {
+        for (const info of seqInfos) {
+            if (!info || info.node.type === 'kern' || info.node.type === 'cr') continue;
+            if (!isCompoundKatexType(info.node.type) && info._entryEnd > info._entryStart) {
+                for (let i = info._entryStart; i < info._entryEnd; i += 1) {
+                    const r = entryClientRect(entries[i]);
+                    if (r && r.height > 1) return { left: fallbackBox.left, top: r.top, height: r.height };
+                }
+            }
+        }
+        for (const info of seqInfos) {
+            if (info && info.node.type === 'supsub' && info.byRole.base) {
+                const baseBox = infoVisualBox(info.byRole.base, entries);
+                if (baseBox && baseBox.height > 1) return { left: fallbackBox.left, top: baseBox.top, height: baseBox.height };
+            }
+        }
+        return { left: fallbackBox.left, top: fallbackBox.top, height: fallbackBox.height };
+    }
+
+    /** Find the source [innerStart, innerEnd] of a braced/delimited AST container if enterable. */
+    function containerInnerRange(info, tex) {
+        if (!info) return null;
+        if (info.mhchem) return [info.mhchem.bodyStart, info.mhchem.bodyEnd];
+        if (info.cellRange) return info.cellRange;
+        if (info.node.type === 'text' && info.innerStart != null) return [info.innerStart, info.innerEnd];
+        const loc = info.node.loc;
+        const fromTex = !loc || !loc.lexer || loc.lexer.input === tex;
+        if (fromTex && (info.node.type === 'ordgroup' || info.node.type === 'styling'
+            || info.node.type === 'font' || info.node.type === 'color'
+            || info.node.type === 'sizing' || info.node.type === 'mclass')) {
+            if (info.end - info.start >= 2) {
+                const a = tex[info.start];
+                const b = tex[info.end - 1];
+                if ((a === '{' && b === '}') || (a === '[' && b === ']')) {
+                    return [info.start + 1, info.end - 1];
+                }
+            }
+        }
+        if (info.node.type === 'leftright') {
+            const slice = tex.slice(info.start, info.end);
+            const openTok = slice.match(/^(?:\\left(?:\s*\\[a-zA-Z]+|\s*\S)|\\begin\s*\{[^}]+\})/);
+            const closeTok = slice.match(/(?:\\right(?:\s*\\[a-zA-Z]+|\s*\S)|\\end\s*\{[^}]+\})$/);
+            const s = info.start + (openTok ? openTok[0].length : 0);
+            const e = info.end - (closeTok ? closeTok[0].length : 0);
+            if (s <= e) return [s, e];
+        }
+        if (info.node.type === 'enclose' && info.children.length) {
+            const childLoc = info.children[0].info.node.loc;
+            if (childLoc && childLoc.lexer && childLoc.lexer.input !== tex) {
+                const openIdx = tex.indexOf('{', info.start);
+                if (openIdx !== -1 && openIdx < info.end && tex[info.end - 1] === '}') {
+                    return [openIdx + 1, info.end - 1];
+                }
+            }
+        }
+        return null;
+    }
+
+    function didEnterScope(info, offset, tex, strictUnbraced) {
+        if (!info) return false;
+        const inner = containerInnerRange(info, tex);
+        if (inner) return offset >= inner[0] && offset <= inner[1];
+        if (!strictUnbraced) return false;
+        if (info.node.type === 'ordgroup' || info.node.type === 'styling'
+            || info.node.type === 'font' || info.node.type === 'color'
+            || info.node.type === 'sizing' || info.node.type === 'mclass') {
+            if (info.children.some(c => didEnterScope(c.info, offset, tex, true))) return true;
+        }
+        return offset >= info.start && offset < info.end;
+    }
+
+    function resolveFlatEntriesCaret(entriesList, offset, baselineBox) {
+        const items = [];
+        for (const e of entriesList) {
+            const r = entryClientRect(e);
+            if (r) items.push({ start: e.start, end: e.end, box: r });
+        }
+        if (!items.length) return { left: baselineBox.left, top: baselineBox.top, height: baselineBox.height };
+        items.sort((a, b) => a.start - b.start || a.end - b.end);
+        for (const item of items) {
+            if (item.start < offset && offset < item.end) {
+                const ratio = (offset - item.start) / Math.max(1, item.end - item.start);
+                return { left: item.box.left + ratio * item.box.width, top: item.box.top, height: item.box.height };
+            }
+        }
+        let prev = null;
+        let next = null;
+        for (const item of items) {
+            if (item.end <= offset) prev = item;
+            else if (!next && item.start >= offset) next = item;
+        }
+        if (!prev && next) return { left: next.box.left, top: next.box.top, height: next.box.height };
+        if (prev && !next) return { left: prev.box.right, top: prev.box.top, height: prev.box.height };
+        if (prev && next) {
+            const span = Math.max(1, next.start - prev.end);
+            const t = Math.max(0, Math.min(1, (offset - prev.end) / span));
+            const left = prev.box.right + t * Math.max(0, next.box.left - prev.box.right);
+            const ref = t <= 0.5 ? prev : next;
+            return { left, top: ref.box.top, height: ref.box.height };
+        }
+        return { left: baselineBox.left, top: baselineBox.top, height: baselineBox.height };
+    }
+
+    function resolveCompoundCaret(info, offset, tex, entries, seqBaseline) {
+        const node = info.node;
+        const box = infoVisualBox(info, entries) || seqBaseline;
+
+        if (info.mhchem) {
+            const sub = entries.slice(info._entryStart, info._entryEnd);
+            if (!sub.length) {
+                return info._slotEl ? emptySlotCaretRect(info._slotEl) : box;
+            }
+            return resolveFlatEntriesCaret(sub, offset, box);
+        }
+
+        if (node.type === 'array') {
+            for (const c of info.children) {
+                const r = c.info.cellRange;
+                if (r && offset >= r[0] && offset <= r[1]) {
+                    const slotEl = findFirstSlotInSubtree(c.info);
+                    const cellFallback = slotEl ? emptySlotCaretRect(slotEl) : { ...box, ...seqBaseline };
+                    if (c.info._entryEnd <= c.info._entryStart) return cellFallback;
+                    return resolveCaretInSequence([c.info], offset, tex, entries, cellFallback);
+                }
+            }
+            const firstCellEnd = info.children[0]?.info?.cellRange?.[0] ?? info.start;
+            return {
+                left: offset <= firstCellEnd ? box.left : box.right,
+                top: seqBaseline.top,
+                height: seqBaseline.height
+            };
+        }
+
+        if (node.type === 'supsub') {
+            for (const role of ['sub', 'sup']) {
+                const child = info.byRole[role];
+                if (child && didEnterScope(child, offset, tex, true)) {
+                    const childFb = findFirstSlotInSubtree(child)
+                        ? emptySlotCaretRect(findFirstSlotInSubtree(child)) : seqBaseline;
+                    return resolveCaretInSequence([child], offset, tex, entries, childFb);
+                }
+            }
+            const base = info.byRole.base;
+            if (base) {
+                const firstScriptStart = Math.min(
+                    info.byRole.sub ? info.byRole.sub.start : Infinity,
+                    info.byRole.sup ? info.byRole.sup.start : Infinity
+                );
+                if (didEnterScope(base, offset, tex, true)) {
+                    const baseFb = infoVisualBox(base, entries) || seqBaseline;
+                    return resolveCaretInSequence([base], offset, tex, entries, baseFb);
+                }
+                const baseBox = infoVisualBox(base, entries);
+                if (baseBox && offset >= base.end && offset <= firstScriptStart) {
+                    return { left: baseBox.right, top: baseBox.top, height: baseBox.height };
+                }
+                if (baseBox && offset <= base.start) {
+                    return { left: baseBox.left, top: baseBox.top, height: baseBox.height };
+                }
+            }
+            return { left: offset >= info.end ? box.right : box.left, top: seqBaseline.top, height: seqBaseline.height };
+        }
+
+        if (node.type === 'enclose' && info.children.length) {
+            const inner = containerInnerRange(info, tex);
+            if (inner && offset >= inner[0] && offset <= inner[1]) {
+                const slotEl = findFirstSlotInSubtree(info);
+                const fb = slotEl ? emptySlotCaretRect(slotEl) : box;
+                if (info._entryEnd <= info._entryStart) return fb;
+                return resolveFlatEntriesCaret(entries.slice(info._entryStart, info._entryEnd), offset, fb);
+            }
+            return { left: offset <= (inner ? inner[0] : info.start) ? box.left : box.right, top: seqBaseline.top, height: seqBaseline.height };
+        }
+
+        if (node.type === 'leftright') {
+            const inner = containerInnerRange(info, tex);
+            if (inner && offset >= inner[0] && offset <= inner[1]) {
+                return resolveCaretInSequence(info.children.map(c => c.info), offset, tex, entries, seqBaseline);
+            }
+            return { left: offset < (inner ? inner[0] : info.end) ? box.left : box.right, top: seqBaseline.top, height: seqBaseline.height };
+        }
+
+        for (const c of info.children) {
+            if (didEnterScope(c.info, offset, tex, true)) {
+                const slotEl = findFirstSlotInSubtree(c.info);
+                const childFb = slotEl ? emptySlotCaretRect(slotEl) : seqBaseline;
+                return resolveCaretInSequence([c.info], offset, tex, entries, childFb);
+            }
+        }
+
+        if (isCompoundKatexType(node.type)) {
+            return { left: offset >= info.end ? box.right : box.left, top: seqBaseline.top, height: seqBaseline.height };
+        }
+
+        if (info.children.length) {
+            const slotEl = findFirstSlotInSubtree(info);
+            const fb = slotEl ? emptySlotCaretRect(slotEl) : box;
+            return resolveCaretInSequence(info.children.map(c => c.info), offset, tex, entries, fb);
+        }
+        return info._slotEl ? emptySlotCaretRect(info._slotEl) : box;
+    }
+
+    function resolveCaretInSequence(seqInfos, offset, tex, entries, fallbackBox) {
+        const visibleInfos = seqInfos.filter(info => info && info.node.type !== 'kern' && info.node.type !== 'cr');
+        if (!visibleInfos.length) {
+            return { left: fallbackBox.left, top: fallbackBox.top, height: fallbackBox.height };
+        }
+        const seqBaseline = baselineForSequence(visibleInfos, entries, fallbackBox);
+
+        for (const info of visibleInfos) {
+            const isLeaf = !info.children.length && !info.mhchem && info.node.type !== 'array' && info.node.type !== 'enclose';
+            if (!isLeaf && (didEnterScope(info, offset, tex, false)
+                || (isCompoundKatexType(info.node.type) && offset > info.start && offset < info.end))) {
+                return resolveCompoundCaret(info, offset, tex, entries, seqBaseline);
+            }
+        }
+
+        const items = [];
+        for (const info of visibleInfos) {
+            const box = infoVisualBox(info, entries);
+            if (!box) continue;
+            items.push({ info, start: info.start, end: info.end, box });
+        }
+        if (!items.length) {
+            return { left: seqBaseline.left ?? fallbackBox.left, top: seqBaseline.top, height: seqBaseline.height };
+        }
+
+        for (const item of items) {
+            if (item.start < offset && offset < item.end) {
+                if (item.info.children.length || item.info.mhchem) {
+                    return resolveCompoundCaret(item.info, offset, tex, entries, seqBaseline);
+                }
+                if (item.info._slotEl && item.info._entryEnd <= item.info._entryStart) {
+                    return { left: item.box.left, top: item.box.top, height: item.box.height };
+                }
+                const ratio = (offset - item.start) / Math.max(1, item.end - item.start);
+                return {
+                    left: item.box.left + ratio * (item.box.width || 0),
+                    top: item.box.top,
+                    height: item.box.height
+                };
+            }
+        }
+
+        let prev = null;
+        let next = null;
+        for (const item of items) {
+            if (item.end <= offset) prev = item;
+            else if (!next && item.start >= offset) next = item;
+        }
+        const pickVertical = (item) => {
+            if (!item || isCompoundKatexType(item.info.node.type)) return seqBaseline;
+            return { top: item.box.top, height: item.box.height };
+        };
+        if (!prev && next) {
+            const v = pickVertical(next);
+            return { left: next.box.left, top: v.top, height: v.height };
+        }
+        if (prev && !next) {
+            const v = pickVertical(prev);
+            return { left: prev.box.right, top: v.top, height: v.height };
+        }
+        if (prev && next) {
+            const span = Math.max(1, next.start - prev.end);
+            const t = Math.max(0, Math.min(1, (offset - prev.end) / span));
+            const left = prev.box.right + t * Math.max(0, next.box.left - prev.box.right);
+            const v = pickVertical(t <= 0.5 ? prev : next);
+            return { left, top: v.top, height: v.height };
+        }
+        return { left: fallbackBox.left, top: seqBaseline.top, height: seqBaseline.height };
+    }
+
+    /** Compute viewport-space `{ left, top, height }` for the cursor inside a rendered `#...-block` formula. */
+    function formulaCursorRect(blockEl, source, cursorOffset) {
+        if (!blockEl || typeof source !== 'string') return null;
+        const block = findMathBlockAtCursor(source, cursorOffset);
+        if (!block) return null;
+        const localOffset = Math.max(0, Math.min(block.raw.length, cursorOffset - block.start));
+        const inner = block.raw.slice(block.openLen, block.raw.length - block.closeLen);
+        const innerOffset = Math.max(0, Math.min(inner.length, localOffset - block.openLen));
+
+        const katexErrorEl = blockEl.classList?.contains('katex-error') ? blockEl : blockEl.querySelector('.katex-error');
+        const katexNode = blockEl.classList?.contains('katex') ? blockEl : blockEl.querySelector('.katex');
+
+        if (!katexNode && !katexErrorEl) {
+            return caretAtRangeOffset(blockEl, localOffset, block.raw.length, blockEl.getBoundingClientRect());
+        }
+        if (katexErrorEl) {
+            return caretAtRangeOffset(katexErrorEl, innerOffset, inner.length, katexErrorEl.getBoundingClientRect());
+        }
+
+        const katexHtml = katexNode.querySelector('.katex-html');
+        const fallbackBox = baselineRectForContainer(katexHtml || katexNode, block.displayMode, blockEl);
+        if (!katexHtml || !inner.trim() || typeof katex === 'undefined' || typeof katex.__parse !== 'function') {
+            return fallbackBox;
+        }
+
+        try {
+            const entries = [];
+            const ast = katex.__parse(inner, { displayMode: block.displayMode, throwOnError: false });
+            const mhSpans = findKatexMhchemSpans(inner);
+            const infos = ast.map(n => buildKatexAstInfo(n, inner.length, false, false)).filter(Boolean);
+            assignKatexSeqSpans(infos, 0, inner.length, inner, mhSpans);
+            const bases = Array.from(katexHtml.children || []).filter(c => c.classList.contains('base'));
+            alignKatexSequence(infos, bases, entries, inner, true);
+            if (!entries.length && infos.length === 0) {
+                const emptySlot = findEmptySlotElement([katexHtml]);
+                if (emptySlot) return emptySlotCaretRect(emptySlot);
+            }
+            const rect = resolveCaretInSequence(infos, innerOffset, inner, entries, fallbackBox);
+            return rect || fallbackBox;
+        } catch {
+            return fallbackBox;
+        }
+    }
+
     window.considerKatexFormulaPoints = considerKatexFormulaPoints;
     window.textAnnotationOffsetAtPoint = textAnnotationOffsetAtPoint;
+    window.formulaCursorRect = formulaCursorRect;
 })();

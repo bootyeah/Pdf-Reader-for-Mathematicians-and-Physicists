@@ -386,8 +386,8 @@
         .latex-preview-body.is-empty { color: #94a3b8; font-size: 14px; }
         .latex-preview-body img { max-width: 100% !important; height: auto !important; }
         .latex-preview-body .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
-        .latex-preview-cursor { position: absolute; pointer-events: none; }
-        .latex-preview-cursor[hidden] { display: none; }
+        .latex-preview-cursor, .latex-preview-inner-cursor { position: absolute; pointer-events: none; }
+        .latex-preview-cursor[hidden], .latex-preview-inner-cursor[hidden] { display: none; }
         body.eye-protection-mode aside.latex-live-preview {
             background-color: #FCF9F3 !important;
             border-color: rgba(161, 98, 7, 0.24) !important;

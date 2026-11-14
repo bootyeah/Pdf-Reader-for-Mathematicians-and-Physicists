@@ -8,6 +8,7 @@
 
 - `python tests/test_latex_manager.py`：临时配置副本验证解析、保存、备份恢复、保留快捷键、配置冲突、输入校验与本机接口访问控制。
 - `node tests/reader-latex-preview.cjs`：真实 Edge 验证高亮附注、文本块、导图的旁侧预览、红色光标与公式红框、选区移动和滚动跟随、速录、焦点、保存取消、撤销重做、TikZ 缓存及迟到结果、窄视口定位。
+- `node tests/reader-latex-inner-cursor.cjs`：真实 Edge 验证文本批注正文预览与旁侧 LaTeX 实时预览在公式内部的精确红线光标位置（上下标、分式、根式、矩阵、`\text{}`、mhchem、空公式/未闭合括号/未知命令等输入态、横向滚动跟随、缩放适配及退出清理），同时保留外层公式虚线红框。
 - `node tests/reader-latex-manager.cjs`：真实管理页面验证仅保留 TikZ 宏包、库与绘图环境，增删配置、保存刷新、恢复、冲突提示及退出；使用实际保存的配置副本验证阅读器图形导言区。`READER_TEST_ARTIFACTS=1` 可保存截图。以上测试不修改正式配置、不读取用户 PDF、不调用模型。
 
 ## 思维导图 TikZ 绘图
