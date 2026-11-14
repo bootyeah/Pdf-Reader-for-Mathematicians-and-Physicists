@@ -16,8 +16,6 @@ import socket
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
 
 from PIL import Image, ImageDraw, ImageOps
 
@@ -25,6 +23,7 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if os.path.dirname(APP_DIR) not in sys.path:
     sys.path.insert(0, os.path.dirname(APP_DIR))
 import api_settings
+from tex import latex_ocr as _tex
 CONFIG_PATH = os.path.join(APP_DIR, "config.json")
 LOG_PATH = os.path.join(APP_DIR, "airtex.log")
 
@@ -62,19 +61,7 @@ DEFAULT_CONFIG = {
     "host": "0.0.0.0",
     "port": 8765,
     "token": "",              # 非空时手机端需要 ?t=<token> 才能连接
-    # ---- 电脑浮窗 ----
-    "window_pos": None,       # [x, y]；null = 自动（主屏右上角）
-    "window_width": 560,      # 目标显示宽度（像素）
-    "window_alpha": 0.88,     # 半透明度：1 = 不透明
-    "topmost": True,
     "input_mode": MODE_PHONE,  # 输入模式：phone=手机手写；pc=电脑鼠标手写
-                               # 两套画布完全独立，切换模式不会互相搬内容
-    "canvas_view": "fill",    # 手机手写的取景：fill=填满窗口（=送 AI 的那块区域）；
-                              #                board=整块画板（与手机画面一一对应）
-                              # 注意：鼠标手写固定按 1:1 画板显示，与这一项无关
-    "pc_pen_width": 4,        # 鼠标手写的笔粗（画板文档坐标单位）
-    "auto_copy": True,        # 识别完成后自动复制到剪贴板
-    "show_qr_on_start": False,  # 启动时是否显示扫码浮窗（默认只打日志）
     # ---- 识别行为 ----
     "auto_recognize": False,  # 停笔 N 毫秒后自动识别（默认关闭，手动点「识别」）
     "auto_recognize_delay": 1800,
@@ -413,149 +400,24 @@ def rasterize(doc, target_w=1500, margin=28, min_side=64, crop=True):
     return img.crop((left, top, right, bottom))
 
 
-def prepare_image(cfg, img):
-    """PIL 图片转 base64 PNG 字符串；最长边超过 max_side 时先等比缩小。"""
-    max_side = int(cfg.get("max_side", 4096) or 4096)
-    w, h = img.size
-    if max(w, h) > max_side:
-        s = max_side / float(max(w, h))
-        img = img.resize((max(1, int(w * s)), max(1, int(h * s))), Image.LANCZOS)
-    buf = io.BytesIO()
-    img.convert("RGB").save(buf, format="PNG")
-    return base64.b64encode(buf.getvalue()).decode("ascii")
-
-
-# --------------------------------------------------------------------------
-# 视觉模型调用（沿用 tex/latex_ocr.py 的实现）
-# --------------------------------------------------------------------------
-
-class ApiError(RuntimeError):
-    """带 HTTP 状态码与业务错误码的接口异常，便于判断是否该降级。"""
-
-    def __init__(self, message, http_status=0, code=""):
-        super().__init__(message)
-        self.http_status = http_status
-        self.code = code
+prepare_image = _tex.prepare_image
+ApiError = _tex.ApiError
+_is_overload = _tex._is_overload
+clean_code = _tex.clean_code
+normalize_delimiters = _tex.normalize_delimiters
+latex_inner = _tex.latex_inner
+normalize_paragraph = _tex.normalize_paragraph
+is_empty_paragraph = _tex.is_empty_paragraph
 
 
 def _post_chat(cfg, img_b64, model, prompt, is_fallback=False):
-    url = api_settings.completion_url(str(cfg.get("base_url", "")))
-    payload = {
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url",
-                     "image_url": {"url": "data:image/png;base64," + img_b64}},
-                ],
-            }
-        ],
-        "temperature": cfg.get("temperature", 0.2),
-        # GLM-4.6V 系列支持思考模式，识图不需要推理链：显式关闭，
-        # 避免推理内容混进 LaTeX 结果，同时减少等待时间。
-        "thinking": {"type": "disabled"},
-    }
-    api_settings.apply_parameters(payload, cfg, model=model, allow_fallback=is_fallback)
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + str(cfg.get("api_key", "")).strip(),
-        },
-    )
-    # Shared transport supports direct, system and explicitly configured proxies.
-    try:
-        with api_settings.open_request(req, cfg) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = ""
-        code = ""
-        try:
-            body = json.loads(exc.read().decode("utf-8"))
-            detail = body.get("error", {}).get("message", "") or str(body)
-            code = str(body.get("error", {}).get("code", ""))
-        except Exception:
-            pass
-        detail = api_settings.redact(detail or exc.reason, cfg)
-        raise ApiError(f"HTTP {exc.code}: {detail}",
-                       http_status=exc.code, code=code)
-    except Exception as exc:
-        raise RuntimeError(f"网络请求失败：{exc}")
-    try:
-        content = api_settings.protocol.completion_text(data, allow_empty=True)
-        return content.strip(), data.get("model", "")
-    except ValueError as exc:
-        raise RuntimeError(str(exc)) from exc
-
-
-def _is_overload(exc):
-    """暂时限流或服务故障可重试一次；参数、鉴权、额度错误不重试。"""
-    return api_settings.protocol.retryable_overload(exc.http_status, exc.code, str(exc))
+    return _tex._post_chat(cfg, img_b64, model, is_fallback=is_fallback, prompt=prompt)
 
 
 def call_api(cfg, img_b64, mode=MODE_PHONE):
     """调用 OpenAI 兼容的 chat/completions 视觉接口，返回 (文本, 实际模型名)。"""
     prompt = build_prompt(cfg, mode)
-    model = cfg.get("model", "")
-    try:
-        return _post_chat(cfg, img_b64, model, prompt)
-    except ApiError as exc:
-        fallback = str(cfg.get("fallback_model", "") or "").strip()
-        if not fallback or fallback == model or not _is_overload(exc):
-            raise
-        log(f"主模型 {model} 拥堵（{exc}），自动降级到 {fallback} 重试")
-        time.sleep(0.4)  # 官方建议增加重试间隔，避免立即高频重试
-        return _post_chat(cfg, img_b64, fallback, prompt, is_fallback=True)
-
-
-# --------------------------------------------------------------------------
-# 结果清理（与 tex 工具保持一致）
-# --------------------------------------------------------------------------
-
-def clean_code(text):
-    """去掉模型偶尔附带的 ```latex 代码块围栏等多余内容。"""
-    text = (text or "").strip()
-    if text.startswith("```"):
-        text = text.strip("`").strip()
-        first_line = text.split("\n", 1)[0].strip().lower()
-        if first_line in ("latex", "tex", "katex", "math"):
-            text = text.split("\n", 1)[1].strip()
-    return text
-
-
-def normalize_delimiters(code):
-    """确保公式被 $...$ 或 $$...$$ 包裹。
-
-    - 已是 $...$ / $$...$$ 则原样保留
-    - \\[...\\] 转成 $$...$$，\\(...\\) 转成 $...$
-    - 其它情况（无包裹、包裹不完整）统一包成 $$...$$
-    """
-    code = (code or "").strip()
-    if not code:
-        return code
-    if code.startswith("$$") and code.endswith("$$") and len(code) >= 4:
-        return code
-    if code.startswith("$") and code.endswith("$") and len(code) >= 2:
-        return code
-    if code.startswith("\\[") and code.endswith("\\]"):
-        return "$$" + code[2:-2].strip() + "$$"
-    if code.startswith("\\(") and code.endswith("\\)"):
-        return "$" + code[2:-2].strip() + "$"
-    core = code.strip("$").strip()
-    return "$$" + core + "$$"
-
-
-def latex_inner(code):
-    """取出公式本体（去掉 $ / $$ / \\[ \\] 包裹），供渲染使用。"""
-    c = (code or "").strip()
-    if c.startswith("\\[") and c.endswith("\\]"):
-        return c[2:-2].strip()
-    if c.startswith("\\(") and c.endswith("\\)"):
-        return c[2:-2].strip()
-    return c.strip("$").strip()
+    return _tex.call_api(cfg, img_b64, prompt=prompt, logger=log)
 
 
 def is_empty_result(code):
@@ -623,17 +485,13 @@ def recognize_doc(cfg, doc, mode=MODE_PHONE):
     raw = clean_code(text)
     paragraph = cfg.get('output_kind') == 'paragraph'
     if paragraph:
-        # 正文保留在数学环境外，只规范公式定界符。
-        final = re.sub(r'\\\[(.*?)\\\]', lambda m: '$$' + m[1].strip() + '$$', raw, flags=re.S)
-        final = re.sub(r'\\\((.*?)\\\)', lambda m: '$' + m[1].strip() + '$', final, flags=re.S)
+        final = normalize_paragraph(raw)
+        empty = is_empty_paragraph(raw)
     else:
         final = normalize_delimiters(raw)
+        empty = is_empty_result(raw)
     if final != raw:
         log("分隔符已自动修正：" + raw[:80])
-    if paragraph:
-        empty = not raw or re.fullmatch(r'未检测到(?:内容|公式)[\s。.!！]*', raw) is not None
-    else:
-        empty = is_empty_result(raw)
     if empty:
         return {"ok": True, "empty": True, "latex": "", "model": model,
                 "error": ("未检测到可识别内容，请重试或切换识别模型" if paragraph

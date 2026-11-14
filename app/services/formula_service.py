@@ -119,10 +119,16 @@ def recognize(body, deepseek=None):
             raise ValueError('图片太小，请重新框选')
         text, model = tex.call_api(cfg, tex.prepare_image(cfg, img))
         raw = tex.clean_code(text)
-        empty = not raw.strip('$ \n\t') or core.NOT_FOUND_TEXT in raw
-        return {'ok': True, 'latex': '' if empty else tex.normalize_delimiters(raw),
-                'model': model, 'empty': empty,
-                'error': '未检测到公式，请缩小到公式区域后重试' if empty else ''}
+        paragraph = cfg.get('output_kind') == 'paragraph'
+        if paragraph:
+            empty = tex.is_empty_paragraph(raw)
+            latex = '' if empty else tex.normalize_paragraph(raw)
+            err = '未检测到可识别内容，请重试或切换识别模型' if empty else ''
+        else:
+            empty = not raw.strip('$ \n\t') or core.NOT_FOUND_TEXT in raw
+            latex = '' if empty else tex.normalize_delimiters(raw)
+            err = '未检测到公式，请缩小到公式区域后重试' if empty else ''
+        return {'ok': True, 'latex': latex, 'model': model, 'empty': empty, 'error': err}
     finally:
         _ocr_slots.release()
 
@@ -226,7 +232,7 @@ def _set_engine(entry, engine, deepseek):
     base = _config('handwriting')
     with _lock:
         base.update({k: entry['base'][k] for k in ('host', 'port', 'token', 'input_mode',
-                     'auto_recognize', 'auto_copy', 'require_page_token')})
+                     'auto_recognize', 'require_page_token') if k in entry['base']})
         cfg = _purpose_config(_apply_engine(base, engine, deepseek), entry.get('purpose'))
         entry['server'].app.cfg = entry['server'].cfg = cfg
         entry['engine'] = engine
@@ -254,7 +260,7 @@ def phone(body, deepseek=None):
         if engine != ENGINE_DEEPSEEK and not str(base.get('api_key', '')).strip():
             raise ValueError('请通过 API-Manager.bat 或 airtex/config.json 填写 api_key')
         base.update(host='0.0.0.0', port=0, token=secrets.token_urlsafe(24),
-                    input_mode='phone', auto_recognize=False, auto_copy=False,
+                    input_mode='phone', auto_recognize=False,
                     require_page_token=True)
         purpose = 'whiteboard' if body.get('purpose') == 'whiteboard' else 'formula'
         cfg = _purpose_config(_apply_engine(base, engine, deepseek), purpose)

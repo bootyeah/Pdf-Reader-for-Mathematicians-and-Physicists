@@ -38,11 +38,64 @@ def render_latex_to_svg(tex_code):
     """编译一段完整 LaTeX 文档并转成 SVG。
     返回 (svg_base64, error_text)：成功时 error_text 为空字符串。"""
     import re
-    tex_code = re.sub(
-        r'\(\s*([A-Za-z][A-Za-z0-9_@-]*)\s*(?:\.\s*([A-Za-z0-9_@ -]+?)\s*)?\)',
-        lambda m: f"({m.group(1)}.{m.group(2).strip()})" if m.group(2) else f"({m.group(1)})",
-        tex_code,
+    anchor_re = re.compile(
+        r'(?<![A-Za-z0-9_\\])\(\s*([A-Za-z][A-Za-z0-9_@-]*)(?:'
+        r'\s+\.\s*([A-Za-z0-9_@ -]+?)'
+        r'|\.\s*((?:north|south)(?:\s+(?:east|west))?|(?:mid|base)(?:\s+(?:east|west))?|east|west|center|text)'
+        r')?\s*\)'
     )
+    path_cmd_re = re.compile(r'\\(?:draw|path|fill|filldraw|clip|shade|shadedraw|node|coordinate|pic)\b')
+
+    def _clean_segment(seg):
+        return anchor_re.sub(
+            lambda m: f"({m.group(1)}.{(m.group(2) or m.group(3)).strip()})"
+            if (m.group(2) or m.group(3)) else f"({m.group(1)})",
+            seg,
+        )
+
+    def _walk_tikz(src):
+        out, buf, i, n = [], [], 0, len(src)
+        while i < n:
+            ch = src[i]
+            if ch == '\\' and i + 1 < n and src[i + 1] in '{}$\\':
+                buf.append(src[i:i + 2]); i += 2; continue
+            if ch == '$':
+                out.append(_clean_segment(''.join(buf))); buf.clear()
+                delim = '$$' if src.startswith('$$', i) else '$'
+                j = i + len(delim)
+                while j < n:
+                    if src[j] == '\\' and j + 1 < n:
+                        j += 2; continue
+                    if src.startswith(delim, j):
+                        j += len(delim); break
+                    j += 1
+                out.append(src[i:j]); i = j; continue
+            if ch == '{':
+                prev = ''.join(buf)
+                is_env = bool(re.search(r'\\(?:begin|end)\s*$', prev))
+                depth, j = 1, i + 1
+                while j < n and depth > 0:
+                    if src[j] == '\\' and j + 1 < n:
+                        j += 2; continue
+                    if src[j] == '{':
+                        depth += 1
+                    elif src[j] == '}':
+                        depth -= 1
+                    j += 1
+                inner = src[i + 1:j - 1] if depth == 0 else src[i + 1:j]
+                end_ch = '}' if depth == 0 else ''
+                out.append(_clean_segment(prev)); buf.clear()
+                if not is_env and path_cmd_re.search(inner):
+                    out.append('{' + _walk_tikz(inner) + end_ch)
+                else:
+                    out.append('{' + inner + end_ch)
+                i = j; continue
+            buf.append(ch); i += 1
+        if buf:
+            out.append(_clean_segment(''.join(buf)))
+        return ''.join(out)
+
+    tex_code = _walk_tikz(tex_code)
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tempdir:
         tex_path = os.path.join(tempdir, 'temp.tex')
         svg_path = os.path.join(tempdir, 'temp.svg')

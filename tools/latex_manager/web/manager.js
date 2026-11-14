@@ -1,6 +1,11 @@
 (() => {
     const $ = id => document.getElementById(id);
-    const token = new URLSearchParams(location.hash.slice(1)).get('token') || '';
+    const fragment = new URLSearchParams(location.hash.slice(1));
+    const token = fragment.get('token') || sessionStorage.getItem('latex-manager-token') || '';
+    if (fragment.has('token')) {
+        if (token) sessionStorage.setItem('latex-manager-token', token);
+        history.replaceState(null, '', location.pathname + location.search);
+    }
     const sections = {
         packages: ['TikZ 宏包与导言', '仅用于本机 TeX Live 编译的图形。每项填写一条导言命令，例如 \\usepackage{siunitx} 或 \\usepackage[version=4]{mhchem}。\n需要的宏包应已安装在 TeX Live 中；自行填写了完整文档的图形仍使用其自己的导言区。'],
         tikzLibraries: ['TikZ 库', '每项填写一个库名称，例如 calc、positioning、arrows.meta。编译图形时统一加载。'],
@@ -29,10 +34,12 @@
     function status() {
         if (exiting) {
             document.querySelectorAll('button, input, textarea').forEach(el => { el.disabled = true; });
+            $('dirty-dot')?.classList.remove('dirty');
             $('save-status').textContent = '已退出';
             return;
         }
         const dirty = isDirty();
+        $('dirty-dot')?.classList.toggle('dirty', dirty);
         $('save-status').textContent = busy ? '正在处理…' : dirty ? '有未保存的更改' : snapshot ? '所有更改已保存' : '尚未载入配置';
         $('save-status').classList.toggle('dirty', dirty);
         $('save').disabled = busy || !snapshot || !dirty;
@@ -137,4 +144,12 @@
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (!$('save').disabled) $('save').click(); }
     });
     run(async () => { accept(await api('/api/config')); });
+    $('config-path')?.addEventListener('click', async () => {
+        const text = $('config-path')?.textContent?.trim();
+        if (!text) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            notice('已复制配置文件路径');
+        } catch (_) {}
+    });
 })();

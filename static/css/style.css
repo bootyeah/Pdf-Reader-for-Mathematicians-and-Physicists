@@ -69,10 +69,14 @@
         /* 3. 抹除工具栏里原有的小块纯白/浅灰背景 */
         body.eye-protection-mode header .bg-white,
         body.eye-protection-mode header .bg-gray-50,
-        body.eye-protection-mode aside .bg-white,
+        body.eye-protection-mode aside .bg-white:not(.sidebar-item),
         body.eye-protection-mode aside .bg-gray-50 {
             background-color: transparent !important;
             border-color: #F0EBE1 !important;
+        }
+        body.eye-protection-mode aside .sidebar-item {
+            background-color: #FAF7F2 !important;
+            border-color: #E6E2D6 !important;
         }
 
         /* 4. 按钮悬停时，使用匹配淡色背景的 hover 颜色 */
@@ -1666,6 +1670,38 @@
         body.eye-protection-mode #quick-folder-modal-card .bg-gray-50 {
             background-color: #F4EFE6 !important;
         }
+        body.eye-protection-mode #note-modal,
+        body.eye-protection-mode #note-modal > .bg-white {
+            background-color: #FAF7F2 !important;
+            border-color: #E6E2D6 !important;
+            color: #3F3A33 !important;
+        }
+        body.eye-protection-mode #note-modal #note-header {
+            background-color: #F4EFE6 !important;
+            border-color: #E6E2D6 !important;
+            color: #3F3A33 !important;
+        }
+        body.eye-protection-mode #note-modal #text-size-controls {
+            background-color: #EFE9DC !important;
+            color: #3F3A33 !important;
+        }
+        body.eye-protection-mode #note-modal #note-input {
+            background-color: #F4EFE6 !important;
+            border-color: #E6E2D6 !important;
+            color: #3F3A33 !important;
+        }
+        body.eye-protection-mode #note-modal #note-input:focus {
+            background-color: #FAF7F2 !important;
+            border-color: #8B6F4E !important;
+        }
+        body.eye-protection-mode #note-modal #note-preview {
+            background-color: #FAF7F2 !important;
+            color: #3F3A33 !important;
+        }
+        body.eye-protection-mode #note-modal #note-preview:hover {
+            background-color: #F4EFE6 !important;
+            border-color: #E6E2D6 !important;
+        }
 /* 有界页面窗口：绝对定位允许保留选择/拖拽中的页面，而不创建全书占位节点。 */
 #pages-container.pdf-virtual-pages { display: block; position: relative; padding-bottom: 0; overflow-anchor: none; }
 .pdf-virtual-pages > .page-wrapper { position: absolute; margin: 0; }
@@ -1758,21 +1794,21 @@ body.show-sidecars .pdf-virtual-pages .annotation-layer { width: calc(var(--anno
 #formula-crop-overlay { position: fixed; inset: 0; z-index: 10000; cursor: crosshair; touch-action: none; background: rgba(15,23,42,.15); backdrop-filter: blur(1px); }
 .formula-crop-tip { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); padding: 8px 16px; background: rgba(15, 23, 42, 0.9); backdrop-filter: blur(4px); border-radius: 6px; color: white; font-size: 13px; pointer-events: none; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); }
 .formula-crop-box { position: absolute; border: 2px solid #2563eb; background: rgba(219,234,254,.18); pointer-events: none; border-radius: 2px; }
-body.eye-protection-mode #formula-input-panel { background: #f2f3e9; border-color: #d8ddcb; }
-body.eye-protection-mode .formula-mode-group { background: #e5e8d9; border-color: #d8ddcb; }
-body.eye-protection-mode #formula-input-bar button[data-mode]:hover { background: rgba(255, 255, 255, 0.5); }
-body.eye-protection-mode #formula-input-bar button[data-mode][aria-pressed="true"] { background: #fafbf6; border-color: #d8ddcb; }
-body.eye-protection-mode #formula-input-bar #formula-collapse { background: #fafbf6; border-color: #d8ddcb; }
-body.eye-protection-mode #formula-input-bar #formula-deepseek { background: #fafbf6; border-color: #d8ddcb; }
-body.eye-protection-mode #formula-input-bar #formula-deepseek[aria-pressed="true"] { background: #e9ecf8; border-color: #c7cdd8; }
-body.eye-protection-mode #formula-input-panel button:not(.formula-primary) { background: #fafbf6; border-color: #d8ddcb; }
-body.eye-protection-mode #formula-input-panel button:not(.formula-primary):hover { background: #f0f2e4; }
+body.eye-protection-mode #formula-input-panel { background: #F4EFE6; border-color: #E6E2D6; color: #3F3A33; }
+body.eye-protection-mode .formula-mode-group { background: #EFE9DC; border-color: #E6E2D6; }
+body.eye-protection-mode #formula-input-bar button[data-mode]:hover { background: rgba(250, 247, 242, 0.65); color: #3F3A33; }
+body.eye-protection-mode #formula-input-bar button[data-mode][aria-pressed="true"] { background: #FAF7F2; border-color: #E6E2D6; color: #8B6F4E; }
+body.eye-protection-mode #formula-input-bar #formula-collapse { background: #FAF7F2; border-color: #E6E2D6; color: #3F3A33; }
+body.eye-protection-mode #formula-input-bar #formula-deepseek { background: #FAF7F2; border-color: #E6E2D6; color: #3F3A33; }
+body.eye-protection-mode #formula-input-bar #formula-deepseek[aria-pressed="true"] { background: #EFE9DC; border-color: #8B6F4E; color: #8B6F4E; }
+body.eye-protection-mode #formula-input-panel button:not(.formula-primary) { background: #FAF7F2; border-color: #E6E2D6; color: #3F3A33; }
+body.eye-protection-mode #formula-input-panel button:not(.formula-primary):hover { background: #EFE9DC; }
 body.eye-protection-mode #formula-pad,
 body.eye-protection-mode #formula-phone-pad,
 body.eye-protection-mode #formula-image-drop,
 body.eye-protection-mode #formula-preview,
 body.eye-protection-mode #formula-phone-pairing,
-body.eye-protection-mode #formula-code { background: #fafbf6; border-color: #d8ddcb; }
+body.eye-protection-mode #formula-code { background: #FAF7F2; border-color: #E6E2D6; color: #3F3A33; }
 
 /* 独立手写草稿窗口 (现代化极简视觉设计，与整体阅读器美术风格统一) */
 #handwriting-whiteboard {
@@ -3288,17 +3324,17 @@ body.eye-protection-mode #handwriting-whiteboard.wb-pure-mode #whiteboard-pure:h
 /* 护眼模式配色适配 */
 body.eye-protection-mode #companion-pdf-panel .window-collapse-dir-btn,
 body.eye-protection-mode #handwriting-whiteboard .window-collapse-dir-btn {
-    border-color: #bccab5;
-    background: #dce5d5;
+    border-color: #E6E2D6;
+    background: #EFE9DC;
 }
 body.eye-protection-mode #companion-pdf-panel .window-collapse-dir-part,
 body.eye-protection-mode #handwriting-whiteboard .window-collapse-dir-part {
-    color: #4b5d4e;
+    color: #3F3A33;
 }
 body.eye-protection-mode #companion-pdf-panel .window-collapse-dir-part.is-active,
 body.eye-protection-mode #handwriting-whiteboard .window-collapse-dir-part.is-active {
-    background: #3d6b47;
-    color: #f6faf2;
+    background: #8B6F4E;
+    color: #FAF7F2;
 }
 
 /* 内容主体 */

@@ -354,7 +354,7 @@
                     name: state.fileName,
                     fingerprint: state.fingerprint || '',
                     localPath: state.localFilePath || '',
-                    annotations: JSON.parse(JSON.stringify(state.annotations)),
+                    annotations: JSON.parse(JSON.stringify(typeof serializeAnnotationsClean === 'function' ? serializeAnnotationsClean(state.annotations) : state.annotations)),
                 };
             }
 
@@ -405,8 +405,11 @@
                 }
             }
             // 串行闸门：保存时连点两次 / 顺手改一笔，都不会把两次上传交错在一起
-            async function upload() {
+            async function upload(opts = {}) {
                 if (!state.fileName || state.annotationsLoading) return;
+                if (!opts?.confirmed && remoteHint !== null && info.phase === 'remote') {
+                    if (!window.confirm('云端版本较新，继续上传将覆盖云端批注，是否继续？')) return;
+                }
                 const payload = currentPayload(), loadToken = state.loadToken;
                 if (!(await ensureConfigured())) return;
                 try {
@@ -838,8 +841,13 @@
                 if (!(await ensureConfigured())) return;
                 // 没开文档时 upload() 会直接返回，状态就会永远停在「正在同步」——这里先拦下来
                 if (!state.fileName) { setPhase('idle', '', '先打开一本书，才有批注可以同步到云端'); return; }
+                let confirmed = false;
+                if (remoteHint !== null && info.phase === 'remote') {
+                    if (!window.confirm('云端版本较新，继续上传将覆盖云端批注，是否继续？')) return;
+                    confirmed = true;
+                }
                 setPhase('syncing', '正在同步到云端…');
-                await upload();
+                await upload({ confirmed });
             });
             // ↻ 顺便重读一次 cloud_config.json：改完配置不必刷新整个页面
             dom.panelRefresh?.addEventListener('click', async () => {

@@ -7,6 +7,7 @@ from pathlib import Path
 import secrets
 import sys
 import threading
+import time
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -40,17 +41,36 @@ class ManagerHandler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
-    def send_data(self, status, data, mime='application/json; charset=utf-8'):
+    def send_data(self, status, data, mime='application/json; charset=utf-8', close_conn=False):
         raw = data if isinstance(data, bytes) else json.dumps(data, ensure_ascii=False).encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', mime)
         self.send_header('Content-Length', str(len(raw)))
+        if close_conn:
+            self.send_header('Connection', 'close')
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'no-referrer')
         self.send_header('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'")
         self.end_headers()
         self.wfile.write(raw)
+        try:
+            self.wfile.flush()
+        except OSError:
+            pass
+
+    def _drain_bounded(self, size, limit=65536):
+        remaining = min(max(size, 0), limit)
+        try:
+            while remaining > 0:
+                chunk = self.rfile.read(min(16384, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except OSError:
+            pass
+        if size > limit:
+            self.close_connection = True
 
     def authorized(self, api=False):
         if (self.headers.get('Host') != f'127.0.0.1:{self.server.server_port}' or
@@ -92,12 +112,20 @@ class ManagerHandler(BaseHTTPRequestHandler):
             self.send_data(404, {'error': '页面不存在。'})
 
     def do_POST(self):
-        if not self.authorized(api=True):
-            return
         try:
             size = int(self.headers.get('Content-Length', '0'))
+        except (ValueError, TypeError):
+            size = 0
+        if not self.authorized(api=True):
+            if size > 0:
+                self._drain_bounded(size)
+            return
+        try:
             if not 0 < size <= MAX_BODY or self.headers.get_content_type() != 'application/json':
-                raise storage.StorageError('请求必须是小于 512 KB 的 JSON。')
+                if size > 0:
+                    self._drain_bounded(size)
+                self.send_data(400, {'error': '请求必须是小于 512 KB 的 JSON。'}, close_conn=(size > MAX_BODY))
+                return
             body = json.loads(self.rfile.read(size))
             if not isinstance(body, dict):
                 raise storage.StorageError('无效的请求。')
@@ -106,8 +134,11 @@ class ManagerHandler(BaseHTTPRequestHandler):
             elif self.path == '/api/restore':
                 self.send_data(200, storage.restore(body.get('revision')))
             elif self.path == '/api/quit':
-                self.send_data(200, {'ok': True})
-                threading.Thread(target=self.server.shutdown, daemon=True).start()
+                self.send_data(200, {'ok': True}, close_conn=True)
+                def _shutdown_delayed(srv):
+                    time.sleep(0.15)
+                    srv.shutdown()
+                threading.Thread(target=_shutdown_delayed, args=(self.server,), daemon=True).start()
             else:
                 self.send_data(404, {'error': '接口不存在。'})
         except (ValueError, TypeError, RecursionError) as exc:

@@ -260,7 +260,7 @@
 
                     <div class="relative group" id="save-dropdown-wrapper">
                         <button id="save-status-btn" class="btn-saved border w-10 h-10 rounded-lg flex items-center justify-center transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed relative z-10" title="保存">
-                            <i id="save-icon" class="ph ph-floppy-disk text-[22px] group-hover:scale-110 transition-transform"></i>
+                            <i id="save-icon" class="ph ph-floppy-disk text-[22px] group-hover:scale-110 transition-transform"></i> 
                         </button>
                         <!-- 下拉菜单：极简纯图标 -->
                         <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-white border border-gray-200 shadow-xl rounded-xl p-1.5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 flex justify-center w-auto">
@@ -598,18 +598,21 @@
     <script src="./js/annotate.js"></script>        <!-- ⑤ 批注：绘图工具/工具栏/配色/缩放滑块/HUD/页码雷达 -->
     <script src="./js/window-layers.js"></script>     <!-- 悬浮小窗层级：点击哪个小窗就置于最上层 -->
     <script src="./js/latex-preview.js"></script>
+    <script src="./js/quantum-snippet-engine.js"></script>
+    <script src="./js/katex-cursor-mapper.js"></script>
     <script src="./js/note-sidebar.js"></script>    <!-- ⑥ 笔记弹窗 + 幻影光标 + 侧边栏虚拟列表 -->
     <script src="./js/phone-handwriting.js"></script>
     <script src="./js/ai-model-labels.js"></script>
     <script src="./js/formula-input.js"></script>   <!-- 编辑框内的手写、手机和图片公式输入 -->
     <script src="./js/handwriting-whiteboard.js"></script>
     <script src="./js/cloud-sync.js"></script>      <!-- ⑦ 云端批注库：保存时把批注 JSON 覆盖同步到 GitHub / Gitee 私有仓库（只传批注，不传 PDF） -->
+    <script src="./js/mindmap-router.js"></script>
     <script src="./js/mindmap.js"></script>         <!-- ⑦ 逻辑思维导图：左侧纵向结构树与页面定位 -->
     <script src="./js/extras.js"></script>          <!-- ⑦ 附加：导出/无界草稿本/抓手工具/素材库/跳转 -->
     <script src="./js/dictionary.js"></script>      <!-- ⑧ 词典：框选翻译悬浮气泡 + 单词/短语/句子（词或短语由模型判定，DeepSeek V4.1 Flash） -->
     <script src="./js/video.js"></script>          <!-- ⑨ 视频播放：悬浮播放器 (F9 唤出) -->
     <script src="./js/chat.js"></script>           <!-- ⑩ DeepSeek 对话：工具栏鲸鱼按钮 + 可拖动悬浮对话框（流式输出 / 粘贴图片 / Markdown + LaTeX） -->
     <script src="./js/companion-pdf.js"></script>  <!-- ⑪ 小窗对照阅读：阅读器内画中画 PDF 小窗 -->
-    <script src="./js/boot.js"></script>            <!-- ⑪ 启动：批注导入导出 + 全局护盾（核心 init 在 extras.js 结尾点火） -->
+    <script src="./js/boot.js"></script>            <!-- ⑪ 启动：批注导入导出 + 全局护盾（核心 init 在本文件结尾点火） -->
 </body>
 </html>

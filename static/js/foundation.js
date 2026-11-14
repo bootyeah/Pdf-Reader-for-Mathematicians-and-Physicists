@@ -156,8 +156,37 @@
             outlineMap: [],          // 解析后的有序目录地图，用于二分定位。
             currentPhysicalPage: 1,  // 记录当前屏幕中心的物理页
             toolbarCollapsed: false, // 顶部工具栏是否折叠为细条
-            cloudSync: { phase: 'idle', text: '', detail: '' }  // 云端批注库状态镜像（实现见 cloud-sync.js）
+            cloudSync: { phase: 'idle', text: '', detail: '' }, // 云端批注库状态镜像（实现见 cloud-sync.js）
+            isProgrammaticScroll: false,
+            lastRenderedScale: 1.0,
+            pinchCurrentScale: null,
+            activeOutlineUrl: null,
+            draggingMarker: null,
+            activeBubblePageNum: null,
+            isMouseDownOnViewer: false
         };
+
+        // 过滤只在内存渲染期使用的临时 TikZ 位图字段，避免写入撤销栈、本地缓存、PDF 嵌入层或云端。
+        function stripTransientAnnotationFields(anno) {
+            if (!anno || typeof anno !== 'object') return anno;
+            if (!('tikzBase64' in anno) && !('tikzSource' in anno)) return anno;
+            const cleaned = { ...anno };
+            delete cleaned.tikzBase64;
+            delete cleaned.tikzSource;
+            return cleaned;
+        }
+
+        function serializeAnnotationsClean(annotations = state.annotations) {
+            if (!annotations || typeof annotations !== 'object') return {};
+            const cleaned = {};
+            Object.keys(annotations).forEach((key) => {
+                const val = annotations[key];
+                cleaned[key] = Array.isArray(val) ? val.map(stripTransientAnnotationFields) : val;
+            });
+            return cleaned;
+        }
+        window.stripTransientAnnotationFields = stripTransientAnnotationFields;
+        window.serializeAnnotationsClean = serializeAnnotationsClean;
 
         const els = {
             container: document.getElementById('viewer-container'),

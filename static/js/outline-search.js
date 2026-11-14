@@ -185,10 +185,13 @@
             const affectedKeys = affectedPages && [...new Set(affectedPages.map(String))];
             // 页内锚点随撤销快照保存，避免撤销/重做时按新的缩放重新猜测旧终点。
             normalizeArrowAnchors(state.annotations, affectedKeys);
+            const cleanSlice = (val) => (Array.isArray(val) && typeof stripTransientAnnotationFields === 'function')
+                ? val.map(stripTransientAnnotationFields)
+                : val;
             // 1. 只为受影响的页创建撤销快照。
             const beforeState = {};
             (affectedKeys || Object.keys(state.annotations)).forEach(k => {
-                beforeState[k] = JSON.stringify(state.annotations[k]);
+                beforeState[k] = JSON.stringify(cleanSlice(state.annotations[k]));
             });
 
             // 2. 执行工具动作
@@ -198,7 +201,7 @@
             // 3. 执行后：比对状态，提取纯净 Delta (差异包)
             const afterState = {};
             (affectedKeys || Object.keys(state.annotations)).forEach(k => {
-                afterState[k] = JSON.stringify(state.annotations[k]);
+                afterState[k] = JSON.stringify(cleanSlice(state.annotations[k]));
             });
 
             const backward = {};

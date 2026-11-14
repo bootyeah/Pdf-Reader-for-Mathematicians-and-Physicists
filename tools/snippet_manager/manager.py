@@ -74,10 +74,10 @@ class ManagerHandler(BaseHTTPRequestHandler):
     def authorized(self, api=True):
         host = self.headers.get("Host", "")
         if host != f"127.0.0.1:{self.server.server_port}":
-            self.send_data(403, {"error": "仅允许本机访问。"})
+            self.send_data(403, {"error": "仅允许本机同源访问。"})
             return False
         origin = self.headers.get("Origin")
-        if origin and origin != self.server.origin:
+        if (origin is not None and origin != self.server.origin) or self.headers.get("Sec-Fetch-Site") == "cross-site":
             self.send_data(403, {"error": "不允许跨站请求。"})
             return False
         if api and not secrets.compare_digest(self.headers.get("X-Manager-Token", ""), self.server.token):
@@ -142,11 +142,17 @@ class ManagerHandler(BaseHTTPRequestHandler):
                 self.send_data(404, {"error": "接口不存在。"})
             return
 
+        if not self.authorized(api=False):
+            return
+
         # Static assets
         if path == "/":
             self.serve_static(ASSETS / "index.html")
         elif path in ("/manager.js", "/manager.css"):
             self.serve_static(ASSETS / path[1:])
+        elif path == "/static/js/quantum-snippet-engine.js":
+            engine_file = (PROJECT_ROOT / "static" / "js" / "quantum-snippet-engine.js").resolve()
+            self.serve_static(engine_file)
         elif path.startswith("/static/lib/"):
             # Map /static/lib/... to PROJECT_ROOT/static/lib/...
             rel_path = path[len("/static/lib/"):]
@@ -215,13 +221,13 @@ class ManagerHandler(BaseHTTPRequestHandler):
                 self.send_data(200, self.snapshot(saved_doc))
 
             elif self.path == "/api/restore":
-                restored_doc = storage.restore_backup()
+                restored_doc = storage.restore_backup(current_revision=body.get("revision"))
                 self.send_data(200, self.snapshot(restored_doc))
 
             elif self.path == "/api/import":
                 data = body.get("data")
                 mode = body.get("mode", "merge")
-                imported_doc = storage.import_snippets(data, mode=mode)
+                imported_doc = storage.import_snippets(data, mode=mode, current_revision=body.get("revision"))
                 self.send_data(200, self.snapshot(imported_doc))
 
             else:
@@ -247,7 +253,8 @@ def main():
             port = int(session["port"])
             origin = f"http://127.0.0.1:{port}"
             req = urllib.request.Request(origin + "/api/health", headers={"X-Manager-Token": session["token"]})
-            with urllib.request.urlopen(req, timeout=1.2) as resp:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(req, timeout=1.2) as resp:
                 health = json.loads(resp.read().decode("utf-8"))
             if health.get("app") == "reader-snippet-manager":
                 if not args.no_browser:

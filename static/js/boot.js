@@ -94,31 +94,103 @@
 
             // 🚀 包装进 performAction：支持 Ctrl+Z 完美一键撤销！
             performAction(() => {
+                const cleanAnno = (a) => (typeof stripTransientAnnotationFields === 'function'
+                    ? stripTransientAnnotationFields(a)
+                    : a);
+                const mergeMindMapNodes = (targetList, srcList) => {
+                    if (!Array.isArray(srcList)) return;
+                    const byId = new Map();
+                    targetList.forEach((n, idx) => { if (n && n.id) byId.set(n.id, idx); });
+                    srcList.forEach((srcNode) => {
+                        if (!srcNode || !srcNode.id) return;
+                        const cloned = JSON.parse(JSON.stringify(srcNode));
+                        if (!byId.has(srcNode.id)) {
+                            byId.set(srcNode.id, targetList.length);
+                            targetList.push(cloned);
+                            return;
+                        }
+                        const cur = targetList[byId.get(srcNode.id)];
+                        if (Array.isArray(cloned.children) && cloned.children.length) {
+                            if (!Array.isArray(cur.children)) cur.children = [];
+                            mergeMindMapNodes(cur.children, cloned.children);
+                        }
+                        if (Array.isArray(cloned.branches) && cloned.branches.length) {
+                            if (!Array.isArray(cur.branches)) cur.branches = [];
+                            cloned.branches.forEach((br, bi) => {
+                                if (!Array.isArray(br)) return;
+                                if (!Array.isArray(cur.branches[bi])) cur.branches[bi] = [];
+                                mergeMindMapNodes(cur.branches[bi], br);
+                            });
+                        }
+                        if ((!cur.text || cur.text === '新节点') && cloned.text) cur.text = cloned.text;
+                        if (!cur.note && cloned.note) cur.note = cloned.note;
+                        if (Array.isArray(cloned.mergeTo) && cloned.mergeTo.length) {
+                            const merged = new Set([...(Array.isArray(cur.mergeTo) ? cur.mergeTo : []), ...cloned.mergeTo]);
+                            cur.mergeTo = Array.from(merged);
+                        }
+                    });
+                };
+
                 if (mode === 'merge') {
-                    // 智能合并：遍历导入的每一页
+                    // 智能合并：新增批注追加，同 ID 已修改批注就地更新
                     Object.keys(incoming).forEach(pageNum => {
                         // settings 是「本机阅读状态」（上次读到第几页 / 页码偏移），不是批注，一律不动
                         if (pageNum === 'settings' || !Array.isArray(incoming[pageNum])) return;
                         if (!state.annotations[pageNum]) state.annotations[pageNum] = [];
 
-                        // 根据 ID 去重，防止同一个批注被导入两次
-                        const existingIds = new Set(state.annotations[pageNum].map(a => a.id));
-                        const newAnnos = incoming[pageNum].filter(a => {
-                            if (existingIds.has(a.id)) return false;
-                            existingIds.add(a.id);
-                            return true;
+                        const pageList = state.annotations[pageNum];
+                        const existingById = new Map();
+                        pageList.forEach((item, idx) => {
+                            if (item && item.id != null) existingById.set(item.id, idx);
                         });
 
-                        state.annotations[pageNum].push(...newAnnos);
+                        incoming[pageNum].forEach((rawAnno) => {
+                            if (!rawAnno || typeof rawAnno !== 'object') return;
+                            const cleaned = cleanAnno(rawAnno);
+                            if (cleaned.id != null && existingById.has(cleaned.id)) {
+                                const idx = existingById.get(cleaned.id);
+                                const prevClean = cleanAnno(pageList[idx]);
+                                if (JSON.stringify(prevClean) !== JSON.stringify(cleaned)) {
+                                    pageList[idx] = cleaned;
+                                }
+                            } else {
+                                if (cleaned.id != null) existingById.set(cleaned.id, pageList.length);
+                                pageList.push(cleaned);
+                            }
+                        });
                     });
                     if (incoming.mindmap) {
-                        state.annotations['mindmap'] = incoming.mindmap;
+                        const incMap = JSON.parse(JSON.stringify(incoming.mindmap));
+                        const curMap = state.annotations['mindmap'];
+                        const curHasPages = curMap && Array.isArray(curMap.pages) && curMap.pages.length > 0;
+                        const incHasPages = Array.isArray(incMap.pages) && incMap.pages.length > 0;
+                        if (!curMap || (!curHasPages && !curMap.root && !(curMap.nodes && curMap.nodes.length))) {
+                            state.annotations['mindmap'] = incMap;
+                        } else if (curHasPages && incHasPages) {
+                            const pageById = new Map(curMap.pages.map(p => [p.id, p]));
+                            incMap.pages.forEach(ip => {
+                                if (!ip || !ip.id) return;
+                                if (!pageById.has(ip.id)) {
+                                    curMap.pages.push(ip);
+                                    pageById.set(ip.id, ip);
+                                } else {
+                                    const tp = pageById.get(ip.id);
+                                    if (!Array.isArray(tp.nodes)) tp.nodes = [];
+                                    mergeMindMapNodes(tp.nodes, ip.nodes || []);
+                                    if (tp.root && ip.root) mergeMindMapNodes([tp.root], [ip.root]);
+                                }
+                            });
+                        } else if (Array.isArray(curMap.nodes) && Array.isArray(incMap.nodes)) {
+                            mergeMindMapNodes(curMap.nodes, incMap.nodes);
+                        } else {
+                            state.annotations['mindmap'] = incMap;
+                        }
                     }
                 } else {
                     // 暴力覆盖：批注整表替换，但保留本机的 settings（阅读位置属于本机状态）
                     const localSettings = state.annotations['settings'];
                     const replaced = {};
-                    Object.keys(incoming).forEach(pageNum => { if (pageNum !== 'settings') replaced[pageNum] = incoming[pageNum]; });
+                    Object.keys(incoming).forEach(pageNum => { if (pageNum !== 'settings') replaced[pageNum] = Array.isArray(incoming[pageNum]) ? incoming[pageNum].map(cleanAnno) : incoming[pageNum]; });
                     if (localSettings) replaced['settings'] = localSettings;
                     state.annotations = replaced;
                 }
@@ -143,7 +215,7 @@
                 fingerprint: state.fingerprint,  // 绑定 PDF 指纹防错
                 fileName: state.fileName,        // 记录原文件名
                 timestamp: new Date().toISOString(),
-                annotations: state.annotations   // 核心批注数据
+                annotations: typeof serializeAnnotationsClean === 'function' ? serializeAnnotationsClean(state.annotations) : state.annotations   // 核心批注数据
             };
 
             // 转化为 JSON Blob
@@ -238,3 +310,5 @@
                 if (typeof restoreLastPage === 'function') setTimeout(restoreLastPage, 0);
             }
         });
+
+        init();

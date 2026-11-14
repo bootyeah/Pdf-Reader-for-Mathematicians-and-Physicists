@@ -55,10 +55,19 @@ def json_config_path() -> Path:
 def _atomic_write(path: Path, text_content: str):
     """Write text atomically using a temp file in the same directory."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", dir=str(path.parent), delete=False, encoding="utf-8") as tf:
-        tf.write(text_content)
-        tmp_name = tf.name
-    os.replace(tmp_name, str(path))
+    tmp_name = None
+    try:
+        with tempfile.NamedTemporaryFile("w", dir=str(path.parent), delete=False, encoding="utf-8") as tf:
+            tmp_name = tf.name
+            tf.write(text_content)
+        os.replace(tmp_name, str(path))
+        tmp_name = None
+    finally:
+        if tmp_name and os.path.exists(tmp_name):
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
 
 def _prev_non_space(text: str, index: int) -> str:
     j = index - 1
@@ -228,6 +237,113 @@ def _normalize_regex_flags(flags: object) -> str:
     return "".join(dict.fromkeys(c for c in str(flags or "") if c in "dgimsuvy"))
 
 
+_JS_SIMPLE_ESCAPES = {
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+    "b": "\b",
+    "f": "\f",
+    "v": "\v",
+    "\\": "\\",
+    "'": "'",
+    '"': '"',
+    "/": "/",
+}
+
+
+def _unescape_js_string(inner: str) -> str:
+    """Decode JS string escape sequences without UTF-8 latin1 mojibake."""
+    out = []
+    i = 0
+    n = len(inner)
+    while i < n:
+        ch = inner[i]
+        if ch != "\\" or i + 1 >= n:
+            out.append(ch)
+            i += 1
+            continue
+        esc = inner[i + 1]
+        if esc in _JS_SIMPLE_ESCAPES:
+            out.append(_JS_SIMPLE_ESCAPES[esc])
+            i += 2
+        elif esc in ("\r", "\n"):
+            i += 3 if (esc == "\r" and i + 2 < n and inner[i + 2] == "\n") else 2
+        elif esc == "0" and (i + 2 >= n or not ("0" <= inner[i + 2] <= "9")):
+            out.append("\0")
+            i += 2
+        elif esc == "x" and i + 4 <= n:
+            hx = inner[i + 2:i + 4]
+            try:
+                out.append(chr(int(hx, 16)))
+                i += 4
+            except ValueError:
+                out.append(esc)
+                i += 2
+        elif esc == "u":
+            if i + 2 < n and inner[i + 2] == "{":
+                end_b = inner.find("}", i + 3)
+                if end_b != -1:
+                    try:
+                        out.append(chr(int(inner[i + 3:end_b], 16)))
+                        i = end_b + 1
+                        continue
+                    except ValueError:
+                        pass
+            if i + 6 <= n:
+                hx = inner[i + 2:i + 6]
+                try:
+                    cp = int(hx, 16)
+                    if 0xD800 <= cp <= 0xDBFF and i + 12 <= n and inner[i + 6:i + 8] == "\\u":
+                        try:
+                            low = int(inner[i + 8:i + 12], 16)
+                            if 0xDC00 <= low <= 0xDFFF:
+                                cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00)
+                                out.append(chr(cp))
+                                i += 12
+                                continue
+                        except ValueError:
+                            pass
+                    out.append(chr(cp))
+                    i += 6
+                    continue
+                except ValueError:
+                    pass
+            out.append(esc)
+            i += 2
+        else:
+            out.append(esc)
+            i += 2
+    return "".join(out)
+
+
+def _extract_js_string_prop(raw: str, key: str) -> str:
+    m = re.search(rf'\b{key}:\s*(?:"((?:\\.|[^"\\])*)"|\'((?:\\.|[^\'\\])*)\')', raw)
+    if not m:
+        return ""
+    val = m.group(1) if m.group(1) is not None else m.group(2)
+    return _unescape_js_string(val)
+
+
+def _escape_regex_slashes(pattern: str) -> str:
+    """Escape unescaped forward slashes so the pattern is valid inside /.../flags."""
+    out = []
+    bs = 0
+    for ch in pattern:
+        if ch == "\\":
+            bs += 1
+            out.append(ch)
+        elif ch == "/":
+            if bs % 2 == 0:
+                out.append("\\/")
+            else:
+                out.append(ch)
+            bs = 0
+        else:
+            bs = 0
+            out.append(ch)
+    return "".join(out)
+
+
 def parse_snippet_object(raw: str, index: int) -> dict:
     trig_m = re.search(r'trigger:\s*(/(?:\\.|[^/\\])+/[a-z]*|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\')', raw)
     if not trig_m:
@@ -248,20 +364,17 @@ def parse_snippet_object(raw: str, index: int) -> dict:
         else:
             trigger_val = raw_trig[1:]
     elif (raw_trig.startswith('"') and raw_trig.endswith('"')) or (raw_trig.startswith("'") and raw_trig.endswith("'")):
-        try:
-            trigger_val = json.loads(f'"{raw_trig[1:-1]}"')
-        except Exception:
-            trigger_val = raw_trig[1:-1].encode().decode('unicode-escape', errors='replace')
+        trigger_val = _unescape_js_string(raw_trig[1:-1])
     else:
         trigger_val = raw_trig
 
-    opt_m = re.search(r'options:\s*(?:"((?:\\.|[^"\\])*)"|\'((?:\\.|[^\'\\])*)\')', raw)
-    options = (opt_m.group(1) if opt_m.group(1) is not None else opt_m.group(2)) if opt_m else ""
+    options = _extract_js_string_prop(raw, "options")
     if "r" in options:
         is_regex = True
+    if not regex_flags:
+        regex_flags = _normalize_regex_flags(_extract_js_string_prop(raw, "regex_flags"))
 
-    desc_m = re.search(r'description:\s*(?:"((?:\\.|[^"\\])*)"|\'((?:\\.|[^\'\\])*)\')', raw)
-    description = (desc_m.group(1) if desc_m.group(1) is not None else desc_m.group(2)) if desc_m else ""
+    description = _extract_js_string_prop(raw, "description")
 
     prio_m = re.search(r'priority:\s*(-?\d+)', raw)
     priority = int(prio_m.group(1)) if prio_m else 0
@@ -306,10 +419,7 @@ def parse_snippet_object(raw: str, index: int) -> dict:
             rep_m = re.search(r'replacement:\s*(?:"((?:\\.|[^"\\])*)"|\'((?:\\.|[^\'\\])*)\')', raw)
             if rep_m:
                 raw_rep = rep_m.group(1) if rep_m.group(1) is not None else rep_m.group(2)
-                try:
-                    replacement = json.loads(f'"{raw_rep}"')
-                except Exception:
-                    replacement = raw_rep
+                replacement = _unescape_js_string(raw_rep)
             else:
                 replacement = ""
     else:
@@ -342,8 +452,10 @@ def format_snippet_to_js(item: dict) -> str:
     is_regex = item.get("is_regex", False) or "r" in item.get("options", "")
     regex_flags = _normalize_regex_flags(item.get("regex_flags", ""))
     has_template_var = "${" in trig
-    if is_regex and trig and not has_template_var and not trig.startswith("/") and "/" not in trig:
-        parts.append(f"trigger: /{trig}/{regex_flags}")
+    used_regex_literal = False
+    if is_regex and trig and not has_template_var and not trig.startswith("/"):
+        parts.append(f"trigger: /{_escape_regex_slashes(trig)}/{regex_flags}")
+        used_regex_literal = True
     else:
         parts.append(f"trigger: {json.dumps(trig, ensure_ascii=False)}")
 
@@ -356,11 +468,15 @@ def format_snippet_to_js(item: dict) -> str:
     # 3. Options
     parts.append(f"options: {json.dumps(item.get('options', ''), ensure_ascii=False)}")
 
-    # 4. Description
+    # 4. Preserve regex_flags if regex fell back to a string trigger (e.g., template vars or leading /)
+    if is_regex and regex_flags and not used_regex_literal:
+        parts.append(f"regex_flags: {json.dumps(regex_flags, ensure_ascii=False)}")
+
+    # 5. Description
     if item.get("description"):
         parts.append(f"description: {json.dumps(item['description'], ensure_ascii=False)}")
 
-    # 5. Priority
+    # 6. Priority
     if item.get("priority", 0) != 0:
         parts.append(f"priority: {item['priority']}")
 
@@ -498,7 +614,7 @@ def save_data(snippets: list[dict], current_revision: str | None = None) -> dict
 
         return new_doc
 
-def restore_backup() -> dict:
+def restore_backup(current_revision: str | None = None) -> dict:
     """Restore from previous backup if available."""
     with _LOCK:
         json_path = json_config_path()
@@ -509,9 +625,9 @@ def restore_backup() -> dict:
         raw = backup_json_path.read_text(encoding="utf-8")
         backup_doc = json.loads(raw)
         snippets = backup_doc.get("snippets", [])
-        return save_data(snippets)
+        return save_data(snippets, current_revision=current_revision)
 
-def import_snippets(data: list | dict, mode: str = "merge") -> dict:
+def import_snippets(data: list | dict, mode: str = "merge", current_revision: str | None = None) -> dict:
     """Import snippets from external JSON/Obsidian format.
     mode: 'merge' (append new/update) or 'replace' (overwrite all)"""
     with _LOCK:
@@ -567,4 +683,4 @@ def import_snippets(data: list | dict, mode: str = "merge") -> dict:
                     final_list.append(item)
                     existing_map[key] = len(final_list) - 1
 
-        return save_data(final_list)
+        return save_data(final_list, current_revision=current_revision)

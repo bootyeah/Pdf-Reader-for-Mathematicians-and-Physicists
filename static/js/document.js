@@ -87,7 +87,8 @@
 
         function initHistory() {
             // 初始状态存入唯一的全量快照，后续全部采用增量 Delta
-            state.history = [{ type: 'FULL', data: JSON.stringify(state.annotations) }];
+            const cleanSnapshot = typeof serializeAnnotationsClean === 'function' ? serializeAnnotationsClean(state.annotations) : state.annotations;
+            state.history = [{ type: 'FULL', data: JSON.stringify(cleanSnapshot) }];
             state.historyIndex = 0;
         }
 
@@ -276,17 +277,20 @@
 
             // 3. 数据合并与状态初始化
             // 保持内嵌优先、本地兜底，并保留恢复期间的新编辑及对应的撤销增量。
-            state.annotationBase = JSON.stringify(embeddedAnnos);
-            let restored = Object.keys(embeddedAnnos).length > 0 ? embeddedAnnos : localAnnos;
+            const cleanAnnosMap = (obj) => (typeof serializeAnnotationsClean === 'function' ? serializeAnnotationsClean(obj) : obj);
+            const cleanEmbedded = cleanAnnosMap(embeddedAnnos);
+            const cleanLocal = cleanAnnosMap(localAnnos);
+            state.annotationBase = JSON.stringify(cleanEmbedded);
+            let restored = Object.keys(cleanEmbedded).length > 0 ? cleanEmbedded : cleanLocal;
             if (localDraft?.unsaved && typeof localDraft.base === 'string') {
                 try {
                     // PDF 在另一窗口更新过时，保留外部新增内容，并重新应用本机的增删改。
                     restored = JSON.parse(state.annotationBase);
-                    applyAnnotationChanges(restored, JSON.parse(localDraft.base), localAnnos);
+                    applyAnnotationChanges(restored, cleanAnnosMap(JSON.parse(localDraft.base)), cleanLocal);
                     updateSaveStatus(true);
                 } catch (error) { console.warn('本地草稿恢复失败:', error); }
             }
-            restoreAnnotationsPreservingEdits(restored);
+            restoreAnnotationsPreservingEdits(cleanAnnosMap(restored));
             updateCrossPageArrows();
             state.annotationsLoading = false;
 
@@ -372,7 +376,7 @@
             const key = `pdf_annos_${state.fingerprint}`;
             // 捕获独立快照；同一文档串行写入，避免迟到的旧写入回滚新批注。
             // 元信息只进入 IndexedDB，导出和 PDF 内嵌仍沿用原有格式。
-            const snapshot = JSON.parse(JSON.stringify(state.annotations));
+            const snapshot = JSON.parse(JSON.stringify(typeof serializeAnnotationsClean === 'function' ? serializeAnnotationsClean(state.annotations) : state.annotations));
             snapshot.__readerLocalState = { unsaved: state.unsavedChanges, base: state.annotationBase };
             let entry = annotationStorageWrites.get(key);
             if (entry) { entry.pending = snapshot; return entry.promise; }

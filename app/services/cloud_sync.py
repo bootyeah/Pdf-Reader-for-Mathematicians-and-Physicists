@@ -352,7 +352,38 @@ def _cloud_entry_meta(item):
     }
 
 
-def _cloud_hydrate_entry(cfg, entry):
+def _cloud_cache_merge_hydrated(cfg, hydrated_items):
+    """把补全后的条元数据回写到 _CLOUD_LIST_CACHE，避免后续列表重复拉取。"""
+    updates = {
+        h['key']: h for h in hydrated_items
+        if isinstance(h, dict) and h.get('readable') and h.get('key')
+    }
+    if not updates:
+        return
+    repo_prefix = (cfg.get('provider'), cfg.get('owner'), cfg.get('repo'))
+    with _CLOUD_CACHE_LOCK:
+        for cache_key, cached in list(_CLOUD_LIST_CACHE.items()):
+            if not isinstance(cache_key, tuple) or cache_key[:3] != repo_prefix:
+                continue
+            ts, cached_files = cached
+            changed = False
+            next_files = []
+            for item in cached_files:
+                upd = updates.get(item.get('key'))
+                if upd and (not upd.get('sha') or not item.get('sha') or upd['sha'] == item['sha']):
+                    merged = dict(item)
+                    merged.update(upd)
+                    next_files.append(merged)
+                    changed = True
+                else:
+                    next_files.append(item)
+            if changed:
+                timed = sorted([f for f in next_files if f.get('timestamp')], key=lambda f: str(f['timestamp']), reverse=True)
+                untimed = sorted([f for f in next_files if not f.get('timestamp')], key=lambda f: str(f.get('name') or '').lower())
+                _CLOUD_LIST_CACHE[cache_key] = (ts, timed + untimed)
+
+
+def _cloud_hydrate_entry(cfg, entry, write_cache=True):
     """给缺元信息的条目补一次单文件请求。"""
     if not isinstance(entry, dict) or entry.get('readable') or not entry.get('key'):
         return entry
@@ -363,7 +394,7 @@ def _cloud_hydrate_entry(cfg, entry):
     document = (existing or {}).get('json')
     if not isinstance(document, dict):
         return entry
-    return {
+    hydrated = {
         **entry,
         'timestamp': document.get('timestamp'),
         'device': document.get('device'),
@@ -374,6 +405,9 @@ def _cloud_hydrate_entry(cfg, entry):
         'size': entry.get('size') or (existing or {}).get('size'),
         'readable': True,
     }
+    if write_cache:
+        _cloud_cache_merge_hydrated(cfg, [hydrated])
+    return hydrated
 
 
 def _cloud_hydrate_entries(cfg, entries, limit=8, workers=4):
@@ -383,9 +417,14 @@ def _cloud_hydrate_entries(cfg, entries, limit=8, workers=4):
     if not todo:
         return []
     workers = max(1, min(workers, len(todo)))
+    hydrated_list = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        for entry, hydrated in zip(todo, pool.map(lambda item: _cloud_hydrate_entry(cfg, item), todo)):
+        for entry, hydrated in zip(todo, pool.map(lambda item: _cloud_hydrate_entry(cfg, item, write_cache=False), todo)):
             entry.update(hydrated)
+            if hydrated.get('readable'):
+                hydrated_list.append(entry)
+    if hydrated_list:
+        _cloud_cache_merge_hydrated(cfg, hydrated_list)
     return todo
 
 

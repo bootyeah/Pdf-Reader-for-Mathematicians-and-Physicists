@@ -1109,17 +1109,14 @@
 
             candidateDoc = await task.promise;
             if (generation !== loadGeneration) return;
-            // 获取真实几何尺寸；混合横竖页的跳转和整页缩放不能用单页采样猜测。
-            const dimensions = [];
-            for (let start = 1; start <= candidateDoc.numPages; start += 8) {
-                const batch = await Promise.all(Array.from({ length: Math.min(8, candidateDoc.numPages - start + 1) }, async (_, i) => {
-                    const page = await candidateDoc.getPage(start + i);
-                    const vp = page.getViewport({ scale: 1 });
-                    return { width: vp.width, height: vp.height };
-                }));
-                if (generation !== loadGeneration) return;
-                dimensions.push(...batch);
-            }
+            // 启动阶段仅采样第 1 页尺寸搭建占位骨架，其余页面的真实尺寸在渲染时按需懒校准，避免大文档打开时全量 getPage 循环。
+            const firstPage = await candidateDoc.getPage(1);
+            if (generation !== loadGeneration) return;
+            const firstVp = firstPage.getViewport({ scale: 1 });
+            const dimensions = Array.from({ length: candidateDoc.numPages }, () => ({
+                width: firstVp.width,
+                height: firstVp.height
+            }));
 
             // 新文档准备好后才替换旧文档，失败或迟到的加载不会清空当前阅读内容。
             cancelPageWork();
@@ -1263,7 +1260,23 @@
         try {
             const page = await doc.getPage(pageNum);
             if (!isCurrent()) return;
+            const baseVp = page.getViewport({ scale: 1 });
             const viewport = page.getViewport({ scale });
+            const prevDim = pageDimensions[pageNum - 1];
+            if (!prevDim || Math.abs(prevDim.width - baseVp.width) > 0.5 || Math.abs(prevDim.height - baseVp.height) > 0.5) {
+                pageDimensions[pageNum - 1] = { width: baseVp.width, height: baseVp.height };
+                info.wrapper.style.width = Math.round(viewport.width) + 'px';
+                info.wrapper.style.height = Math.round(viewport.height) + 'px';
+                if (pagesContainer && viewportEl) {
+                    const currentMax = parseFloat(pagesContainer.style.width) || 0;
+                    const neededWidth = Math.max(viewportEl.clientWidth - 24, Math.round(viewport.width));
+                    if (neededWidth > currentMax) pagesContainer.style.width = neededWidth + 'px';
+                }
+                if (pageNum === currentPage && (currentScaleMode === 'fit-width' || currentScaleMode === 'fit-page')) {
+                    applyZoom(null, false);
+                    if (Math.abs(effectiveScale - scale) > 0.0001) return;
+                }
+            }
             // 后台画完再交换；旧画布留在屏幕上，缩放时不会被清成白页。
             const canvas = document.createElement('canvas');
             canvas.className = 'cp-page-canvas';
@@ -1483,13 +1496,45 @@
     }
 
     // ---------- 获取当前进入视口的页码 ----------
+    function getLayoutViewportDelta() {
+        const firstInfo = pageWrappers.get(1);
+        if (!firstInfo) return null;
+        return firstInfo.wrapper.getBoundingClientRect().top - firstInfo.wrapper.offsetTop;
+    }
+
+    function findFirstPageBottomAfter(targetY, delta) {
+        let lo = 1;
+        let hi = numPages;
+        let ans = -1;
+        while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            const info = pageWrappers.get(mid);
+            if (!info) break;
+            const bottom = info.wrapper.offsetTop + delta + info.wrapper.offsetHeight;
+            if (bottom >= targetY) {
+                ans = mid;
+                hi = mid - 1;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        return ans;
+    }
+
     function getVisiblePages() {
-        const visible = [];
+        if (!viewportEl || !numPages || !pageWrappers.size || panel?.hidden) return [currentPage];
+        const delta = getLayoutViewportDelta();
+        if (delta === null) return [currentPage];
         const viewRect = viewportEl.getBoundingClientRect();
-        for (const [pageNum, info] of pageWrappers.entries()) {
-            const r = info.wrapper.getBoundingClientRect();
-            if (r.bottom >= viewRect.top - 100 && r.top <= viewRect.bottom + 100) {
-                visible.push(pageNum);
+        const visible = [];
+        const startPage = findFirstPageBottomAfter(viewRect.top - 100, delta);
+        if (startPage !== -1) {
+            for (let p = startPage; p <= numPages; p++) {
+                const info = pageWrappers.get(p);
+                if (!info) break;
+                const top = info.wrapper.offsetTop + delta;
+                if (top > viewRect.bottom + 100) break;
+                visible.push(p);
             }
         }
         return visible.length ? visible : [currentPage];
@@ -1501,17 +1546,13 @@
         if (isNavigating) return;
         if (scrollDebounceTimer) clearTimeout(scrollDebounceTimer);
         scrollDebounceTimer = setTimeout(() => {
-            if (isNavigating) return;
+            if (isNavigating || !viewportEl || !numPages || !pageWrappers.size) return;
+            const delta = getLayoutViewportDelta();
+            if (delta === null) return;
             const viewRect = viewportEl.getBoundingClientRect();
             const centerY = viewRect.top + Math.min(140, viewRect.height * 0.4);
-            let closestPage = currentPage;
-            for (const [pageNum, info] of pageWrappers.entries()) {
-                const r = info.wrapper.getBoundingClientRect();
-                if (r.bottom > centerY) {
-                    closestPage = pageNum;
-                    break;
-                }
-            }
+            const firstAfter = findFirstPageBottomAfter(centerY + 0.001, delta);
+            const closestPage = firstAfter !== -1 ? firstAfter : currentPage;
 
             if (closestPage !== currentPage) {
                 currentPage = closestPage;
@@ -1817,6 +1858,11 @@
         panel.hidden = true;
         isOpen = false;
         panel.classList.remove('cp-focused');
+        for (const pageNum of pageWrappers.keys()) {
+            if (Math.abs(pageNum - currentPage) > 1) {
+                recyclePage(pageNum);
+            }
+        }
         syncOpenButton();
         if (hadFocus) returnFocus?.focus?.({ preventScroll: true });
     }

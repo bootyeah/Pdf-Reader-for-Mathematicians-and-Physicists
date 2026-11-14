@@ -537,9 +537,9 @@
             if (!body) return '';
             // 清理 TikZ 节点括号内的首尾误输入空格，例如 (c6 ) 或 (c6 .north) -> (c6) / (c6.north)，
             // 避免 PGF 把末尾空格当成节点名一部分而报 No shape named `c6 ' is known.
-            body = body.replace(/\(\s*([A-Za-z][A-Za-z0-9_@-]*)\s*(?:\.\s*([A-Za-z0-9_@ -]+?)\s*)?\)/g, function (m, name, anchor) {
-                return anchor ? '(' + name + '.' + anchor.trim() + ')' : '(' + name + ')';
-            });
+            body = (function walkTikz(src) { const anchorRe = /(^|[^A-Za-z0-9_\\])\(\s*([A-Za-z][A-Za-z0-9_@-]*)(?:\s+\.\s*([A-Za-z0-9_@ -]+?)|\.\s*((?:north|south)(?:\s+(?:east|west))?|(?:mid|base)(?:\s+(?:east|west))?|east|west|center|text))?\s*\)/g; const pathCmdRe = /\\(?:draw|path|fill|filldraw|clip|shade|shadedraw|node|coordinate|pic)\b/; const cleanSeg = (seg) => seg.replace(anchorRe, (m, prefix, name, a1, a2) => { const anchor = a1 || a2; return prefix + (anchor ? '(' + name + '.' + anchor.trim() + ')' : '(' + name + ')'); }); const out = []; let buf = ''; let i = 0; const n = src.length; while (i < n) { const ch = src[i]; if (ch === '\\' && i + 1 < n && '{}$\\'.includes(src[i + 1])) { buf += src.slice(i, i + 2); i += 2; continue; } if (ch === '$') { out.push(cleanSeg(buf)); buf = ''; const delim = src.startsWith('$$', i) ? '$$' : '$'; let j = i + delim.length; while (j < n) { if (src[j] === '\\' && j + 1 < n) { j += 2; continue; } if (src.startsWith(delim, j)) { j += delim.length; break; } j++; } out.push(src.slice(i, j)); i = j; continue; } if (ch === '{') { const isEnv = /\\(?:begin|end)\s*$/.test(buf); let depth = 1; let j = i + 1; while (j < n && depth > 0) { if (src[j] === '\\' && j + 1 < n) { j += 2; continue; } if (src[j] === '{') depth++; else if (src[j] === '}') depth--; j++; } const inner = depth === 0 ? src.slice(i + 1, j - 1) : src.slice(i + 1, j); const endCh = depth === 0 ? '}' : ''; out.push(cleanSeg(buf)); buf = ''; out.push(!isEnv && pathCmdRe.test(inner) ? '{' + walkTikz(inner) + endCh : '{' + inner + endCh); i = j; continue; } buf += ch; i++; } if (buf) out.push(cleanSeg(buf)); return out.join(''); })(body);
+
+
             // 已经是完整文档（批注里用户自己写的），原样交给引擎
             if (body.includes('\\documentclass')) return body;
 
@@ -671,7 +671,10 @@
                 });
                 if (!isCurrent()) return;
 
-                if (anno) { anno.tikzBase64 = imgSrc; anno.tikzSource = tikzCode; }
+                if (anno) {
+                    delete anno.tikzBase64;
+                    delete anno.tikzSource;
+                }
 
                 const img = document.createElement('img');
                 img.src = imgSrc;
@@ -756,13 +759,8 @@
                                            .replace(/&nbsp;/g, ' ');
                     const cachedAnno = tikzMatches.length === 1 ? anno : null;
                     const cachedEntry = TIKZ_CACHE.get(tikzCacheKey(buildStandaloneTex(cleanTikz, { extractBody: false })));
-                    let cachedSrc = cachedEntry?.status === 'done' ? cachedEntry.dataUrl : '';
-                    let cachedHeight = cachedEntry?.imgH;
-                    if (cachedAnno && (!anno.tikzSource || anno.tikzSource === cleanTikz) &&
-                        /^data:image\/svg\+xml;base64,[A-Za-z0-9+/=\s]+$/.test(anno.tikzBase64 || '')) {
-                        cachedSrc = anno.tikzBase64;
-                        cachedHeight = anno.imgH || cachedHeight;
-                    }
+                    const cachedSrc = cachedEntry?.status === 'done' ? cachedEntry.dataUrl : '';
+                    const cachedHeight = cachedEntry?.imgH;
                     if (cachedSrc) {
                         const h = cachedHeight ? (cachedHeight / 8) + 'em' : 'auto';
                         // 🌟 压平为一行，彻底消灭渲染图片时的换行空白！

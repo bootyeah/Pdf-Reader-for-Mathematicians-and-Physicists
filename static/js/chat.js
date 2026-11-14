@@ -1193,6 +1193,17 @@
                 } else {
                     const el = messageEl('assistant');
                     msgEntryMap.set(el.wrap, entry);
+                    if (m.reasoning_content && String(m.reasoning_content).trim()) {
+                        const reasoningEl = document.createElement('div');
+                        reasoningEl.className = 'ds-reasoning collapsed';
+                        reasoningEl.innerHTML =
+                            '<div class="ds-reasoning-head"><i class="ph ph-brain"></i><span>思考过程</span>' +
+                            '<i class="ph ph-caret-down ds-reasoning-caret"></i></div>' +
+                            '<div class="ds-reasoning-body"></div>';
+                        reasoningEl.querySelector('.ds-reasoning-body').innerHTML =
+                            markdownToHtml(m.reasoning_content, { tikz: false });
+                        el.bubble.appendChild(reasoningEl);
+                    }
                     const content = document.createElement('div');
                     content.className = 'ds-content';
                     el.bubble.appendChild(content);

@@ -75,7 +75,7 @@
             mirror.remove();
         }
 
-        let timer, frame, lastText, lastCursor, lastPosition, closed = false;
+        let timer, frame = 0, positioning = false, lastText, lastCursor, lastPosition, closed = false;
         function paint() {
             const index = input.selectionStart ?? 0;
             if (closed || (input.value === lastText && index === lastCursor)) return;
@@ -87,6 +87,7 @@
             if (!lastText) body.appendChild(document.createTextNode('输入内容后在此预览'));
             renderLatex(body);
             followCursor = true;
+            if (!positioning) schedulePosition();
         }
         let followCursor = false, lastLayout;
         function syncCursor() {
@@ -111,62 +112,93 @@
             clearTimeout(timer);
             const hasGraphics = LATEX_CONFIG.environments.some(env => input.value.includes(`\\begin{${env}}`));
             timer = setTimeout(paint, hasGraphics ? 300 : 30);
+            schedulePosition();
         }
         function position() {
-            const rect = anchor.getBoundingClientRect();
-            if (!input.isConnected || !rect.width || !rect.height) { close(); return; }
-            const gap = 10, margin = 8;
-            const width = Math.min(320, innerWidth - margin * 2);
-            const height = Math.min(Math.max(rect.height, 180), 400, innerHeight - margin * 2);
-            const sideTop = Math.max(margin, Math.min(rect.top, innerHeight - height - margin));
-            // 优先放在输入框左右两侧；窄视口下左右都放不下时回退到上下空隙，避免遮挡编辑窗本身。
-            const sides = [
-                { left: rect.right + gap, top: sideTop, maxHeight: height },
-                { left: rect.left - width - gap, top: sideTop, maxHeight: height }
-            ];
-            const candidates = sides.filter(p => p.left >= margin && p.left + width <= innerWidth - margin);
-            if (!candidates.length) {
-                const alignedLeft = Math.max(margin, Math.min(rect.left, innerWidth - width - margin));
-                const belowSpace = innerHeight - margin - (rect.bottom + gap);
-                const aboveSpace = (rect.top - gap) - margin;
-                const vertical = [];
-                if (belowSpace >= 80) {
-                    const h = Math.min(height, belowSpace);
-                    vertical.push({ left: alignedLeft, top: rect.bottom + gap, maxHeight: h, space: belowSpace });
+            frame = 0;
+            if (closed) return;
+            positioning = true;
+            try {
+                const rect = anchor.getBoundingClientRect();
+                if (!input.isConnected || !rect.width || !rect.height) { close(); return; }
+                const gap = 10, margin = 8;
+                const width = Math.min(320, innerWidth - margin * 2);
+                const height = Math.min(Math.max(rect.height, 180), 400, innerHeight - margin * 2);
+                const sideTop = Math.max(margin, Math.min(rect.top, innerHeight - height - margin));
+                // 优先放在输入框左右两侧；窄视口下左右都放不下时回退到上下空隙，避免遮挡编辑窗本身。
+                const sides = [
+                    { left: rect.right + gap, top: sideTop, maxHeight: height },
+                    { left: rect.left - width - gap, top: sideTop, maxHeight: height }
+                ];
+                const candidates = sides.filter(p => p.left >= margin && p.left + width <= innerWidth - margin);
+                if (!candidates.length) {
+                    const alignedLeft = Math.max(margin, Math.min(rect.left, innerWidth - width - margin));
+                    const belowSpace = innerHeight - margin - (rect.bottom + gap);
+                    const aboveSpace = (rect.top - gap) - margin;
+                    const vertical = [];
+                    if (belowSpace >= 80) {
+                        const h = Math.min(height, belowSpace);
+                        vertical.push({ left: alignedLeft, top: rect.bottom + gap, maxHeight: h, space: belowSpace });
+                    }
+                    if (aboveSpace >= 80) {
+                        const h = Math.min(height, aboveSpace);
+                        vertical.push({ left: alignedLeft, top: rect.top - gap - h, maxHeight: h, space: aboveSpace });
+                    }
+                    vertical.sort((a, b) => b.space - a.space);
+                    candidates.push(...vertical);
                 }
-                if (aboveSpace >= 80) {
-                    const h = Math.min(height, aboveSpace);
-                    vertical.push({ left: alignedLeft, top: rect.top - gap - h, maxHeight: h, space: aboveSpace });
+                // 两侧都放不下时，贴着空间更大的一侧并夹进视口。
+                const roomRight = innerWidth - rect.right, roomLeft = rect.left;
+                const placement = candidates[0] || {
+                    left: roomRight >= roomLeft ? innerWidth - width - margin : margin, top: sideTop, maxHeight: height
+                };
+                const { left, top, maxHeight } = placement;
+                const nextPosition = [left, top, width, maxHeight].map(Math.round).join(',');
+                if (nextPosition !== lastPosition) {
+                    lastPosition = nextPosition;
+                    Object.assign(panel.style, { left: left + 'px', top: top + 'px', width: width + 'px', height: maxHeight + 'px' });
                 }
-                vertical.sort((a, b) => b.space - a.space);
-                candidates.push(...vertical);
+                // 方向键、鼠标选字、Tab 占位和程序设置选区都可能不触发 input。
+                if (input.value === lastText && (input.selectionStart ?? 0) !== lastCursor) paint();
+                syncCursor();
+            } finally {
+                positioning = false;
             }
-            // 两侧都放不下时，贴着空间更大的一侧并夹进视口。
-            const roomRight = innerWidth - rect.right, roomLeft = rect.left;
-            const placement = candidates[0] || {
-                left: roomRight >= roomLeft ? innerWidth - width - margin : margin, top: sideTop, maxHeight: height
-            };
-            const { left, top, maxHeight } = placement;
-            const nextPosition = [left, top, width, maxHeight].map(Math.round).join(',');
-            if (nextPosition !== lastPosition) {
-                lastPosition = nextPosition;
-                Object.assign(panel.style, { left: left + 'px', top: top + 'px', width: width + 'px', height: maxHeight + 'px' });
-            }
-            // 方向键、鼠标选字、Tab 占位和程序设置选区都可能不触发 input。
-            if (input.value === lastText && (input.selectionStart ?? 0) !== lastCursor) paint();
-            syncCursor();
+        }
+        function schedulePosition() {
+            if (closed || frame) return;
             frame = requestAnimationFrame(position);
         }
+        const onSelectionChange = () => {
+            if (document.activeElement === input) schedulePosition();
+        };
+        const inputSyncEvents = ['keyup', 'mouseup', 'click', 'focus', 'select'];
+        const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(schedulePosition) : null;
+        const mutationObserver = typeof MutationObserver === 'function' ? new MutationObserver(schedulePosition) : null;
         function close() {
             if (closed) return;
             closed = true;
             clearTimeout(timer);
-            cancelAnimationFrame(frame);
+            if (frame) { cancelAnimationFrame(frame); frame = 0; }
             input.removeEventListener('input', update);
+            inputSyncEvents.forEach(ev => input.removeEventListener(ev, schedulePosition));
+            document.removeEventListener('selectionchange', onSelectionChange);
+            window.removeEventListener('resize', schedulePosition);
+            window.removeEventListener('scroll', schedulePosition, true);
+            resizeObserver?.disconnect();
+            mutationObserver?.disconnect();
             panel.remove();
             if (active === close) active = null;
         }
         input.addEventListener('input', update);
+        inputSyncEvents.forEach(ev => input.addEventListener(ev, schedulePosition));
+        document.addEventListener('selectionchange', onSelectionChange);
+        window.addEventListener('resize', schedulePosition);
+        window.addEventListener('scroll', schedulePosition, true);
+        resizeObserver?.observe(anchor);
+        if (input !== anchor) resizeObserver?.observe(input);
+        mutationObserver?.observe(anchor, { attributes: true, attributeFilter: ['style', 'class', 'hidden'] });
+        if (anchor.parentElement) mutationObserver?.observe(anchor.parentElement, { childList: true });
         active = close;
         paint();
         position();

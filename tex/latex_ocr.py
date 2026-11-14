@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -17,6 +18,7 @@ if os.path.dirname(APP_DIR) not in sys.path:
 import api_settings
 CONFIG_PATH = os.path.join(APP_DIR, "config.json")
 LOG_PATH = os.path.join(APP_DIR, "latex_ocr.log")
+NOT_FOUND_TEXT = "未检测到公式"
 
 DEFAULT_CONFIG = {
     "api_key": "",
@@ -26,10 +28,6 @@ DEFAULT_CONFIG = {
     # 降级备用模型：主模型遇到 429 拥堵（如错误码 1305 平台过载）时自动改用它。
     # 留空 = 关闭自动降级。
     "fallback_model": "glm-4v-flash",
-    # 全局热键，支持 ctrl / alt / shift / win + 字母数字或 F1-F12
-    "hotkey": "ctrl+alt+z",
-    "exit_hotkey": "ctrl+alt+x",
-    "pill_pos": None,  # 悬浮球位置 [x, y]；null = 自动（主屏右下角）；拖动后自动记忆
     "prompt": (
         "你是一个顶级的 LaTeX 排版专家。请准确识别图片中的数学公式，并将其转换为 LaTeX 代码。\n"
         "要求：\n"
@@ -78,10 +76,10 @@ def save_config(cfg):
 
 def prepare_image(cfg, img):
     """把 PIL 图片转成接口需要的 base64 PNG 字符串，超长边先等比缩小。"""
-    max_side = int(cfg.get("max_side", 4096))
+    max_side = int(cfg.get("max_side", 4096) or 4096)
     w, h = img.size
     if max(w, h) > max_side:
-        scale = max_side / max(w, h)
+        scale = max_side / float(max(w, h))
         img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))),
                          Image.LANCZOS)
     buf = io.BytesIO()
@@ -98,16 +96,17 @@ class ApiError(RuntimeError):
         self.code = code
 
 
-def _post_chat(cfg, img_b64, model, is_fallback=False):
+def _post_chat(cfg, img_b64, model, is_fallback=False, prompt=None):
     """按指定模型发一次 chat/completions 请求。"""
     url = api_settings.completion_url(str(cfg.get("base_url", "")))
+    text_prompt = cfg.get("prompt", "") if prompt is None else prompt
     payload = {
         "model": model,
         "messages": [
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": cfg.get("prompt", "")},
+                    {"type": "text", "text": text_prompt},
                     {"type": "image_url",
                      "image_url": {"url": "data:image/png;base64," + img_b64}},
                 ],
@@ -152,7 +151,7 @@ def _post_chat(cfg, img_b64, model, is_fallback=False):
         raise RuntimeError(str(exc)) from exc
 
 
-def call_api(cfg, img_b64):
+def call_api(cfg, img_b64, prompt=None, logger=None):
     """调用 OpenAI 兼容的 chat/completions 视觉接口。
 
     主模型遇到拥堵（HTTP 429，例如错误码 1305「该模型当前访问量过大」、
@@ -160,16 +159,17 @@ def call_api(cfg, img_b64):
     使识别不因平台过载而失败。fallback_model 留空则关闭自动降级。
     """
     model = cfg.get("model", "")
+    emit = logger or log
     try:
-        return _post_chat(cfg, img_b64, model)
+        return _post_chat(cfg, img_b64, model, prompt=prompt)
     except ApiError as exc:
         fallback = str(cfg.get("fallback_model", "") or "").strip()
         if not fallback or fallback == model or not _is_overload(exc):
             raise
-        log(f"主模型 {model} 拥堵（{exc}），自动降级到 {fallback} 重试")
+        emit(f"主模型 {model} 拥堵（{exc}），自动降级到 {fallback} 重试")
         time.sleep(0.4)  # 官方建议增加重试间隔，避免立即高频重试
         retry_cfg = dict(cfg, model=fallback)
-        return _post_chat(retry_cfg, img_b64, fallback, is_fallback=True)
+        return _post_chat(retry_cfg, img_b64, fallback, is_fallback=True, prompt=prompt)
 
 
 def _is_overload(exc):
@@ -179,13 +179,28 @@ def _is_overload(exc):
 
 def clean_code(text):
     """去掉模型偶尔附带的 ```latex 代码块围栏等多余内容。"""
-    text = text.strip()
+    text = (text or "").strip()
     if text.startswith("```"):
         text = text.strip("`").strip()
         first_line = text.split("\n", 1)[0].strip().lower()
         if first_line in ("latex", "tex", "katex", "math"):
             text = text.split("\n", 1)[1].strip()
     return text
+
+
+def normalize_paragraph(text):
+    """保留段落正文，仅把 \\[...\\] 和 \\(...\\) 定界符规范成 $$...$$ / $...$。"""
+    raw = (text or "").strip()
+    if not raw:
+        return raw
+    final = re.sub(r'\\\[(.*?)\\\]', lambda m: '$$' + m[1].strip() + '$$', raw, flags=re.S)
+    return re.sub(r'\\\((.*?)\\\)', lambda m: '$' + m[1].strip() + '$', final, flags=re.S)
+
+
+def is_empty_paragraph(raw):
+    """段落模式下检查是否为空或「未检测到内容/公式」提示语。"""
+    stripped = (raw or "").strip()
+    return not stripped or re.fullmatch(r'未检测到(?:内容|公式)[\s。.!！]*', stripped) is not None
 
 
 def normalize_delimiters(code):

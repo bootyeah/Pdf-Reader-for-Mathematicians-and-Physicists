@@ -12,8 +12,10 @@ import base64
 import hashlib
 import json
 import os
+import select
 import socket
 import struct
+import sys
 import threading
 import time
 import urllib.parse
@@ -33,6 +35,7 @@ PAGE_PATH = os.path.join(WEB_DIR, "index.html")
 # WebSocket
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 WS_MAGIC = WS_GUID
+OP_CONT = 0x0
 OP_TEXT = 0x1
 OP_BINARY = 0x2
 OP_CLOSE = 0x8
@@ -146,6 +149,15 @@ class AppCore:
     # ---------- WebSocket 广播 ----------
 
     def register_ws(self, sock, client_id=""):
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
+        try:
+            sndtimeo = struct.pack("I", 5000) if sys.platform == "win32" else struct.pack("ll", 5, 0)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, sndtimeo)
+        except OSError:
+            pass
         with self.ws_lock:
             self._ws_id += 1
             wid = self._ws_id
@@ -170,18 +182,25 @@ class AppCore:
                 self.ws_clients[wid] = (sock, client_id)
 
     def send_frame(self, wid, frame):
-        """线程安全地向指定 WebSocket 发送已编码帧。"""
+        """线程安全地向指定 WebSocket 发送已编码帧（带写就绪超时，避免失联客户端卡死广播）。"""
         with self.ws_lock:
             item = self.ws_clients.get(wid)
             send_lock = self._ws_send_locks.get(wid)
         if not item:
             return False
+        sock = item[0]
         try:
             if send_lock:
                 with send_lock:
-                    item[0].sendall(frame)
+                    _, writable, _ = select.select([], [sock], [], 2.0)
+                    if not writable:
+                        raise TimeoutError("WebSocket 写入超时")
+                    sock.sendall(frame)
             else:
-                item[0].sendall(frame)
+                _, writable, _ = select.select([], [sock], [], 2.0)
+                if not writable:
+                    raise TimeoutError("WebSocket 写入超时")
+                sock.sendall(frame)
             return True
         except Exception:
             self.unregister_ws(wid)
@@ -254,67 +273,6 @@ class AppCore:
             # 保留 infinite 等文档属性，同时隔离笔迹坐标，避免渲染/识别改动原稿。
             return deepcopy(src)
 
-    def pc_set_board(self, w, h, force=False):
-        """设定鼠标画板的文档尺寸（画板为空时才生效，免得把写好的内容挪歪）。"""
-        with self.lock:
-            if self.pc_doc["strokes"] and not force:
-                return [self.pc_doc["w"], self.pc_doc["h"]]
-            try:
-                w = max(80, min(6000, int(w)))
-                h = max(80, min(6000, int(h)))
-            except (TypeError, ValueError):
-                return [self.pc_doc["w"], self.pc_doc["h"]]
-            self.pc_doc = {"w": w, "h": h, "strokes": []}
-            self.pc_rev += 1
-            return [w, h]
-
-    def pc_add_stroke(self, stroke):
-        """电脑鼠标写完一笔（松开左键时调用）。只有鼠标手写模式才接受。"""
-        with self.lock:
-            if self.mode != core.MODE_PC:
-                return False
-            pts = core.sanitize_strokes(
-                [stroke], bounds=(self.pc_doc["w"], self.pc_doc["h"]))
-            if not pts:
-                return False
-            self.pc_doc["strokes"].append(pts[0])
-            self.pc_rev += 1
-            self.error = ""
-            if self.cfg.get("auto_recognize"):
-                self.auto_recognize_at = (
-                    time.monotonic() + float(
-                        self.cfg.get("auto_recognize_delay", 1800)) / 1000.0)
-        self._notify()
-        self.push_state()
-        return True
-
-    def pc_undo(self):
-        with self.lock:
-            if self.mode != core.MODE_PC or not self.pc_doc["strokes"]:
-                return False
-            self.pc_doc["strokes"].pop()
-            self.pc_rev += 1
-            self.result = None
-        self._notify()
-        self.push_state()
-        return True
-
-    def pc_clear(self):
-        with self.lock:
-            if self.mode != core.MODE_PC:
-                return False
-            if not self.pc_doc["strokes"]:
-                return False
-            self.pc_doc["strokes"] = []
-            self.pc_rev += 1
-            self.result = None
-            self.error = ""
-            self.auto_recognize_at = 0.0
-        self._notify()
-        # 只告诉手机「电脑画板清空了」，不动它的画布（cleared_seq 不加）
-        self.push_state({"pcCleared": True})
-        return True
-
     # ---------- 文档更新 ----------
 
     def touch(self, device="", ip=""):
@@ -380,14 +338,8 @@ class AppCore:
         return cur_rev, True
 
     def clear(self, from_pc=False, client_id="", wid=None):
-        """清空当前模式的画布。
-
-        鼠标手写模式下「清空」清的是鼠标画板，手机画布一根笔都不动
-        （所以手机端切回来时自己的内容还在）。
-        """
+        """清空当前模式的画布。"""
         if self.mode == core.MODE_PC:
-            if from_pc:
-                self.pc_clear()
             return
         with self.lock:
             self.doc = dict(self.doc, strokes=[])
@@ -408,9 +360,6 @@ class AppCore:
 
     def undo(self, client_id="", wid=None, remote=False):
         if self.mode == core.MODE_PC:
-            # 鼠标手写模式下手机端已暂停：它不能替电脑撤销鼠标笔画
-            if not remote:
-                self.pc_undo()
             return
         with self.lock:
             if self.doc["strokes"]:
@@ -558,36 +507,82 @@ def ws_encode(data, opcode=OP_TEXT):
     return bytes(header) + data
 
 
-def ws_read_frame(sock):
-    """读一帧；返回 (opcode, payload) 或 None（连接结束）。"""
+def _ws_read_raw_frame(sock):
+    """读单个物理帧；返回 (fin, opcode, payload) 或 None（连接结束/半包 EOF）。"""
     head = _recv_exact(sock, 2)
-    if not head:
+    if head is None:
         return None
     b1, b2 = head[0], head[1]
+    fin = bool(b1 & 0x80)
     opcode = b1 & 0x0F
-    masked = b2 & 0x80
+    masked = bool(b2 & 0x80)
     length = b2 & 0x7F
     if length == 126:
-        length = struct.unpack("!H", _recv_exact(sock, 2))[0]
+        ext = _recv_exact(sock, 2)
+        if ext is None:
+            return None
+        length = struct.unpack("!H", ext)[0]
     elif length == 127:
-        length = struct.unpack("!Q", _recv_exact(sock, 8))[0]
+        ext = _recv_exact(sock, 8)
+        if ext is None:
+            return None
+        length = struct.unpack("!Q", ext)[0]
     if length > MAX_BODY:
         raise ValueError("WebSocket 帧过大：%d" % length)
     mask = _recv_exact(sock, 4) if masked else b""
+    if mask is None:
+        return None
     payload = _recv_exact(sock, length) if length else b""
-    if masked:
-        payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
-    return opcode, payload
+    if payload is None:
+        return None
+    if masked and payload:
+        n = len(payload)
+        mask_bytes = (mask * ((n // 4) + 1))[:n]
+        payload = (int.from_bytes(payload, "big") ^ int.from_bytes(mask_bytes, "big")).to_bytes(n, "big")
+    return fin, opcode, payload
+
+
+def ws_read_frame(sock):
+    """读一帧（支持 RFC 6455 分片重组）；返回 (opcode, payload) 或 None（连接结束）。"""
+    frag_opcode = None
+    frag_chunks = []
+    frag_bytes = 0
+    while True:
+        raw = _ws_read_raw_frame(sock)
+        if raw is None:
+            return None
+        fin, opcode, payload = raw
+        if opcode >= 0x8:  # 控制帧不可分片，直接透传
+            return opcode, payload
+        if opcode == OP_CONT:
+            if frag_opcode is None:
+                return None
+            frag_bytes += len(payload)
+            if frag_bytes > MAX_BODY:
+                raise ValueError("WebSocket 分片消息过大：%d" % frag_bytes)
+            frag_chunks.append(payload)
+            if fin:
+                return frag_opcode, b"".join(frag_chunks)
+        elif not fin:
+            if frag_opcode is not None:
+                return None
+            frag_opcode = opcode
+            frag_chunks = [payload]
+            frag_bytes = len(payload)
+        else:
+            return opcode, payload
 
 
 def _recv_exact(sock, n):
-    buf = b""
+    if n <= 0:
+        return b""
+    buf = bytearray()
     while len(buf) < n:
         chunk = sock.recv(n - len(buf))
         if not chunk:
-            return None if not buf else buf
-        buf += chunk
-    return buf
+            return None
+        buf.extend(chunk)
+    return bytes(buf)
 
 
 # --------------------------------------------------------------------------
@@ -833,16 +828,42 @@ class Handler(BaseHTTPRequestHandler):
                 dict({"type": "state"}, **app.snapshot()),
                 ensure_ascii=False).encode("utf-8"), OP_TEXT)):
                 return
+            frag_opcode = None
+            frag_chunks = []
+            frag_bytes = 0
             while True:
-                frame = ws_read_frame(sock)
+                frame = _ws_read_raw_frame(sock)
                 if frame is None:
                     break
-                opcode, payload = frame
+                fin, opcode, payload = frame
                 if opcode == OP_CLOSE:
                     break
                 if opcode == OP_PING:
                     if not app.send_frame(wid, ws_encode(payload, OP_PONG)):
                         break
+                    continue
+                if opcode == OP_PONG:
+                    continue
+                if opcode == OP_CONT:
+                    if frag_opcode is None:
+                        break
+                    frag_bytes += len(payload)
+                    if frag_bytes > MAX_BODY:
+                        raise ValueError("WebSocket 分片消息过大：%d" % frag_bytes)
+                    frag_chunks.append(payload)
+                    if not fin:
+                        continue
+                    opcode = frag_opcode
+                    payload = b"".join(frag_chunks)
+                    frag_opcode = None
+                    frag_chunks = []
+                    frag_bytes = 0
+                elif not fin:
+                    if frag_opcode is not None:
+                        break
+                    frag_opcode = opcode
+                    frag_chunks = [payload]
+                    frag_bytes = len(payload)
                     continue
                 if opcode != OP_TEXT:
                     continue
