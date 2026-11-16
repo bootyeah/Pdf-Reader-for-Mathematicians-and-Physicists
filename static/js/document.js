@@ -204,6 +204,7 @@
             // 点击弹窗外部时，输入框里已经打好的内容按「保存」处理（落库 + 存本地 + 进撤销栈），不再回滚丢弃。
             if (!els.noteModal.classList.contains('hidden') && !e.target.closest('#note-modal')) {
                 if (typeof commitNoteEdit === 'function') commitNoteEdit();
+                if (typeof closeAnnoColorPopover === 'function') closeAnnoColorPopover();
                 els.noteModal.classList.add('hidden');
                 state.activeAnnotationId = null;
                 state.isEditingNote = false;

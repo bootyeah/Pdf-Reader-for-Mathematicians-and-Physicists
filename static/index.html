@@ -494,17 +494,21 @@
 
     <!-- 笔记弹窗 -->
     <div id="note-modal" class="hidden fixed z-50 bg-white rounded-lg shadow-xl border border-gray-200 note-popup flex flex-col ring-1 ring-black/5" style="resize: both; overflow: hidden; min-width: 260px; min-height: 200px;">
-        <div class="flex justify-between items-center px-3 py-1.5 border-b bg-gray-50 rounded-t-lg cursor-move select-none shrink-0" id="note-header">
-            <span class="text-xs font-bold text-gray-500 uppercase flex items-center gap-1">
-                <i class="ph ph-note-pencil text-blue-500"></i> <span id="modal-title">笔记</span>
+        <div class="relative flex justify-between items-center px-3 py-1.5 border-b bg-gray-50 rounded-t-lg cursor-move select-none shrink-0" id="note-header">
+            <span class="text-xs font-bold text-gray-500 uppercase flex items-center gap-1 min-w-0 truncate">
+                <i class="ph ph-note-pencil text-blue-500 shrink-0"></i> <span id="modal-title" class="truncate">笔记</span>
             </span>
-            <div class="flex gap-1 items-center">
-                <div id="text-size-controls" class="hidden flex items-center bg-gray-200 rounded px-1 py-0.5 mr-1">
+            <div class="flex gap-1 items-center shrink-0">
+                <button type="button" id="anno-color-btn" class="w-4 h-4 rounded-full border border-gray-300 shadow-sm hover:scale-110 transition-transform mr-0.5 cursor-pointer shrink-0" title="切换颜色" aria-label="切换颜色" aria-expanded="false"></button>
+                <div id="text-size-controls" class="hidden flex items-center bg-gray-200 rounded px-1 py-0.5 mr-0.5">
                     <button id="font-minus-btn" class="text-gray-600 hover:text-black font-bold px-1 rounded hover:bg-gray-300 text-xs" title="缩小字体">A-</button>
                     <div class="w-px h-3 bg-gray-400 mx-1"></div>
                     <button id="font-plus-btn" class="text-gray-600 hover:text-black font-bold px-1 rounded hover:bg-gray-300 text-xs" title="放大字体">A+</button>
                 </div>
                 
+                <button type="button" id="duplicate-text-btn" class="hidden text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded p-0.5 transition" title="复制文本块" aria-label="复制文本块">
+                    <i class="ph ph-copy"></i>
+                </button>
                 <button id="save-snippet-btn" class="hidden text-gray-400 hover:text-orange-500 hover:bg-orange-50 rounded p-0.5 transition" title="存为常用素材">
                     <i class="ph-fill ph-star"></i>
                 </button>
@@ -514,6 +518,18 @@
                 <button id="close-note-btn" class="text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded p-0.5 transition">
                     <i class="ph ph-x"></i>
                 </button>
+            </div>
+            <div id="anno-color-popover" class="hidden absolute top-full right-2 mt-1 bg-white border border-gray-200 shadow-lg rounded-full px-2.5 py-2 flex items-center gap-2 z-50 cursor-default">
+                <button type="button" class="w-[18px] h-[18px] rounded-full bg-[#fde047] anno-color-swatch transition-transform" data-color="#fde047" title="黄色" aria-label="黄色"></button>
+                <button type="button" class="w-[18px] h-[18px] rounded-full bg-[#f87171] anno-color-swatch transition-transform" data-color="#f87171" title="红色" aria-label="红色"></button>
+                <button type="button" class="w-[18px] h-[18px] rounded-full bg-[#4ade80] anno-color-swatch transition-transform" data-color="#4ade80" title="绿色" aria-label="绿色"></button>
+                <button type="button" class="w-[18px] h-[18px] rounded-full bg-[#60a5fa] anno-color-swatch transition-transform" data-color="#60a5fa" title="蓝色" aria-label="蓝色"></button>
+                <button type="button" class="w-[18px] h-[18px] rounded-full bg-[#000000] border border-gray-300 anno-color-swatch transition-transform" data-color="#000000" title="黑色" aria-label="黑色"></button>
+                <div id="anno-custom-color-wrapper" class="relative w-[20px] h-[20px] rounded-full p-[2px] cursor-pointer shadow-sm hover:ring-2 hover:ring-gray-300 transition-all" title="自定义颜色">
+                    <div class="relative w-full h-full rounded-full overflow-hidden bg-white">
+                        <input type="color" id="anno-custom-color-input" class="absolute -top-2 -left-2 w-10 h-10 cursor-pointer p-0 border-0" value="#fde047" aria-label="自定义颜色">
+                    </div>
+                </div>
             </div>
         </div>
         <!-- 下方包裹区设为 flex-1 撑满剩余空间 -->

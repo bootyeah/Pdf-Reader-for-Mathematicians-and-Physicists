@@ -15,12 +15,162 @@
             state.originalAnnoSnapshot = null;
         }
 
+        const annoColorBtn = document.getElementById('anno-color-btn');
+        const annoColorPopover = document.getElementById('anno-color-popover');
+        const annoCustomColorWrapper = document.getElementById('anno-custom-color-wrapper');
+        const annoCustomColorInput = document.getElementById('anno-custom-color-input');
+        const duplicateTextBtn = document.getElementById('duplicate-text-btn');
+        let pendingCustomColorStart = null;
+
+        function getAnnotationColor(anno) {
+            if (!anno) return '#fde047';
+            if (anno.color) return anno.color;
+            if (typeof MARKER_CONFIG !== 'undefined' && MARKER_CONFIG[anno.type]) return MARKER_CONFIG[anno.type].color;
+            if (anno.type === 'text') return '#000000';
+            return '#fde047';
+        }
+
+        function syncAnnoColorUI(color) {
+            const normalized = String(color || '#fde047').toLowerCase();
+            if (annoColorBtn) {
+                annoColorBtn.style.backgroundColor = color || '#fde047';
+            }
+            if (!annoColorPopover) return;
+            let matchedPreset = false;
+            annoColorPopover.querySelectorAll('.anno-color-swatch').forEach(btn => {
+                const match = (btn.dataset.color || '').toLowerCase() === normalized;
+                btn.classList.toggle('selected', match);
+                if (match) matchedPreset = true;
+            });
+            if (annoCustomColorInput && /^#[0-9a-f]{6}$/i.test(normalized)) {
+                annoCustomColorInput.value = normalized;
+            }
+            if (annoCustomColorWrapper) {
+                annoCustomColorWrapper.classList.toggle('selected', !matchedPreset);
+            }
+        }
+
+        function closeAnnoColorPopover() {
+            if (annoColorPopover) annoColorPopover.classList.add('hidden');
+            if (annoColorBtn) annoColorBtn.setAttribute('aria-expanded', 'false');
+        }
+
+        function refreshEditingTextVisuals(anno) {
+            if (state.isEditingNote && anno?.type === 'text') {
+                phantomMemo = { div: null, annotationId: null, pageNum: null, version: -1, cursor: -1, text: null };
+                refreshActiveTextCursor();
+                if (typeof window.syncVirtualCursor === 'function') window.syncVirtualCursor();
+            }
+        }
+
+        function previewAnnotationColor(nextColor) {
+            if (!state.activeAnnotationId || !nextColor) return;
+            const pageNum = state.activePageNum;
+            const anno = state.annotations[pageNum]?.find(a => a.id === state.activeAnnotationId);
+            if (!anno) return;
+            if (!pendingCustomColorStart) {
+                pendingCustomColorStart = {
+                    hasColor: Object.prototype.hasOwnProperty.call(anno, 'color'),
+                    color: anno.color
+                };
+            }
+            anno.color = nextColor;
+            syncAnnoColorUI(nextColor);
+            renderAnnotations(pageNum, true);
+            if (typeof updateCrossPageArrows === 'function') updateCrossPageArrows([pageNum]);
+            refreshEditingTextVisuals(anno);
+        }
+
+        function applyAnnotationColor(nextColor, restoreStart = null) {
+            if (!state.activeAnnotationId || !nextColor) return;
+            const pageNum = state.activePageNum;
+            const liveAnno = state.annotations[pageNum]?.find(a => a.id === state.activeAnnotationId);
+            if (!liveAnno) return;
+
+            const currentColor = restoreStart ? restoreStart.color : liveAnno.color;
+            if (!restoreStart && (currentColor || '').toLowerCase() === nextColor.toLowerCase()) {
+                syncAnnoColorUI(nextColor);
+                return;
+            }
+
+            // Temporarily restore uncommitted draft fields so the undo entry records only the color change.
+            const sizingKeys = ['width', 'height', 'fontSizeScale', 'size'];
+            let liveDraft = null;
+            if (state.isEditingNote && state.originalAnnoSnapshot) {
+                liveDraft = {
+                    hasText: Object.prototype.hasOwnProperty.call(liveAnno, 'text'),
+                    text: liveAnno.text,
+                    imgH: liveAnno.imgH,
+                    sizing: {}
+                };
+                for (const key of sizingKeys) {
+                    if (Object.prototype.hasOwnProperty.call(liveAnno, key)) liveDraft.sizing[key] = liveAnno[key];
+                    if (Object.prototype.hasOwnProperty.call(state.originalAnnoSnapshot, key)) liveAnno[key] = state.originalAnnoSnapshot[key];
+                    else delete liveAnno[key];
+                }
+                if (liveAnno.type === 'text') {
+                    if (Object.prototype.hasOwnProperty.call(state.originalAnnoSnapshot, 'text')) liveAnno.text = state.originalAnnoSnapshot.text;
+                    else delete liveAnno.text;
+                    liveAnno.imgH = state.originalAnnoSnapshot.imgH;
+                    delete liveAnno.tikzBase64;
+                    delete liveAnno.tikzSource;
+                }
+            }
+            if (restoreStart) {
+                if (restoreStart.hasColor) liveAnno.color = restoreStart.color;
+                else delete liveAnno.color;
+            }
+
+            performAction(() => {
+                const anno = state.annotations[pageNum]?.find(a => a.id === state.activeAnnotationId);
+                if (anno) anno.color = nextColor;
+            }, [pageNum]);
+
+            if (state.originalAnnoSnapshot) {
+                state.originalAnnoSnapshot.color = nextColor;
+            }
+
+            const updatedAnno = state.annotations[pageNum]?.find(a => a.id === state.activeAnnotationId);
+            if (liveDraft && updatedAnno) {
+                for (const key of sizingKeys) {
+                    if (Object.prototype.hasOwnProperty.call(liveDraft.sizing, key)) updatedAnno[key] = liveDraft.sizing[key];
+                    else delete updatedAnno[key];
+                }
+                if (updatedAnno.type === 'text') {
+                    if (liveDraft.hasText) updatedAnno.text = liveDraft.text;
+                    else delete updatedAnno.text;
+                    updatedAnno.imgH = liveDraft.imgH;
+                }
+                renderAnnotations(pageNum, true);
+            }
+            refreshEditingTextVisuals(updatedAnno);
+            syncAnnoColorUI(nextColor);
+        }
+
+        function flushPendingCustomColor() {
+            if (!pendingCustomColorStart || !state.activeAnnotationId) {
+                pendingCustomColorStart = null;
+                return;
+            }
+            const anno = state.annotations[state.activePageNum]?.find(a => a.id === state.activeAnnotationId);
+            const start = pendingCustomColorStart;
+            pendingCustomColorStart = null;
+            if (!anno) return;
+            if (!start.hasColor || (anno.color || '').toLowerCase() !== (start.color || '').toLowerCase()) {
+                applyAnnotationColor(anno.color, start);
+            }
+        }
+
         function openNoteModal(anno, pageNum, clientX, clientY, forceEditMode = false) {
             window.FormulaInput?.reset();
+            pendingCustomColorStart = null;
+            closeAnnoColorPopover();
             state.activeAnnotationId = anno.id;
             state.activePageNum = pageNum;
             
             state.originalAnnoSnapshot = JSON.parse(JSON.stringify(anno));
+            const liveAnno = state.annotations[pageNum]?.find(a => a.id === anno.id) || anno;
+            syncAnnoColorUI(getAnnotationColor(liveAnno));
 
             if (anno.type === 'text') {
                 els.noteInput.placeholder = '点击编辑文本';
@@ -43,11 +193,13 @@
                 sizeControls.classList.add('hidden');
             }
 
-            // 2. 存为素材控制：仅 文本块 (包含公式和TikZ) 允许收藏，图章不需要
+            // 2. 存为素材与一键复制控制：仅 文本块 (包含公式和TikZ) 使用
             if (anno.type === 'text') {
-                snippetBtn.classList.remove('hidden'); 
+                snippetBtn.classList.remove('hidden');
+                if (duplicateTextBtn) duplicateTextBtn.classList.remove('hidden');
             } else {
-                snippetBtn.classList.add('hidden'); 
+                snippetBtn.classList.add('hidden');
+                if (duplicateTextBtn) duplicateTextBtn.classList.add('hidden');
             }
 
             const defaultW = 320; // 加大后的默认宽度
@@ -78,7 +230,9 @@
         // 把当前输入框里的内容落库（写数据 + 存本地 + 进撤销栈 + 刷新界面）。
         // 「保存」按钮与「点击弹窗外部」共用这一条路径，两者行为完全一致。
         function commitNoteEdit() {
-            if (!state.activeAnnotationId || !state.isEditingNote) return null;
+            if (!state.activeAnnotationId) return null;
+            flushPendingCustomColor();
+            if (!state.isEditingNote) return null;
 
             clearTimeout(state.livePreviewTimer); // 停掉尚未执行的实时预览，避免关闭弹窗后再去重绘
 
@@ -142,6 +296,7 @@
 
         let closeNoteLivePreview = null;
         function setNoteMode(mode) {
+            closeAnnoColorPopover();
             closeNoteLivePreview?.();
             closeNoteLivePreview = null;
             if (mode !== 'edit') window.FormulaInput?.reset();
@@ -196,6 +351,7 @@
 
         els.toggleEditBtn.addEventListener('click', () => {
             if (state.isEditingNote) {
+                flushPendingCustomColor();
                 rollbackLivePreview();
                 const anno = state.annotations[state.activePageNum]?.find(a => a.id === state.activeAnnotationId);
                 let content = anno?.note;
@@ -212,6 +368,8 @@
                 const currentAnno = commitNoteEdit();
                 renderNotePreview(els.noteInput.value, currentAnno, state.activePageNum);
             } else {
+                flushPendingCustomColor();
+                closeAnnoColorPopover();
                 els.noteModal.classList.add('hidden');
                 state.activeAnnotationId = null;
             }
@@ -631,9 +789,207 @@
             els.noteInput.select(); // 原生 API：瞬间全选输入框内的所有文字
         });
 
+        function computeDuplicateTextPosition(anno, pageNum) {
+            const srcDiv = findTextAnnotationDiv(anno.id, pageNum);
+            const wrapper = (typeof pageWrappers !== 'undefined' && pageWrappers.get(Number(pageNum)))
+                || document.getElementById(`page-wrapper-${pageNum}`);
+            let boxW = anno.width || 0.12;
+            let boxH = anno.height || 0.04;
+            if (srcDiv && wrapper) {
+                const wRect = wrapper.getBoundingClientRect();
+                const dRect = srcDiv.getBoundingClientRect();
+                if (wRect.width > 0 && wRect.height > 0 && dRect.width > 0 && dRect.height > 0) {
+                    boxW = dRect.width / wRect.width;
+                    boxH = dRect.height / wRect.height;
+                }
+            }
+
+            const inSidecar = anno.x >= 0.98;
+            const zoneMinX = inSidecar ? 0.98 : 0.01;
+            const zoneMaxX = inSidecar ? 1.96 : 0.97;
+            const zoneMinY = 0.01;
+            const zoneMaxY = 0.96;
+            const gapX = 0.02;
+            const gapY = 0.015;
+            const effectiveW = Math.min(boxW, zoneMaxX - zoneMinX);
+            const effectiveH = Math.min(boxH, zoneMaxY - zoneMinY);
+
+            const candidates = [
+                { x: anno.x + boxW + gapX, y: anno.y },
+                { x: anno.x, y: anno.y + boxH + gapY },
+                { x: anno.x - boxW - gapX, y: anno.y },
+                { x: anno.x, y: anno.y - boxH - gapY }
+            ];
+
+            const pageList = state.annotations[pageNum] || [];
+            const isOccupied = (cx, cy) => pageList.some(
+                a => a.type === 'text' && Math.abs(a.x - cx) < 0.015 && Math.abs(a.y - cy) < 0.015
+            );
+
+            for (const cand of candidates) {
+                if (cand.x >= zoneMinX && cand.x + Math.min(effectiveW, 0.08) <= zoneMaxX
+                    && cand.y >= zoneMinY && cand.y + Math.min(effectiveH, 0.03) <= zoneMaxY
+                    && !isOccupied(cand.x, cand.y)) {
+                    return cand;
+                }
+            }
+
+            const baseX = Math.max(zoneMinX, Math.min(zoneMaxX - 0.05, anno.x + 0.03));
+            const baseY = Math.max(zoneMinY, Math.min(zoneMaxY - 0.03, anno.y + 0.03));
+            let chosen = { x: baseX, y: baseY };
+            for (let step = 0; step < 8 && isOccupied(chosen.x, chosen.y); step++) {
+                chosen = {
+                    x: Math.max(zoneMinX, Math.min(zoneMaxX - 0.05, baseX + step * 0.02)),
+                    y: Math.max(zoneMinY, Math.min(zoneMaxY - 0.03, baseY + step * 0.025))
+                };
+            }
+            return chosen;
+        }
+
+        function duplicateActiveTextAnnotation() {
+            if (!state.activeAnnotationId) return;
+            const pageNum = state.activePageNum;
+            flushPendingCustomColor();
+
+            let sourceAnno = state.annotations[pageNum]?.find(a => a.id === state.activeAnnotationId);
+            if (!sourceAnno || sourceAnno.type !== 'text') return;
+
+            if (state.isEditingNote) {
+                const committed = commitNoteEdit();
+                if (committed) sourceAnno = committed;
+            } else {
+                clearTimeout(state.livePreviewTimer);
+                state.originalAnnoSnapshot = null;
+            }
+
+            const { x: newX, y: newY } = computeDuplicateTextPosition(sourceAnno, pageNum);
+            const rawText = sourceAnno.text === '点击编辑文本' ? '' : (sourceAnno.text || '');
+            const duplicatedId = nextAnnotationId();
+            const clonedAnno = {
+                id: duplicatedId,
+                type: 'text',
+                color: sourceAnno.color || '#000000',
+                x: newX,
+                y: newY,
+                text: rawText,
+                timestamp: new Date().toLocaleString()
+            };
+            if (sourceAnno.fontSizeScale !== undefined) clonedAnno.fontSizeScale = sourceAnno.fontSizeScale;
+            if (sourceAnno.width !== undefined) clonedAnno.width = sourceAnno.width;
+            if (sourceAnno.height !== undefined) clonedAnno.height = sourceAnno.height;
+
+            performAction(() => {
+                addAnnotation(pageNum, clonedAnno);
+            }, [pageNum]);
+
+            closeAnnoColorPopover();
+            setNoteMode('preview');
+            els.noteModal.classList.add('hidden');
+            state.activeAnnotationId = null;
+            state.originalAnnoSnapshot = null;
+
+            const clonedDiv = findTextAnnotationDiv(duplicatedId, pageNum);
+            if (clonedDiv && typeof clonedDiv.animate === 'function') {
+                clonedDiv.animate([
+                    { boxShadow: '0 0 0 2px rgba(59, 130, 246, 0.9), 0 0 12px rgba(59, 130, 246, 0.45)' },
+                    { boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }
+                ], { duration: 650, easing: 'ease-out' });
+            }
+        }
+
+        if (duplicateTextBtn) {
+            duplicateTextBtn.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+            duplicateTextBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                duplicateActiveTextAnnotation();
+            });
+        }
+
+        if (annoColorBtn) {
+            annoColorBtn.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+            annoColorBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (!annoColorPopover || !state.activeAnnotationId) return;
+                const willOpen = annoColorPopover.classList.contains('hidden');
+                if (willOpen) {
+                    const anno = state.annotations[state.activePageNum]?.find(a => a.id === state.activeAnnotationId);
+                    syncAnnoColorUI(getAnnotationColor(anno));
+                    annoColorPopover.classList.remove('hidden');
+                    annoColorBtn.setAttribute('aria-expanded', 'true');
+                } else {
+                    flushPendingCustomColor();
+                    closeAnnoColorPopover();
+                }
+            });
+        }
+
+        if (annoColorPopover) {
+            annoColorPopover.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                if (e.target.closest('.anno-color-swatch')) e.preventDefault();
+            });
+            annoColorPopover.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const swatch = e.target.closest('.anno-color-swatch');
+                if (swatch) {
+                    pendingCustomColorStart = null;
+                    applyAnnotationColor(swatch.dataset.color);
+                    closeAnnoColorPopover();
+                }
+            });
+        }
+
+        if (annoCustomColorInput) {
+            annoCustomColorInput.addEventListener('input', (e) => {
+                e.stopPropagation();
+                previewAnnotationColor(e.target.value);
+            });
+            annoCustomColorInput.addEventListener('change', (e) => {
+                e.stopPropagation();
+                if (!pendingCustomColorStart && state.activeAnnotationId) {
+                    const anno = state.annotations[state.activePageNum]?.find(a => a.id === state.activeAnnotationId);
+                    if (anno) {
+                        pendingCustomColorStart = {
+                            hasColor: Object.prototype.hasOwnProperty.call(anno, 'color'),
+                            color: anno.color
+                        };
+                    }
+                }
+                if (state.activeAnnotationId) {
+                    const anno = state.annotations[state.activePageNum]?.find(a => a.id === state.activeAnnotationId);
+                    if (anno) anno.color = e.target.value;
+                }
+                flushPendingCustomColor();
+                closeAnnoColorPopover();
+            });
+        }
+
+        els.noteModal.addEventListener('mousedown', (e) => {
+            if (annoColorPopover && !annoColorPopover.classList.contains('hidden')
+                && !e.target.closest('#anno-color-popover') && !e.target.closest('#anno-color-btn')) {
+                flushPendingCustomColor();
+                closeAnnoColorPopover();
+            }
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && annoColorPopover && !annoColorPopover.classList.contains('hidden')) {
+                flushPendingCustomColor();
+                closeAnnoColorPopover();
+            }
+        });
+
         document.getElementById('delete-note-btn').addEventListener('click', () => {
             if (!state.activeAnnotationId) return;
             clearTimeout(state.livePreviewTimer);
+            pendingCustomColorStart = null;
+            closeAnnoColorPopover();
             setNoteMode('preview');
             state.originalAnnoSnapshot = null;
             const targetId = state.activeAnnotationId;
@@ -647,6 +1003,8 @@
         });
         document.getElementById('close-note-btn').addEventListener('click', () => {
             clearTimeout(state.livePreviewTimer);
+            flushPendingCustomColor();
+            closeAnnoColorPopover();
             rollbackLivePreview();
             setNoteMode('preview');
             els.noteModal.classList.add('hidden');
