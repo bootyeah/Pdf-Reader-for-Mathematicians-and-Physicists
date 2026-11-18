@@ -21,9 +21,13 @@
     const API_URL = '/api/chat';
     const STORAGE_KEY = 'pdf_reader_deepseek_chat_state';
     const MAX_HISTORY = 24;            // 送给模型的历史消息条数上限（不含本轮）
-    const MAX_IMAGES = 4;              // 单条消息最多几张图
+    const MAX_IMAGES = 8;              // 单条消息最多几张图（与后端 CHAT_MAX_IMAGES 对齐）
     const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
     const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+    const PDF_THUMB_WIDTH = 360;
+    const PDF_HIGHRES_SCALE = 2.5;
+    const PDF_HIGHRES_MAX_PX = 2400;
+    const PDF_THUMB_CACHE_MAX = 150;
     const HEADER_HEIGHT = 72;          // 顶栏高度（与 LOCALPdfReader.html 的 h-[72px] 一致）
     function getHeaderHeight() { const h = document.querySelector('header'); return h ? h.offsetHeight : HEADER_HEIGHT; }
 
@@ -51,6 +55,14 @@
     let panel = null;
     let headerEl = null;
     let bodyEl = null;
+    let pdfBtn = null;
+    let pdfPickerEl = null;
+    let pdfGridEl = null;
+    let pdfLocateBtn = null;
+    let pdfClearBtn = null;
+    let pdfStatusEl = null;
+    let pdfCancelBtn = null;
+    let pdfConfirmBtn = null;
     let inputEl = null;
     let sendBtn = null;
     let stopBtn = null;
@@ -73,7 +85,7 @@
     let fontScale = 1;
     const msgEntryMap = new WeakMap(); // wrap (.ds-msg) -> history entry {role, content}
     let history = [];              // [{role:'user'|'assistant', content:string|Array}]
-    let attachments = [];          // 待发送图片 [{id, dataUrl, name}]
+    let attachments = [];          // 待发送图片 [{id, dataUrl, name, pdfPage?, pdfDoc?, pdfToken?}]
     let pendingImages = 0;         // 正在异步读取中的图片数，防止并发超额
     let streaming = false;         // 正在生成
     let abortController = null;
@@ -88,6 +100,21 @@
     let restoringState = false;
     let modelThinking = {};        // 模型 → 'enabled' | 'disabled' | 'low' | 'medium' | 'high' | 'omit'（来自 /api/ai-config）
     let modelCapabilities = {};
+
+    // ---------- PDF 选页抽屉状态 ----------
+    let pdfPickerOpen = false;
+    let pdfSelectedPages = [];
+    let pdfLastClickedPage = null;
+    let pdfThumbObserver = null;
+    let pdfThumbCache = new Map();
+    let pdfThumbDoc = null;
+    let pdfThumbToken = null;
+    let pdfPickerGen = 0;
+    let pdfThumbQueue = [];
+    let pdfThumbActive = 0;
+    let pdfConfirming = false;
+    let pdfShownCurrentPage = 0;
+    let pdfViewerScrollBound = null;
 
     function isThinkingModeEnabled(mode) {
         return ['enabled', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(mode);
@@ -713,11 +740,31 @@
                     '<i class="ph ph-x"></i>' +
                 '</button>' +
             '</div>' +
-            '<div class="ds-chat-body custom-scrollbar" id="ds-chat-body">' + WELCOME + '</div>' +
+            '<div class="ds-chat-stage">' +
+                '<div class="ds-chat-body custom-scrollbar" id="ds-chat-body">' + WELCOME + '</div>' +
+                '<div class="ds-pdf-picker" id="ds-pdf-picker" hidden>' +
+                    '<div class="ds-pdf-picker-bar">' +
+                        '<button type="button" class="ds-pdf-pill" id="ds-pdf-clear-btn" title="清空已选页面" aria-label="清空已选页面">' +
+                            '<i class="ph ph-trash"></i>' +
+                        '</button>' +
+                        '<button type="button" class="ds-pdf-pill ds-pdf-locate-btn" id="ds-pdf-locate-btn" title="定位到当前阅读页" aria-label="定位到当前阅读页">' +
+                            '<i class="ph ph-crosshair"></i>' +
+                        '</button>' +
+                    '</div>' +
+                    '<div class="ds-pdf-grid custom-scrollbar" id="ds-pdf-grid"></div>' +
+                    '<div class="ds-pdf-picker-foot">' +
+                        '<span class="ds-pdf-status" id="ds-pdf-status"></span>' +
+                        '<div class="ds-pdf-foot-btns">' +
+                            '<button type="button" class="ds-edit-btn" id="ds-pdf-cancel-btn">取消</button>' +
+                            '<button type="button" class="ds-edit-btn ds-edit-primary" id="ds-pdf-confirm-btn">添加高清图</button>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>' +
             '<div class="ds-chat-thumbs" id="ds-chat-thumbs"></div>' +
             '<div class="ds-chat-input-row">' +
-                '<button type="button" class="ds-chat-tool" id="ds-chat-image-btn" title="选择图片（也可直接 Ctrl+V 粘贴）">' +
-                    '<i class="ph ph-image"></i>' +
+                '<button type="button" class="ds-chat-tool" id="ds-chat-pdf-btn" title="选择 PDF 页面转高清图片发送">' +
+                    '<i class="ph ph-file-pdf"></i>' +
                 '</button>' +
                 '<textarea id="ds-chat-input" class="ds-chat-input" rows="1" placeholder=""></textarea>' +
                 '<button type="button" class="ds-chat-send" id="ds-chat-send-btn" title="发送 (Enter)">' +
@@ -731,6 +778,14 @@
 
         headerEl = panel.querySelector('#ds-chat-header');
         bodyEl = panel.querySelector('#ds-chat-body');
+        pdfBtn = panel.querySelector('#ds-chat-pdf-btn');
+        pdfPickerEl = panel.querySelector('#ds-pdf-picker');
+        pdfGridEl = panel.querySelector('#ds-pdf-grid');
+        pdfLocateBtn = panel.querySelector('#ds-pdf-locate-btn');
+        pdfClearBtn = panel.querySelector('#ds-pdf-clear-btn');
+        pdfStatusEl = panel.querySelector('#ds-pdf-status');
+        pdfCancelBtn = panel.querySelector('#ds-pdf-cancel-btn');
+        pdfConfirmBtn = panel.querySelector('#ds-pdf-confirm-btn');
         inputEl = panel.querySelector('#ds-chat-input');
         sendBtn = panel.querySelector('#ds-chat-send-btn');
         thumbsEl = panel.querySelector('#ds-chat-thumbs');
@@ -1275,6 +1330,7 @@
             }
             if (e.key === 'Escape') {
                 e.preventDefault();
+                if (pdfPickerOpen) { closePdfPicker(); return; }
                 if (streaming) abortStream(); else hidePanel();
             }
         });
@@ -1301,10 +1357,63 @@
             if (files && files.length) addImageFiles(files);
         });
 
-        // 工具栏「选择图片」按钮
-        panel.querySelector('#ds-chat-image-btn').addEventListener('click', function (e) {
+        // 工具栏「选择 PDF 页面」按钮
+        pdfBtn.addEventListener('click', function (e) {
             e.stopPropagation();
-            pickImageFile();
+            togglePdfPicker();
+        });
+
+        // PDF 选页抽屉事件
+        pdfClearBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            pdfSelectedPages = [];
+            pdfLastClickedPage = null;
+            updatePdfPickerUI();
+        });
+        pdfLocateBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            const rs = getReaderState();
+            const doc = rs && rs.pdfDoc;
+            if (!doc) return;
+            syncCurrentPdfPageInPicker();
+            scrollPickerToPage(getCurrentPdfPage(rs, doc.numPages), false);
+        });
+        pdfCancelBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            closePdfPicker();
+        });
+        pdfConfirmBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            confirmPdfPages();
+        });
+        pdfGridEl.addEventListener('mousedown', function (e) {
+            if (e.shiftKey && e.target.closest && e.target.closest('.ds-pdf-card')) {
+                e.preventDefault();
+            }
+        });
+        pdfGridEl.addEventListener('click', function (e) {
+            const card = e.target.closest && e.target.closest('.ds-pdf-card');
+            if (!card || pdfConfirming) return;
+            togglePdfCardSelection(Number(card.dataset.page), !!e.shiftKey);
+        });
+        pdfGridEl.addEventListener('dblclick', function (e) {
+            const card = e.target.closest && e.target.closest('.ds-pdf-card');
+            if (!card || pdfConfirming) return;
+            const pageNum = Number(card.dataset.page);
+            if (!Number.isInteger(pageNum) || pageNum < 1) return;
+            const rs = getReaderState();
+            const doc = rs && rs.pdfDoc;
+            const token = rs ? rs.loadToken : null;
+            const maxAllowed = getMaxPdfSelectable(doc, token);
+            if (pdfSelectedPages.indexOf(pageNum) === -1) {
+                if (pdfSelectedPages.length >= maxAllowed) {
+                    flashHint('单条消息最多 ' + MAX_IMAGES + ' 张图片');
+                    return;
+                }
+                pdfSelectedPages.push(pageNum);
+                updatePdfPickerUI();
+            }
+            confirmPdfPages();
         });
 
         // 回答 / 代码块复制、历史消息删改、TikZ 源码开关、思考过程折叠（事件委托，消息是流式重建的）
@@ -1487,9 +1596,10 @@
             });
         }
 
-        // Esc 收起面板（输入框里按下时由上面的 keydown 处理）
+        // Esc 收起面板（选页抽屉打开时先收起抽屉；输入框里按下时由上面的 keydown 处理）
         document.addEventListener('keydown', function (e) {
             if (e.key !== 'Escape' || !panelVisible) return;
+            if (pdfPickerOpen) { e.preventDefault(); closePdfPicker(); return; }
             if (e.target && e.target.closest && e.target.closest('#ds-chat-panel')) return;
             hidePanel();
         });
@@ -1497,8 +1607,9 @@
 
     function autoGrow() {
         if (!inputEl) return;
-        inputEl.style.height = 'auto';
-        inputEl.style.height = Math.min(120, inputEl.scrollHeight) + 'px';
+        inputEl.style.height = '34px';
+        const borderH = inputEl.offsetHeight - inputEl.clientHeight;
+        inputEl.style.height = Math.min(120, Math.max(34, inputEl.scrollHeight + borderH)) + 'px';
     }
 
     // 只序列化选中的回答节点。公式与图形作为完整单元复制，避免半个公式或重复 MathML。
@@ -1648,26 +1759,8 @@
     }
 
     // =========================================================================
-    // 六、图片：粘贴 / 拖拽 / 选择
+    // 六、图片：粘贴 / 拖拽
     // =========================================================================
-    function pickImageFile() {
-        let input = document.getElementById('ds-chat-file-input');
-        if (!input) {
-            input = document.createElement('input');
-            input.type = 'file';
-            input.id = 'ds-chat-file-input';
-            input.accept = 'image/png,image/jpeg,image/webp,image/gif';
-            input.multiple = true;
-            input.style.display = 'none';
-            input.addEventListener('change', function () {
-                addImageFiles(input.files);
-                input.value = '';
-            });
-            document.body.appendChild(input);
-        }
-        input.click();
-    }
-
     function handlePaste(e) {
         const dt = e.clipboardData;
         if (!dt) return;
@@ -1719,6 +1812,7 @@
                     name: file.name || 'pasted-image'
                 });
                 renderThumbs();
+                if (pdfPickerOpen) updatePdfPickerUI();
                 inputEl.focus();
             };
             reader.onerror = reader.onabort = finishRead;
@@ -1733,9 +1827,12 @@
             return;
         }
         thumbsEl.classList.add('show');
+        const rs = getReaderState();
         thumbsEl.innerHTML = attachments.map(function (a) {
+            const badge = a.pdfPage ? (a.pdfLabel || formatPdfPageLabel(a.pdfPage, rs, true)) : '';
             return '<div class="ds-thumb" data-id="' + a.id + '" title="' + escapeHtml(a.name) + '">' +
                 '<img src="' + a.dataUrl + '" alt="">' +
+                (badge ? '<span class="ds-thumb-badge">' + escapeHtml(badge) + '</span>' : '') +
                 '<button type="button" class="ds-thumb-del" data-del="' + a.id + '" title="移除">' +
                     '<i class="ph ph-x"></i>' +
                 '</button>' +
@@ -1744,10 +1841,538 @@
         thumbsEl.querySelectorAll('.ds-thumb-del').forEach(function (btn) {
             btn.addEventListener('click', function (e) {
                 e.stopPropagation();
+                const removed = attachments.find(function (a) { return a.id === btn.dataset.del; });
                 attachments = attachments.filter(function (a) { return a.id !== btn.dataset.del; });
                 renderThumbs();
+                if (pdfPickerOpen && removed && removed.pdfPage) {
+                    pdfSelectedPages = pdfSelectedPages.filter(function (p) { return p !== removed.pdfPage; });
+                    updatePdfPickerUI();
+                } else if (pdfPickerOpen) {
+                    updatePdfPickerUI();
+                }
             });
         });
+    }
+
+    // =========================================================================
+    // 六·五、PDF 页面转高清图片选择器
+    // =========================================================================
+    function getReaderState() {
+        return typeof state !== 'undefined' ? state : window.state;
+    }
+
+    function isCurrentDocPdfAttachment(a, doc, token) {
+        return !!(a && a.pdfPage && a.pdfDoc === doc && a.pdfToken === token);
+    }
+
+    function getCurrentPdfPage(rs, totalPages) {
+        const cur = rs && Number(rs.currentPhysicalPage);
+        if (Number.isInteger(cur) && cur >= 1 && cur <= totalPages) return cur;
+        return 1;
+    }
+
+    function formatPdfPageLabel(physicalPage, rs, shortMode) {
+        const offset = Number(rs && rs.pageOffset) || 0;
+        const logical = physicalPage - offset;
+        if (offset > 0 && logical <= 0) {
+            const front = Math.abs(logical - 1);
+            return shortMode ? ('前' + front) : ('前 ' + front + ' 页');
+        }
+        const num = offset > 0 ? logical : physicalPage;
+        return shortMode ? ('P.' + num) : ('第 ' + num + ' 页');
+    }
+
+    function getMaxPdfSelectable(doc, token) {
+        const otherCount = attachments.filter(function (a) {
+            return !isCurrentDocPdfAttachment(a, doc, token);
+        }).length;
+        return Math.max(0, MAX_IMAGES - otherCount - pendingImages);
+    }
+
+    function setThumbCacheEntry(pageNum, entry) {
+        if (pdfThumbCache.has(pageNum)) pdfThumbCache.delete(pageNum);
+        pdfThumbCache.set(pageNum, entry);
+        while (pdfThumbCache.size > PDF_THUMB_CACHE_MAX) {
+            pdfThumbCache.delete(pdfThumbCache.keys().next().value);
+        }
+    }
+
+    function applyCardThumb(card, entry) {
+        if (!card || !entry) return;
+        const thumbBox = card.querySelector('.ds-pdf-card-thumb');
+        const img = card.querySelector('.ds-pdf-card-img');
+        const ph = card.querySelector('.ds-pdf-card-ph');
+        if (thumbBox && entry.ratio) thumbBox.style.aspectRatio = entry.ratio;
+        if (img) {
+            img.src = entry.dataUrl;
+            img.hidden = false;
+        }
+        if (ph) ph.hidden = true;
+        card.dataset.thumbState = 'done';
+    }
+
+    function isCardNearGrid(card) {
+        if (!pdfGridEl || !card.isConnected) return false;
+        const gr = pdfGridEl.getBoundingClientRect();
+        const cr = card.getBoundingClientRect();
+        if (!gr.height || !cr.height) return true;
+        return cr.bottom >= gr.top - 300 && cr.top <= gr.bottom + 300;
+    }
+
+    async function renderPdfThumbEntry(doc, token, pageNum) {
+        const rs = getReaderState();
+        const viewerCanvas = document.getElementById('canvas-' + pageNum);
+        if (viewerCanvas && viewerCanvas.width >= 200 && viewerCanvas.height >= 200 &&
+            rs && rs.pdfDoc === doc && rs.loadToken === token &&
+            (!rs.pagesRendered || rs.pagesRendered.has(pageNum))) {
+            const targetW = PDF_THUMB_WIDTH;
+            const targetH = Math.max(1, Math.round(viewerCanvas.height * (targetW / viewerCanvas.width)));
+            const tmp = document.createElement('canvas');
+            tmp.width = targetW;
+            tmp.height = targetH;
+            const ctx = tmp.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, targetW, targetH);
+            ctx.drawImage(viewerCanvas, 0, 0, targetW, targetH);
+            const dataUrl = tmp.toDataURL('image/jpeg', 0.84);
+            const ratio = viewerCanvas.width + ' / ' + viewerCanvas.height;
+            tmp.width = 0;
+            tmp.height = 0;
+            return { dataUrl: dataUrl, ratio: ratio };
+        }
+        const page = await doc.getPage(pageNum);
+        const baseVp = page.getViewport({ scale: 1 });
+        const scale = Math.max(0.2, PDF_THUMB_WIDTH / Math.max(baseVp.width, 1));
+        const vp = page.getViewport({ scale: scale });
+        const tmp = document.createElement('canvas');
+        tmp.width = Math.max(1, Math.round(vp.width));
+        tmp.height = Math.max(1, Math.round(vp.height));
+        const ctx = tmp.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, tmp.width, tmp.height);
+        await page.render({ canvasContext: ctx, viewport: vp }).promise;
+        const dataUrl = tmp.toDataURL('image/jpeg', 0.84);
+        const ratio = Math.max(1, Math.round(baseVp.width)) + ' / ' + Math.max(1, Math.round(baseVp.height));
+        tmp.width = 0;
+        tmp.height = 0;
+        return { dataUrl: dataUrl, ratio: ratio };
+    }
+
+    function enqueueThumbRender(pageNum, card, doc, token, gen) {
+        const cached = pdfThumbCache.get(pageNum);
+        if (cached) {
+            setThumbCacheEntry(pageNum, cached);
+            applyCardThumb(card, cached);
+            return;
+        }
+        if (card.dataset.thumbState === 'done' || card.dataset.thumbState === 'queued' || card.dataset.thumbState === 'loading') {
+            return;
+        }
+        card.dataset.thumbState = 'queued';
+        pdfThumbQueue.push({ pageNum: pageNum, card: card, doc: doc, token: token, gen: gen });
+        pumpThumbQueue();
+    }
+
+    function pumpThumbQueue() {
+        while (pdfThumbActive < 2 && pdfThumbQueue.length) {
+            if (pdfGridEl && pdfThumbQueue.length > 1) {
+                const viewCenter = pdfGridEl.scrollTop + pdfGridEl.clientHeight / 2;
+                pdfThumbQueue.sort(function (a, b) {
+                    const da = Math.abs((a.card.offsetTop + a.card.offsetHeight / 2) - viewCenter);
+                    const db = Math.abs((b.card.offsetTop + b.card.offsetHeight / 2) - viewCenter);
+                    return da - db;
+                });
+            }
+            const task = pdfThumbQueue.shift();
+            if (!pdfPickerOpen || task.gen !== pdfPickerGen || !task.card.isConnected) continue;
+            if (!isCardNearGrid(task.card)) {
+                task.card.dataset.thumbState = '';
+                continue;
+            }
+            const cached = pdfThumbCache.get(task.pageNum);
+            if (cached) {
+                applyCardThumb(task.card, cached);
+                continue;
+            }
+            task.card.dataset.thumbState = 'loading';
+            pdfThumbActive++;
+            renderPdfThumbEntry(task.doc, task.token, task.pageNum).then(function (entry) {
+                if (task.doc === pdfThumbDoc && task.token === pdfThumbToken) {
+                    setThumbCacheEntry(task.pageNum, entry);
+                }
+                if (pdfPickerOpen && task.gen === pdfPickerGen && task.card.isConnected) {
+                    applyCardThumb(task.card, entry);
+                }
+            }).catch(function () {
+                if (task.card.isConnected && task.card.dataset.thumbState === 'loading') {
+                    task.card.dataset.thumbState = '';
+                }
+            }).finally(function () {
+                pdfThumbActive = Math.max(0, pdfThumbActive - 1);
+                pumpThumbQueue();
+            });
+        }
+    }
+
+    function scrollPickerToPage(pageNum, instant) {
+        if (!pdfGridEl) return;
+        const card = pdfGridEl.querySelector('.ds-pdf-card[data-page="' + pageNum + '"]');
+        if (!card) return;
+        const targetTop = Math.max(0, card.offsetTop - Math.max(0, (pdfGridEl.clientHeight - card.offsetHeight) / 2));
+        if (instant || typeof pdfGridEl.scrollTo !== 'function') {
+            pdfGridEl.scrollTop = targetTop;
+        } else {
+            pdfGridEl.scrollTo({ top: targetTop, behavior: 'smooth' });
+        }
+    }
+
+    function syncCurrentPdfPageInPicker() {
+        if (!pdfPickerOpen || !pdfGridEl) return;
+        const rs = getReaderState();
+        const doc = rs && rs.pdfDoc;
+        if (!doc) return;
+        const curPage = getCurrentPdfPage(rs, doc.numPages);
+        if (curPage === pdfShownCurrentPage) return;
+
+        const prevCard = pdfShownCurrentPage
+            ? pdfGridEl.querySelector('.ds-pdf-card[data-page="' + pdfShownCurrentPage + '"]')
+            : null;
+        if (prevCard) {
+            prevCard.classList.remove('is-current');
+            const oldTag = prevCard.querySelector('.ds-pdf-card-cur');
+            if (oldTag) oldTag.remove();
+        }
+        const nextCard = pdfGridEl.querySelector('.ds-pdf-card[data-page="' + curPage + '"]');
+        if (nextCard) {
+            nextCard.classList.add('is-current');
+            const foot = nextCard.querySelector('.ds-pdf-card-foot');
+            if (foot && !foot.querySelector('.ds-pdf-card-cur')) {
+                const tag = document.createElement('span');
+                tag.className = 'ds-pdf-card-cur';
+                tag.textContent = '当前页';
+                foot.appendChild(tag);
+            }
+        }
+        pdfShownCurrentPage = curPage;
+        updatePdfPickerUI();
+    }
+
+    function updatePdfPickerUI() {
+        if (!pdfPickerEl) return;
+        const rs = getReaderState();
+        const doc = rs && rs.pdfDoc;
+        const token = rs ? rs.loadToken : null;
+        const maxAllowed = getMaxPdfSelectable(doc, token);
+        const hasExisting = attachments.some(function (a) { return isCurrentDocPdfAttachment(a, doc, token); });
+
+        const orderMap = new Map();
+        pdfSelectedPages.forEach(function (p, idx) { orderMap.set(p, idx + 1); });
+
+        pdfGridEl.querySelectorAll('.ds-pdf-card').forEach(function (card) {
+            const p = Number(card.dataset.page);
+            const ord = orderMap.get(p);
+            card.classList.toggle('is-selected', !!ord);
+            const ordEl = card.querySelector('.ds-pdf-card-order');
+            if (ordEl) ordEl.textContent = ord ? String(ord) : '';
+        });
+
+        pdfClearBtn.disabled = pdfSelectedPages.length === 0;
+
+        if (!pdfSelectedPages.length) {
+            pdfStatusEl.textContent = maxAllowed > 0
+                ? '点击页面选择（支持 Shift 连选，最多 ' + maxAllowed + ' 页）'
+                : '附件数量已达上限（' + MAX_IMAGES + ' 张）';
+        } else {
+            const summary = pdfSelectedPages.map(function (p) { return formatPdfPageLabel(p, rs, true); }).join(', ');
+            pdfStatusEl.textContent = '已选 ' + pdfSelectedPages.length + '/' + maxAllowed + ' 页：' + summary;
+        }
+
+        if (pdfConfirming) return;
+        if (pdfSelectedPages.length > 0) {
+            pdfConfirmBtn.disabled = false;
+            pdfConfirmBtn.textContent = '添加高清图 (' + pdfSelectedPages.length + ')';
+        } else if (hasExisting) {
+            pdfConfirmBtn.disabled = false;
+            pdfConfirmBtn.textContent = '确认移除';
+        } else {
+            pdfConfirmBtn.disabled = true;
+            pdfConfirmBtn.textContent = '添加高清图';
+        }
+    }
+
+    function togglePdfCardSelection(pageNum, isShift) {
+        const rs = getReaderState();
+        const doc = rs && rs.pdfDoc;
+        if (!doc || !Number.isInteger(pageNum) || pageNum < 1 || pageNum > doc.numPages) return;
+        const maxAllowed = getMaxPdfSelectable(doc, rs.loadToken);
+
+        if (isShift && pdfLastClickedPage && pdfLastClickedPage >= 1 && pdfLastClickedPage <= doc.numPages) {
+            const step = pdfLastClickedPage <= pageNum ? 1 : -1;
+            let hitLimit = false;
+            for (let p = pdfLastClickedPage; ; p += step) {
+                if (pdfSelectedPages.indexOf(p) === -1) {
+                    if (pdfSelectedPages.length >= maxAllowed) {
+                        hitLimit = true;
+                        break;
+                    }
+                    pdfSelectedPages.push(p);
+                }
+                if (p === pageNum) break;
+            }
+            if (hitLimit) flashHint('单条消息最多 ' + MAX_IMAGES + ' 张图片');
+            pdfLastClickedPage = pageNum;
+            updatePdfPickerUI();
+            return;
+        }
+
+        const existingIdx = pdfSelectedPages.indexOf(pageNum);
+        if (existingIdx !== -1) {
+            pdfSelectedPages.splice(existingIdx, 1);
+        } else {
+            if (pdfSelectedPages.length >= maxAllowed) {
+                flashHint('单条消息最多 ' + MAX_IMAGES + ' 张图片');
+                return;
+            }
+            pdfSelectedPages.push(pageNum);
+        }
+        pdfLastClickedPage = pageNum;
+        updatePdfPickerUI();
+    }
+
+    async function renderPdfPageHighRes(doc, pageNum) {
+        const page = await doc.getPage(pageNum);
+        const baseVp = page.getViewport({ scale: 1 });
+        const maxDim = Math.max(baseVp.width, baseVp.height, 1);
+        const scale = Math.max(0.5, Math.min(PDF_HIGHRES_SCALE, PDF_HIGHRES_MAX_PX / maxDim));
+        const viewport = page.getViewport({ scale: scale });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(viewport.width));
+        canvas.height = Math.max(1, Math.round(viewport.height));
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+        const approxBytes = function (url) {
+            const comma = url.indexOf(',');
+            return comma === -1 ? 0 : Math.floor((url.length - comma - 1) * 3 / 4);
+        };
+        let dataUrl = canvas.toDataURL('image/png');
+        if (approxBytes(dataUrl) > MAX_IMAGE_BYTES) {
+            dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        }
+        if (approxBytes(dataUrl) > MAX_IMAGE_BYTES) {
+            dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        }
+        canvas.width = 0;
+        canvas.height = 0;
+        return dataUrl;
+    }
+
+    async function confirmPdfPages() {
+        if (pdfConfirming) return;
+        const rs = getReaderState();
+        const doc = rs && rs.pdfDoc;
+        if (!doc) {
+            closePdfPicker();
+            return;
+        }
+        const token = rs.loadToken;
+        const gen = pdfPickerGen;
+        const otherAttachments = attachments.filter(function (a) {
+            return !isCurrentDocPdfAttachment(a, doc, token);
+        });
+        const existingMap = new Map();
+        attachments.forEach(function (a) {
+            if (isCurrentDocPdfAttachment(a, doc, token)) existingMap.set(a.pdfPage, a);
+        });
+
+        if (!pdfSelectedPages.length) {
+            attachments = otherAttachments;
+            renderThumbs();
+            closePdfPicker();
+            inputEl.focus();
+            return;
+        }
+
+        const maxAllowed = Math.max(0, MAX_IMAGES - otherAttachments.length);
+        const targetPages = pdfSelectedPages.slice(0, maxAllowed);
+        const toRenderCount = targetPages.filter(function (p) { return !existingMap.has(p); }).length;
+
+        pdfConfirming = true;
+        pdfConfirmBtn.disabled = true;
+        pdfCancelBtn.disabled = false;
+        let renderedDone = 0;
+        const pdfAttachments = [];
+        try {
+            for (let i = 0; i < targetPages.length; i++) {
+                const p = targetPages[i];
+                const reused = existingMap.get(p);
+                if (reused) {
+                    pdfAttachments.push(reused);
+                    continue;
+                }
+                renderedDone++;
+                pdfConfirmBtn.textContent = toRenderCount > 1
+                    ? '生成中 ' + renderedDone + '/' + toRenderCount + '…'
+                    : '生成中…';
+                const dataUrl = await renderPdfPageHighRes(doc, p);
+                if (!pdfPickerOpen || gen !== pdfPickerGen) return;
+                const liveRs = getReaderState();
+                if (!liveRs || liveRs.pdfDoc !== doc || liveRs.loadToken !== token) return;
+                pdfAttachments.push({
+                    id: 'pdf-' + Date.now() + '-' + p + '-' + Math.random().toString(36).slice(2, 6),
+                    dataUrl: dataUrl,
+                    name: 'PDF ' + formatPdfPageLabel(p, liveRs, false),
+                    pdfLabel: formatPdfPageLabel(p, liveRs, true),
+                    pdfPage: p,
+                    pdfDoc: doc,
+                    pdfToken: token
+                });
+            }
+            attachments = otherAttachments.concat(pdfAttachments);
+            renderThumbs();
+            closePdfPicker();
+            inputEl.focus();
+        } catch (err) {
+            flashHint('生成页面图片失败，请重试');
+        } finally {
+            pdfConfirming = false;
+            if (pdfPickerOpen && gen === pdfPickerGen) updatePdfPickerUI();
+        }
+    }
+
+    function openPdfPicker() {
+        const rs = getReaderState();
+        const doc = rs && rs.pdfDoc;
+        if (!doc) {
+            flashHint('请先打开 PDF 文档后再选择页面');
+            return;
+        }
+        const token = rs.loadToken;
+        if (doc !== pdfThumbDoc || token !== pdfThumbToken) {
+            pdfThumbCache.clear();
+            pdfThumbDoc = doc;
+            pdfThumbToken = token;
+        }
+        pdfPickerGen++;
+        const gen = pdfPickerGen;
+        pdfThumbQueue = [];
+        pdfConfirming = false;
+        if (pdfThumbObserver) {
+            pdfThumbObserver.disconnect();
+            pdfThumbObserver = null;
+        }
+
+        const totalPages = doc.numPages;
+        const curPage = getCurrentPdfPage(rs, totalPages);
+        const seen = new Set();
+        pdfSelectedPages = [];
+        attachments.forEach(function (a) {
+            if (isCurrentDocPdfAttachment(a, doc, token) && a.pdfPage >= 1 && a.pdfPage <= totalPages && !seen.has(a.pdfPage)) {
+                seen.add(a.pdfPage);
+                pdfSelectedPages.push(a.pdfPage);
+            }
+        });
+        pdfLastClickedPage = pdfSelectedPages.length ? pdfSelectedPages[pdfSelectedPages.length - 1] : null;
+
+        const dims = Array.isArray(rs.pageDimensions) ? rs.pageDimensions : [];
+        const frag = document.createDocumentFragment();
+        for (let p = 1; p <= totalPages; p++) {
+            const dim = dims[p - 1];
+            const ratio = dim && dim.width && dim.height
+                ? (Math.max(1, Math.round(dim.width)) + ' / ' + Math.max(1, Math.round(dim.height)))
+                : '595 / 842';
+            const card = document.createElement('button');
+            card.type = 'button';
+            card.className = 'ds-pdf-card' + (p === curPage ? ' is-current' : '');
+            card.dataset.page = String(p);
+            const label = formatPdfPageLabel(p, rs, false);
+            card.title = label + ' · 单击选择，Shift+单击连选，双击快速添加';
+            card.innerHTML =
+                '<div class="ds-pdf-card-thumb" style="aspect-ratio:' + ratio + ';">' +
+                    '<img class="ds-pdf-card-img" alt="' + label + '" hidden>' +
+                    '<span class="ds-pdf-card-ph">' + label + '</span>' +
+                    '<span class="ds-pdf-card-order"></span>' +
+                '</div>' +
+                '<div class="ds-pdf-card-foot">' +
+                    '<span class="ds-pdf-card-label">' +
+                        '<span class="ds-pdf-card-num">' + label + '</span>' +
+                    '</span>' +
+                    (p === curPage ? '<span class="ds-pdf-card-cur">当前页</span>' : '') +
+                '</div>';
+            frag.appendChild(card);
+        }
+        pdfGridEl.replaceChildren(frag);
+
+        pdfShownCurrentPage = curPage;
+        pdfPickerEl.hidden = false;
+        pdfPickerOpen = true;
+        pdfBtn.classList.add('active');
+        modelMenu.classList.remove('show');
+        const flashEl = panel.querySelector('.ds-chat-flash');
+        if (flashEl) flashEl.classList.remove('show');
+        updatePdfPickerUI();
+
+        const viewerEl = document.getElementById('viewer-container');
+        if (viewerEl && !pdfViewerScrollBound) {
+            let scrollSyncQueued = false;
+            pdfViewerScrollBound = function () {
+                if (!pdfPickerOpen || scrollSyncQueued) return;
+                scrollSyncQueued = true;
+                requestAnimationFrame(function () {
+                    scrollSyncQueued = false;
+                    syncCurrentPdfPageInPicker();
+                });
+            };
+            viewerEl.addEventListener('scroll', pdfViewerScrollBound, { passive: true });
+        }
+
+        const targetScrollPage = pdfSelectedPages[0] || curPage;
+        requestAnimationFrame(function () {
+            if (!pdfPickerOpen || gen !== pdfPickerGen) return;
+            scrollPickerToPage(targetScrollPage, true);
+            if (typeof IntersectionObserver !== 'undefined') {
+                pdfThumbObserver = new IntersectionObserver(function (entries) {
+                    if (!pdfPickerOpen || gen !== pdfPickerGen) return;
+                    entries.forEach(function (entry) {
+                        if (!entry.isIntersecting) return;
+                        const card = entry.target;
+                        enqueueThumbRender(Number(card.dataset.page), card, doc, token, gen);
+                    });
+                }, { root: pdfGridEl, rootMargin: '280px 0px', threshold: 0.01 });
+                pdfGridEl.querySelectorAll('.ds-pdf-card').forEach(function (card) {
+                    pdfThumbObserver.observe(card);
+                });
+            } else {
+                pdfGridEl.querySelectorAll('.ds-pdf-card').forEach(function (card) {
+                    enqueueThumbRender(Number(card.dataset.page), card, doc, token, gen);
+                });
+            }
+        });
+    }
+
+    function closePdfPicker() {
+        pdfPickerOpen = false;
+        pdfPickerGen++;
+        pdfThumbQueue = [];
+        pdfConfirming = false;
+        pdfShownCurrentPage = 0;
+        if (pdfThumbObserver) {
+            pdfThumbObserver.disconnect();
+            pdfThumbObserver = null;
+        }
+        const viewerEl = document.getElementById('viewer-container');
+        if (viewerEl && pdfViewerScrollBound) {
+            viewerEl.removeEventListener('scroll', pdfViewerScrollBound);
+            pdfViewerScrollBound = null;
+        }
+        if (pdfPickerEl) pdfPickerEl.hidden = true;
+        if (pdfBtn) pdfBtn.classList.remove('active');
+        if (pdfConfirmBtn) pdfConfirmBtn.disabled = false;
+    }
+
+    function togglePdfPicker() {
+        if (pdfPickerOpen) closePdfPicker(); else openPdfPicker();
     }
 
     // 缩略图上方的一次性提示（大小/格式不合规时）
@@ -1776,6 +2401,7 @@
             flashHint('正在生成回答，先点停止或等它说完');
             return;
         }
+        if (pdfPickerOpen) closePdfPicker();
         const images = attachments.slice();
         inputEl.value = '';
         autoGrow();
@@ -1802,6 +2428,7 @@
     async function send(text, images) {
         ensureDom();
         if (!panelVisible) showPanel();
+        if (pdfPickerOpen) closePdfPicker();
 
         // 首次发言时把开场白清掉
         if (!history.length) clearBody();
@@ -2039,6 +2666,7 @@
     }
 
     function hidePanel() {
+        if (pdfPickerOpen) closePdfPicker();
         if (panel) panel.style.display = 'none';
         panelVisible = false;
         syncToolbarButton(false);

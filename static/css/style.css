@@ -1475,6 +1475,234 @@
             padding: 0;
         }
         .ds-thumb-del:hover { background: #dc2626; }
+        .ds-thumb-badge {
+            position: absolute;
+            left: 3px;
+            bottom: 3px;
+            padding: 1px 4px;
+            border-radius: 4px;
+            background: rgba(15, 23, 42, 0.72);
+            color: #fff;
+            font-size: 9.5px;
+            font-weight: 600;
+            line-height: 1.2;
+            pointer-events: none;
+            max-width: calc(100% - 6px);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* ---------- PDF 页面选择抽屉 ---------- */
+        .ds-chat-stage {
+            position: relative;
+            flex: 1 1 auto;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+        }
+        .ds-pdf-picker {
+            position: absolute;
+            inset: 0;
+            z-index: 3;
+            display: flex;
+            flex-direction: column;
+            background: #f8fafc;
+            min-height: 0;
+        }
+        .ds-pdf-picker[hidden] { display: none; }
+        .ds-pdf-picker-bar {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            background: #fff;
+            border-bottom: 1px solid #eef2f6;
+            flex: none;
+        }
+        .ds-pdf-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            border: 1px solid #e2e8f0;
+            border-radius: 7px;
+            background: #f8fafc;
+            color: #475569;
+            font-size: 15px;
+            cursor: pointer;
+            transition: all 0.14s;
+            flex: none;
+        }
+        .ds-pdf-pill:hover:not(:disabled) { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
+        .ds-pdf-pill:disabled { opacity: 0.4; cursor: default; }
+        .ds-pdf-pill.active { background: #eff6ff; border-color: #3b82f6; color: #1d4ed8; }
+        .ds-pdf-locate-btn {
+            margin-left: auto;
+            color: #2563eb;
+            background: #eff6ff;
+            border-color: #bfdbfe;
+        }
+        .ds-pdf-locate-btn:hover:not(:disabled) { background: #dbeafe; border-color: #60a5fa; color: #1d4ed8; }
+        .ds-pdf-grid {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            padding: 12px;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-auto-rows: max-content;
+            gap: 12px;
+            align-content: start;
+            align-items: start;
+        }
+        .ds-pdf-card {
+            position: relative;
+            display: block;
+            width: 100%;
+            padding: 0;
+            text-align: left;
+            border: 1.5px solid #cbd5e1;
+            border-radius: 10px;
+            background: #fff;
+            cursor: pointer;
+            transition: border-color 0.14s, box-shadow 0.14s, transform 0.12s;
+        }
+        .ds-pdf-card:hover {
+            border-color: #60a5fa;
+            box-shadow: 0 6px 16px -6px rgba(37, 99, 235, 0.22);
+        }
+        .ds-pdf-card.is-current { border-color: #93c5fd; }
+        .ds-pdf-card.is-selected {
+            border-color: #2563eb;
+            box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.22), 0 6px 16px -6px rgba(37, 99, 235, 0.26);
+        }
+        .ds-pdf-card-thumb {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 595 / 842;
+            min-height: 190px;
+            background: #f8fafc;
+            border-radius: 8.5px 8.5px 0 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .ds-pdf-card-img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+            background: #fff;
+        }
+        .ds-pdf-card-img[hidden],
+        .ds-pdf-card-ph[hidden] { display: none; }
+        .ds-pdf-card-ph {
+            font-size: 14px;
+            font-weight: 600;
+            color: #94a3b8;
+            letter-spacing: 0.02em;
+            user-select: none;
+        }
+        .ds-pdf-card-order {
+            position: absolute;
+            top: 7px;
+            right: 7px;
+            min-width: 24px;
+            height: 24px;
+            padding: 0 6px;
+            border-radius: 999px;
+            border: 2px solid rgba(148, 163, 184, 0.78);
+            background: rgba(255, 255, 255, 0.92);
+            box-shadow: 0 1px 4px rgba(15, 23, 42, 0.14);
+            color: transparent;
+            font-size: 12px;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            transition: all 0.12s;
+        }
+        .ds-pdf-card:hover .ds-pdf-card-order { border-color: #60a5fa; }
+        .ds-pdf-card.is-selected .ds-pdf-card-order {
+            background: #2563eb;
+            border-color: #2563eb;
+            color: #fff;
+        }
+        .ds-pdf-card-foot {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+            height: 32px;
+            padding: 0 9px;
+            font-size: 12px;
+            color: #334155;
+            background: #fff;
+            border-top: 1px solid #f1f5f9;
+            border-radius: 0 0 8.5px 8.5px;
+        }
+        .ds-pdf-card-label {
+            display: inline-flex;
+            align-items: baseline;
+            gap: 5px;
+            min-width: 0;
+            overflow: hidden;
+        }
+        .ds-pdf-card-num {
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .ds-pdf-card-cur {
+            padding: 1px 6px;
+            border-radius: 999px;
+            background: #dbeafe;
+            color: #1d4ed8;
+            font-size: 10px;
+            font-weight: 600;
+            line-height: 1.4;
+            white-space: nowrap;
+            flex: none;
+        }
+        .ds-pdf-card.is-selected .ds-pdf-card-foot {
+            background: #eff6ff;
+            color: #1d4ed8;
+        }
+        .ds-pdf-picker-foot {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 7px 10px;
+            background: #fff;
+            border-top: 1px solid #eef2f6;
+            flex: none;
+        }
+        .ds-pdf-status {
+            font-size: 11.5px;
+            color: #64748b;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+        }
+        .ds-pdf-foot-btns {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex: none;
+        }
+        .ds-pdf-foot-btns .ds-edit-btn:disabled {
+            opacity: 0.45;
+            cursor: default;
+        }
 
         /* ---------- 输入区 ---------- */
         .ds-chat-input-row {
@@ -1490,8 +1718,8 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 32px;
-            height: 32px;
+            width: 34px;
+            height: 34px;
             flex: none;
             border: 1px solid #e5e7eb;
             border-radius: 9px;
@@ -1502,13 +1730,17 @@
             transition: all 0.15s;
         }
         .ds-chat-tool:hover { background: #f8fafc; color: #2563eb; border-color: #bfdbfe; }
+        .ds-chat-tool.active { background: #eff6ff; color: #2563eb; border-color: #93c5fd; }
         .ds-chat-input {
             flex: 1 1 auto;
             min-width: 0;
+            box-sizing: border-box;
+            min-height: 34px;
+            height: 34px;
             max-height: 120px;
-            padding: 7px 10px;
-            font-size: calc(13px * var(--ds-font-scale, 1));
-            line-height: 1.6;
+            padding: 6px 10px;
+            font-size: 13px;
+            line-height: 20px;
             color: #1f2937;
             background: #f8fafc;
             border: 1px solid #e5e7eb;
@@ -1523,8 +1755,8 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 32px;
-            height: 32px;
+            width: 34px;
+            height: 34px;
             flex: none;
             border: none;
             border-radius: 9px;
@@ -1585,6 +1817,17 @@
         body.eye-protection-mode .ds-chat-input { background: #F4EFE6 !important; border-color: #E6E2D6 !important; color: #3F3A33 !important; }
         body.eye-protection-mode .ds-chat-input:focus { background: #FBF9F5 !important; border-color: #C9C2B2 !important; }
         body.eye-protection-mode .ds-chat-tool { background: #FAF7F2 !important; border-color: #E6E2D6 !important; }
+        body.eye-protection-mode .ds-chat-tool.active { background: #EFE9DD !important; border-color: #C9C2B2 !important; color: #1d4ed8 !important; }
+        body.eye-protection-mode .ds-pdf-picker { background: #F4EFE6 !important; }
+        body.eye-protection-mode .ds-pdf-picker-bar,
+        body.eye-protection-mode .ds-pdf-picker-foot,
+        body.eye-protection-mode .ds-pdf-card,
+        body.eye-protection-mode .ds-pdf-card-foot { background: #FAF7F2 !important; border-color: #E6E2D6 !important; }
+        body.eye-protection-mode .ds-pdf-card-thumb { background: #F8F4EC !important; }
+        body.eye-protection-mode .ds-pdf-pill { background: #F4EFE6 !important; border-color: #DFD7C6 !important; color: #3F3A33 !important; }
+        body.eye-protection-mode .ds-pdf-locate-btn { background: #EFE9DD !important; border-color: #C9C2B2 !important; color: #1d4ed8 !important; }
+        body.eye-protection-mode .ds-pdf-card.is-selected { border-color: #2563eb !important; }
+        body.eye-protection-mode .ds-pdf-card.is-selected .ds-pdf-card-foot { background: #EFE9DD !important; }
         body.eye-protection-mode .ds-chat-model-menu { background: #FAF7F2 !important; border-color: #E6E2D6 !important; }
         body.eye-protection-mode .ds-msg-user .ds-bubble { background: #F1ECE1 !important; border-color: #E3DCCB !important; }
         body.eye-protection-mode .ds-code-block,
