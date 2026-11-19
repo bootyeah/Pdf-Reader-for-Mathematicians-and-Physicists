@@ -94,10 +94,20 @@
         body.eye-protection-mode #cloud-panel, /* 👈 新增：云端批注库面板。它带 bg-white 又住在 aside 里，会被上面第 3 条一起抹成透明 */
         body.eye-protection-mode #marker-dropdown-wrapper .absolute,
         body.eye-protection-mode #open-dropdown-wrapper .absolute,
-        body.eye-protection-mode #save-dropdown-wrapper .absolute {
+        body.eye-protection-mode #save-dropdown-wrapper .absolute,
+        body.eye-protection-mode #fullscreen-window-card {
             background-color: #FAF7F2 !important; 
             border-color: #E6E2D6 !important;
             box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05) !important;
+        }
+        body.eye-protection-mode .fullscreen-window-item.is-pinned {
+            background-color: #EFE9DC !important;
+            color: #1d4ed8 !important;
+        }
+        #fullscreen-dropdown-wrapper.dropdown-dismissed #fullscreen-window-dropdown {
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
         }
         body.eye-protection-mode #search-input {
             background-color: #FDFCF9 !important;

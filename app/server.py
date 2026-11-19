@@ -23,7 +23,7 @@ if _PROJECT_ROOT not in sys.path:
 
 import api_settings
 from app import routes
-from app.services import cloud_sync, tikz_compiler, video_service, tunnel_service, formula_service
+from app.services import cloud_sync, tikz_compiler, video_service, tunnel_service, formula_service, window_service
 from app.utils import console, browser_close
 
 # Windows Per-Monitor V2 High DPI awareness
@@ -414,6 +414,10 @@ class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):
         hide_console_window()
 
         def finish():
+            try:
+                window_service.unpin_all()
+            except Exception:
+                pass
             try:
                 formula_service.close_all()
             except Exception:
@@ -877,6 +881,10 @@ def main():
         try:
             httpd.serve_forever()
         finally:
+            try:
+                window_service.unpin_all()
+            except Exception:
+                pass
             formula_service.close_all()
 
 

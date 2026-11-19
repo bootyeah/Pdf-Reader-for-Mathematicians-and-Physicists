@@ -1515,9 +1515,143 @@
                 }
         }
 
+        const fullscreenDropdownWrapper = document.getElementById('fullscreen-dropdown-wrapper');
+        const fullscreenWindowListEl = document.getElementById('fullscreen-window-list');
+        let _fullscreenWindows = [];
+        let _hasReaderPinnedWindows = false;
+
+        function renderFullscreenWindowList(windows) {
+            _fullscreenWindows = Array.isArray(windows) ? windows : [];
+            const anyPinned = _fullscreenWindows.some(w => !!(w && w.pinned));
+            _hasReaderPinnedWindows = anyPinned || _fullscreenWindows.some(w => !!(w && w.pinned_by_reader));
+            els.fullscreenBtn?.classList.toggle('text-blue-600', anyPinned);
+            if (!fullscreenWindowListEl) return _fullscreenWindows;
+            fullscreenWindowListEl.innerHTML = '';
+            if (_fullscreenWindows.length === 0) {
+                const emptyEl = document.createElement('div');
+                emptyEl.className = 'fullscreen-window-empty px-2.5 py-2 text-center text-[11px] text-gray-400 select-none';
+                emptyEl.textContent = '暂无其他窗口';
+                fullscreenWindowListEl.appendChild(emptyEl);
+                return _fullscreenWindows;
+            }
+            _fullscreenWindows.forEach(win => {
+                if (!win || win.hwnd == null) return;
+                const pinned = !!win.pinned;
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'fullscreen-window-item group/win w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-xs transition-colors '
+                    + (pinned ? 'is-pinned bg-blue-50 text-blue-600 font-medium' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900');
+                btn.dataset.hwnd = String(win.hwnd);
+                btn.dataset.pinned = pinned ? 'true' : 'false';
+                const label = String(win.title || win.app || '未命名窗口');
+                btn.title = label + (pinned ? '（已置顶 · 点击取消置顶并退回后台）' : '（点击唤起并置顶）');
+
+                const icon = document.createElement('i');
+                icon.className = (pinned
+                    ? 'ph-fill ph-push-pin text-blue-600'
+                    : 'ph ph-app-window text-gray-400 group-hover/win:text-blue-500') + ' text-[14px] shrink-0 transition-colors';
+
+                const span = document.createElement('span');
+                span.className = 'fullscreen-window-title flex-1 min-w-0 truncate';
+                span.textContent = label;
+
+                btn.appendChild(icon);
+                btn.appendChild(span);
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleFullscreenWindow(win.hwnd);
+                });
+                fullscreenWindowListEl.appendChild(btn);
+            });
+            return _fullscreenWindows;
+        }
+
+        async function refreshFullscreenWindows() {
+            try {
+                const resp = await fetch('/api/windows', { cache: 'no-store' });
+                if (!resp.ok) return _fullscreenWindows;
+                const data = await resp.json();
+                if (data && Array.isArray(data.windows)) {
+                    return renderFullscreenWindowList(data.windows);
+                }
+            } catch (_) {}
+            return _fullscreenWindows;
+        }
+
+        async function toggleFullscreenWindow(hwnd, action = 'toggle') {
+            try {
+                const resp = await fetch('/api/windows', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action, hwnd })
+                });
+                const data = await resp.json().catch(() => null);
+                if (data && Array.isArray(data.windows)) {
+                    renderFullscreenWindowList(data.windows);
+                } else {
+                    await refreshFullscreenWindows();
+                }
+                return data;
+            } catch (_) {
+                return null;
+            }
+        }
+
+        async function unpinAllFullscreenWindows() {
+            const shouldNotify = _hasReaderPinnedWindows || _fullscreenWindows.some(w => !!(w && (w.pinned || w.pinned_by_reader)));
+            _hasReaderPinnedWindows = false;
+            els.fullscreenBtn?.classList.remove('text-blue-600');
+            if (!shouldNotify) return null;
+            try {
+                const resp = await fetch('/api/windows', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'unpin_all' }),
+                    keepalive: true
+                });
+                const data = await resp.json().catch(() => null);
+                if (data && Array.isArray(data.windows)) {
+                    renderFullscreenWindowList(data.windows);
+                }
+                return data;
+            } catch (_) {
+                return null;
+            }
+        }
+
+        window.FullscreenWindowSwitcher = {
+            refresh: refreshFullscreenWindows,
+            toggle: toggleFullscreenWindow,
+            unpinAll: unpinAllFullscreenWindows,
+            renderList: renderFullscreenWindowList
+        };
+
+        fullscreenDropdownWrapper?.addEventListener('mouseenter', () => {
+            fullscreenDropdownWrapper.classList.remove('dropdown-dismissed');
+            refreshFullscreenWindows();
+        });
+        fullscreenDropdownWrapper?.addEventListener('mouseleave', () => {
+            fullscreenDropdownWrapper.classList.remove('dropdown-dismissed');
+        });
+
         els.fullscreenBtn.addEventListener('click', () => {
+            fullscreenDropdownWrapper?.classList.add('dropdown-dismissed');
             if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(err => console.error(err));
             else if (document.exitFullscreen) document.exitFullscreen();
+        });
+
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement) {
+                unpinAllFullscreenWindows();
+            }
+        });
+
+        window.addEventListener('pagehide', () => {
+            if (_hasReaderPinnedWindows) {
+                try {
+                    navigator.sendBeacon?.('/api/windows', new Blob([JSON.stringify({ action: 'unpin_all' })], { type: 'application/json' }));
+                } catch (_) {}
+            }
         });
         // Esc 下方的反引号/波浪号物理键进入全屏，Esc 仍交给浏览器退出。
         window.addEventListener('keydown', e => {

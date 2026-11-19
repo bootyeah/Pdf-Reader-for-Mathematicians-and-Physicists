@@ -6,7 +6,7 @@ import os
 import sys
 import tempfile
 import urllib.parse
-from app.services import cloud_sync, formula_service, video_service, online_video_service, bilibili_service
+from app.services import cloud_sync, formula_service, video_service, online_video_service, bilibili_service, window_service
 import api_settings
 
 
@@ -530,6 +530,7 @@ GET_ROUTES = {
     '/api/bilibili/media': handle_bilibili_media,
     '/api/video': handle_video,
     '/api/ai-config': handle_ai_config,
+    '/api/windows': window_service.handle_get,
     '/api/shutdown': handle_shutdown,
     '/.well-known/appspecific/com.chrome.devtools.json': handle_chrome_devtools,
 }
@@ -545,6 +546,7 @@ POST_ROUTES = {
     '/api/check-folder': handle_check_folder,
     '/api/pick-folder': handle_pick_folder,
     '/api/pick-file': handle_pick_file,
+    '/api/windows': window_service.handle_post,
     '/api/shutdown': handle_shutdown,
 }
 
