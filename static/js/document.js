@@ -236,8 +236,11 @@
             const isStale = () => state.loadToken !== loadToken;
 
             let embeddedAnnos = {};
+            let embeddedGrids = {};
             let localAnnos = {};
             let localDraft = null;
+            let localGrids = {};
+            let localGridDraft = null;
 
             // Identify the complete document before touching its cache. A PDF.js
             // prefix fingerprint can belong to several unrelated PDFs.
@@ -247,6 +250,7 @@
                 const result = await readEmbeddedAnnotations(file, loadToken, true);
                 if (isStale()) return;
                 embeddedAnnos = result.annotations || {};
+                embeddedGrids = result.pageGrids || {};
                 fingerprint = result.fingerprint || '';
             } catch (e) {
                 fingerprint = '';
@@ -255,13 +259,21 @@
             if (isStale()) return;
             state.fingerprint = fingerprint;
             if (!isAnnotationTable(embeddedAnnos)) embeddedAnnos = {};
+            if (typeof isPageGridTable === 'function' && !isPageGridTable(embeddedGrids)) embeddedGrids = {};
 
             try {
                 // 1. 极速读取本地 indexedDB 缓存（无阻塞）
                 const localKey = `pdf_annos_${fingerprint}`;
-                await annotationStorageWrites.get(localKey)?.promise;
+                const localGridKey = `pdf_grids_${fingerprint}`;
+                await Promise.all([
+                    annotationStorageWrites.get(localKey)?.promise,
+                    pageGridStorageWrites.get(localGridKey)?.promise
+                ]);
                 if (isStale()) return;
-                const localData = fingerprint ? await localforage.getItem(localKey) : null;
+                const [localData, localGridData] = fingerprint ? await Promise.all([
+                    localforage.getItem(localKey),
+                    localforage.getItem(localGridKey)
+                ]) : [null, null];
                 if (isStale()) return;
                 if (localData) {
                     localAnnos = typeof localData === 'string' ? JSON.parse(localData) : localData;
@@ -269,12 +281,44 @@
                     localDraft = localAnnos.__readerLocalState;
                     delete localAnnos.__readerLocalState;
                 }
+                if (localGridData) {
+                    localGrids = typeof localGridData === 'string' ? JSON.parse(localGridData) : localGridData;
+                    localGridDraft = localGrids?.__readerLocalState;
+                    if (localGrids && typeof localGrids === 'object') delete localGrids.__readerLocalState;
+                    if (typeof isPageGridTable === 'function' && !isPageGridTable(localGrids)) localGrids = {};
+                }
 
             } catch (e) { 
                 localAnnos = {}; localDraft = null;
+                localGrids = {}; localGridDraft = null;
                 console.warn('本地批注缓存读取失败:', e);
             }
             if (isStale()) return;
+
+            // 2. 自动分格数据合并（仅存本地 PDF 与 IndexedDB，不进撤销栈、不上传云端）
+            const cleanGridsMap = (obj) => (typeof serializePageGridsClean === 'function' ? serializePageGridsClean(obj) : (obj || {}));
+            const cleanEmbeddedGrids = cleanGridsMap(embeddedGrids);
+            const cleanLocalGrids = cleanGridsMap(localGrids);
+            const liveEditsBeforeRestore = cleanGridsMap(state.pageGrids);
+            state.pageGridBase = JSON.stringify(cleanEmbeddedGrids);
+            let restoredGrids = Object.keys(cleanEmbeddedGrids).length > 0 ? { ...cleanEmbeddedGrids } : { ...cleanLocalGrids };
+            if (localGridDraft?.unsaved) {
+                restoredGrids = { ...cleanEmbeddedGrids, ...cleanLocalGrids };
+                let baseObj = {};
+                try { baseObj = cleanGridsMap(JSON.parse(localGridDraft.base || '{}')); } catch (_) {}
+                for (const k of Object.keys(baseObj)) {
+                    if (!Object.prototype.hasOwnProperty.call(cleanLocalGrids, k)) delete restoredGrids[k];
+                }
+                if (JSON.stringify(restoredGrids) !== state.pageGridBase) updateSaveStatus(true);
+            }
+            Object.assign(restoredGrids, liveEditsBeforeRestore);
+            state.pageGrids = restoredGrids;
+            if (Object.keys(state.pageGrids).length > 0) {
+                state.pagesRendered.forEach(pageNum => {
+                    if (state.pageGrids[pageNum]) window.PageAutoGrid?.refreshPageTextLayer?.(pageNum);
+                });
+            }
+            window.PageAutoGrid?.updateHudButton?.();
 
             // 3. 数据合并与状态初始化
             // 保持内嵌优先、本地兜底，并保留恢复期间的新编辑及对应的撤销增量。
@@ -328,6 +372,7 @@
             }
 
             if (Object.keys(embeddedAnnos).length > 0 || state.unsavedChanges) saveAnnotationsToStorage();
+            if (Object.keys(embeddedGrids).length > 0 || Object.keys(state.pageGrids).length > 0) savePageGridsToStorage();
             const restoreScrollTop = els.container.scrollTop;
             if (restoreScrollTop > 5) return; // 已经开始阅读时，不让迟到的恢复把用户拉回去。
             // 等待首屏布局稳定后恢复：150ms 先快速到位；700ms 后若用户未手动滚动则再校准一次
@@ -358,6 +403,31 @@
         }
 
         const annotationStorageWrites = new Map();
+        const pageGridStorageWrites = new Map();
+        function savePageGridsToStorage() {
+            if (!state.fingerprint || state.annotationsLoading) return;
+            const key = `pdf_grids_${state.fingerprint}`;
+            const cleanGrids = typeof serializePageGridsClean === 'function' ? serializePageGridsClean(state.pageGrids) : (state.pageGrids || {});
+            const snapshot = JSON.parse(JSON.stringify(cleanGrids));
+            snapshot.__readerLocalState = {
+                unsaved: JSON.stringify(cleanGrids) !== (state.pageGridBase || '{}'),
+                base: state.pageGridBase || '{}'
+            };
+            let entry = pageGridStorageWrites.get(key);
+            if (entry) { entry.pending = snapshot; return entry.promise; }
+            entry = { pending: snapshot };
+            pageGridStorageWrites.set(key, entry);
+            entry.promise = Promise.resolve().then(async () => {
+                while (entry.pending) {
+                    const next = entry.pending;
+                    entry.pending = null;
+                    try { await localforage.setItem(key, next); }
+                    catch (error) { console.error('Local page grid save error', error); }
+                }
+            }).finally(() => { pageGridStorageWrites.delete(key); });
+            return entry.promise;
+        }
+        window.savePageGridsToStorage = savePageGridsToStorage;
         function saveAnnotationsToStorage() {
             if (!state.fingerprint || state.annotationsLoading) return;
             
@@ -969,6 +1039,8 @@
             if (!els.noteModal.classList.contains('hidden') && typeof commitNoteEdit === 'function') commitNoteEdit();
             if (state.resizingText) finishTextResize();
             saveAnnotationsToStorage();
+            savePageGridsToStorage();
+            window.PageAutoGrid?.reset?.();
             clearTimeout(state.zoomEndTimer);
             state.isZooming = false;
             state.handDrag.isDragging = false;
@@ -1002,6 +1074,8 @@
             state.pdfDoc = null;
             state.annotations = {};
             state.annotationBase = '{}';
+            state.pageGrids = {};
+            state.pageGridBase = '{}';
             state.searchQuery = '';
             searchSidebarView = null;
             setSidebarMode('annotations');

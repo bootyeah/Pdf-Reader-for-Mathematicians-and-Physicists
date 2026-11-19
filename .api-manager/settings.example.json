@@ -109,6 +109,21 @@
       "proxy": "system",
       "prompt": "",
       "web_search": false
+    },
+    "page_grid": {
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "api_key": "",
+      "key_source": "formula_image",
+      "model": "glm-4.6v-flash",
+      "fallback_model": "glm-4v-flash",
+      "models": [],
+      "temperature": null,
+      "timeout": 180,
+      "max_tokens": 0,
+      "thinking": "disabled",
+      "proxy": "",
+      "prompt": "你是一个高精度教材与学术文献版面文字识别专家。输入图片为 PDF 页面，其中每一行待识别文字的左侧或行框旁已标注了编号（如 [1]、[2]、[3]…）。\n请严格按照编号顺序，逐行输出对应行框内的文字内容，要求：\n1. 每行一条，严格使用格式：[编号] 文字内容（例如：[1] 第一章 函数与极限）。\n2. 为了使识别出的文字在页面上与原图字形 1:1 精确对齐以便框选，数学符号、希腊字母、上下标请直接输出对应的 Unicode 字符（如 α β γ θ λ μ π σ φ ω Δ Σ Ω ∫ ∑ ∂ ∇ √ ∞ ≤ ≥ ≠ ≈ ∈ ∉ ⊂ ⊆ ∪ ∩ ∀ ∃ → ⇒ ⇔ × ÷ ± ² ³），不要展开为冗长的 LaTeX 命令（如不要写 \\alpha、\\int）。\n3. 忠实还原原文的中英文、数字、标点与词间空格，不翻译、不解释、不跨行合并；若某编号框内无文字，仅输出 [编号]。\n4. 只输出编号行列表本身，不要输出 Markdown 代码块围栏或任何额外说明。",
+      "web_search": false
     }
   }
 }

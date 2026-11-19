@@ -175,11 +175,13 @@ async function performSave() {
             state.annotations.settings.lastPage = state.currentPhysicalPage;
         }
         saveAnnotationsToStorage();
+        if (typeof savePageGridsToStorage === 'function') savePageGridsToStorage();
         const context = {
             loadToken: saveLoadToken, rawFile: state.rawFile,
             fileHandle: state.fileHandle, localPath: state.localFilePath,
             fileName: state.fileName, fingerprint: state.fingerprint,
-            annotations: JSON.stringify(typeof serializeAnnotationsClean === 'function' ? serializeAnnotationsClean(state.annotations) : state.annotations)
+            annotations: JSON.stringify(typeof serializeAnnotationsClean === 'function' ? serializeAnnotationsClean(state.annotations) : state.annotations),
+            pageGrids: JSON.stringify(typeof serializePageGridsClean === 'function' ? serializePageGridsClean(state.pageGrids) : (state.pageGrids || {}))
         };
         if (typeof CloudSync !== 'undefined') CloudSync.upload();
         await performSaveInner(context);
@@ -239,7 +241,20 @@ async function performSaveInner(context) {
         const hexStr = hexArray.join('');
 
         // 3. 极简挂载：写入最外围、最稳定的 Info 字典，绝不破坏 PDF 内部结构
-        pdfDoc.getInfoDict().set(PDFName.of('ReaderProAnnos'), PDFHexString.of(hexStr));
+        const infoDict = pdfDoc.getInfoDict();
+        infoDict.set(PDFName.of('ReaderProAnnos'), PDFHexString.of(hexStr));
+
+        // 4. 独立挂载纯图片页自动分格数据（仅保存在本地 PDF 文件，不参与云端批注同步）
+        if (context.pageGrids && context.pageGrids !== '{}') {
+            const gridBytes = new TextEncoder().encode(context.pageGrids);
+            const gridHex = new Array(gridBytes.length);
+            for (let i = 0; i < gridBytes.length; i++) {
+                gridHex[i] = gridBytes[i].toString(16).padStart(2, '0');
+            }
+            infoDict.set(PDFName.of('ReaderProGrids'), PDFHexString.of(gridHex.join('')));
+        } else {
+            infoDict.delete(PDFName.of('ReaderProGrids'));
+        }
 
         const pdfBytes = await pdfDoc.save();
         if (!isCurrent()) return;
@@ -263,10 +278,13 @@ async function performSaveInner(context) {
             state.rawFile = new File([blob], context.fileName, { type: 'application/pdf' });
             state.fileHandle = handle;
             state.annotationBase = context.annotations;
+            state.pageGridBase = context.pageGrids || '{}';
             // 编码/写盘期间仍允许编辑；只清除此次快照实际覆盖的修改。
             const cleanLive = JSON.stringify(typeof serializeAnnotationsClean === 'function' ? serializeAnnotationsClean(state.annotations) : state.annotations);
-            updateSaveStatus(cleanLive !== context.annotations);
+            const cleanLiveGrids = JSON.stringify(typeof serializePageGridsClean === 'function' ? serializePageGridsClean(state.pageGrids) : (state.pageGrids || {}));
+            updateSaveStatus(cleanLive !== context.annotations || cleanLiveGrids !== state.pageGridBase);
             saveAnnotationsToStorage();
+            if (typeof savePageGridsToStorage === 'function') savePageGridsToStorage();
             updateDocMeta();
         }
 

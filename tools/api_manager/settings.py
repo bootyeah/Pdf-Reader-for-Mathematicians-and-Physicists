@@ -29,6 +29,7 @@ FEATURES = {
     # 第二模型不是只换接口：formula_bridge._apply_engine 会把本项的整组配置覆盖到默认识别项上，
     # 温度、超时、输出上限、思考、代理、备用模型都跟着换，只有提示词留空时才保留默认项的提示词。
     'formula_alt': ('公式识别 · 第二模型', '按下编辑框公式面板或独立手写白板的「第二模型」后，接口、Key、模型与调用参数（温度、超时、输出上限、思考、代理、备用模型）整组改用此项。白板使用独立段落提示词。', '视觉'),
+    'page_grid': ('页面自动分格', '纯图片 PDF 页面的文字行识别与高精度框选定位。默认复用图片公式识别的 GLM 模型与密钥。', '视觉'),
 }
 COMMON = dict(base_url='', api_key='', key_source='', model='', fallback_model='',
               models=[], temperature=None, timeout=60, max_tokens=0,
@@ -38,13 +39,26 @@ _LOCK = threading.RLock()
 THINKING_MODES = protocol.MODES
 THINKING_ACTIVE_MODES = protocol.ACTIVE_MODES
 
+PAGE_GRID_PROMPT = (
+    '你是一个高精度教材与学术文献版面文字识别专家。输入图片为 PDF 页面，其中每一行待识别文字的左侧或行框旁已标注了编号（如 [1]、[2]、[3]…）。\n'
+    '请严格按照编号顺序，逐行输出对应行框内的文字内容，要求：\n'
+    '1. 每行一条，严格使用格式：[编号] 文字内容（例如：[1] 第一章 函数与极限）。\n'
+    '2. 为了使识别出的文字在页面上与原图字形 1:1 精确对齐以便框选，数学符号、希腊字母、上下标请直接输出对应的 Unicode 字符（如 α β γ θ λ μ π σ φ ω Δ Σ Ω ∫ ∑ ∂ ∇ √ ∞ ≤ ≥ ≠ ≈ ∈ ∉ ⊂ ⊆ ∪ ∩ ∀ ∃ → ⇒ ⇔ × ÷ ± ² ³），不要展开为冗长的 LaTeX 命令（如不要写 \\alpha、\\int）。\n'
+    '3. 忠实还原原文的中英文、数字、标点与词间空格，不翻译、不解释、不跨行合并；若某编号框内无文字，仅输出 [编号]。\n'
+    '4. 只输出编号行列表本身，不要输出 Markdown 代码块围栏或任何额外说明。'
+)
+
 # Google AI Studio 的 OpenAI 兼容端点；Key 走 Authorization: Bearer，与 DeepSeek 调用方式一致。
 # Gemini 的温度按具体型号自动处理；超时 180s，思考默认 high，代理默认跟随系统代理。
 GEMINI_CHAT_DEFAULT = dict(COMMON, base_url='https://generativelanguage.googleapis.com/v1beta/openai',
                            model='gemini-4-argon', fallback_model='gemini-3.8-flash',
                            temperature=None, timeout=180, thinking='high', proxy='system')
+PAGE_GRID_DEFAULT = dict(COMMON, base_url='https://open.bigmodel.cn/api/paas/v4',
+                         key_source='formula_image', model='glm-4.6v-flash',
+                         fallback_model='glm-4v-flash', temperature=None,
+                         timeout=180, thinking='disabled', prompt=PAGE_GRID_PROMPT)
 # 后来新增的功能：旧 settings.json 里没有时按默认值补齐，避免整份配置因缺项被判为损坏。
-ADDED_FEATURES = {'chat_gemini': GEMINI_CHAT_DEFAULT}
+ADDED_FEATURES = {'chat_gemini': GEMINI_CHAT_DEFAULT, 'page_grid': PAGE_GRID_DEFAULT}
 
 
 def detect_model_family(model=None, base_url=None):
@@ -75,6 +89,16 @@ def upgrade(doc):
     """Fill in features added after the file was written; leaves everything else untouched."""
     features = doc.get('features') if isinstance(doc, dict) else None
     if isinstance(features, dict):
+        if 'page_grid' not in features:
+            seed = copy.deepcopy(PAGE_GRID_DEFAULT)
+            fi = features.get('formula_image')
+            if isinstance(fi, dict):
+                for k in ('base_url', 'model', 'fallback_model', 'temperature', 'timeout', 'thinking', 'proxy'):
+                    if k in fi:
+                        seed[k] = copy.deepcopy(fi[k])
+                seed['api_key'] = ''
+                seed['key_source'] = 'formula_image'
+            features['page_grid'] = seed
         for fid, default in ADDED_FEATURES.items():
             features.setdefault(fid, copy.deepcopy(default))
         gemini = features.get('chat_gemini')
@@ -152,10 +176,13 @@ def legacy_document():
         return dict(COMMON, **{k: v for k, v in cfg.items() if k in COMMON})
     alt = dict(vision(image), **old['DEEPSEEK_VISION'])
     alt.update(api_key='', key_source='chat', prompt='')
+    grid = dict(vision(image), api_key='', key_source='formula_image',
+                timeout=180, prompt=PAGE_GRID_PROMPT)
     return {'version': 1, 'revision': 'legacy', 'updated_at': '', 'features': {
         'chat': chat, 'chat_gemini': copy.deepcopy(GEMINI_CHAT_DEFAULT), 'dictionary': dictionary,
         'translation': dict(dictionary, api_key='', key_source='dictionary', prompt=old['SENTENCE_PROMPT']),
         'formula_image': vision(image), 'formula_handwriting': vision(hand), 'formula_alt': alt,
+        'page_grid': grid,
     }}
 
 
@@ -317,8 +344,8 @@ def resolve(fid, defaults, document=None):
     cfg = dict(defaults, **doc['features'][fid])
     cfg['api_key'] = api_key_for(doc, fid)
     # Empty vision prompts preserve tex / airtex's mode-aware prompt.
-    if fid.startswith('formula_') and not cfg['prompt']:
-        cfg['prompt'] = defaults.get('prompt', '')
+    if (fid.startswith('formula_') or fid == 'page_grid') and not cfg['prompt']:
+        cfg['prompt'] = defaults.get('prompt', '') or (PAGE_GRID_PROMPT if fid == 'page_grid' else '')
     return cfg
 
 

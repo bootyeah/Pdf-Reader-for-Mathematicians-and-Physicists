@@ -3,6 +3,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import sys
 import tempfile
 import urllib.parse
@@ -335,6 +336,119 @@ def handle_chat(handler):
         handler._json_response(502, {'ok': False, 'error': result['error']})
 
 
+_GRID_BOX_RE = re.compile(r'^\s*\[\s*(\d{1,4})\s*,\s*(\d{1,4})\s*,\s*(\d{1,4})\s*,\s*(\d{1,4})\s*\]\s*[:：\-]?\s*(.*)$')
+_GRID_IDX_RE = re.compile(r'^\s*(?:\[\s*#?(\d+)\s*\]|#(\d+))\s*[:：\-]?\s*(.*)$')
+_GRID_PLAIN_IDX_RE = re.compile(r'^\s*(\d+)\s*[:：.、)）]\s*(.+)$')
+
+
+def _parse_page_grid_output(raw_text):
+    text = (raw_text or '').strip()
+    if text.startswith('```'):
+        text = re.sub(r'^```[a-zA-Z0-9_-]*\s*', '', text)
+        text = re.sub(r'\s*```$', '', text).strip()
+    lines_map = {}
+    boxes_list = []
+    current_idx = None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        bm = _GRID_BOX_RE.match(line)
+        if bm:
+            ymin, xmin, ymax, xmax = (int(bm.group(1)), int(bm.group(2)), int(bm.group(3)), int(bm.group(4)))
+            content = bm.group(5).strip()
+            if content:
+                boxes_list.append({'box': [ymin, xmin, ymax, xmax], 'text': content})
+            current_idx = None
+            continue
+        im = _GRID_IDX_RE.match(line)
+        if im:
+            idx = str(int(im.group(1) or im.group(2)))
+            lines_map[idx] = im.group(3).strip()
+            current_idx = idx
+        elif current_idx is not None and current_idx in lines_map:
+            lines_map[current_idx] = (lines_map[current_idx] + ' ' + line).strip()
+    if not lines_map and not boxes_list:
+        for raw_line in text.splitlines():
+            pm = _GRID_PLAIN_IDX_RE.match(raw_line.strip())
+            if pm:
+                lines_map[str(int(pm.group(1)))] = pm.group(2).strip()
+    return lines_map, boxes_list
+
+
+def handle_page_grid(handler):
+    try:
+        content_length = int(handler.headers.get('Content-Length', 0))
+        if content_length <= 0 or content_length > 14 * 1024 * 1024:
+            formula_service._drain_request(handler)
+            handler._json_response(400, {'ok': False, 'error': '页面图片数据大小无效'})
+            return
+        req_data = json.loads(handler.rfile.read(content_length).decode('utf-8'))
+        if not isinstance(req_data, dict):
+            raise ValueError('请求格式无效')
+    except Exception:
+        handler._json_response(400, {'ok': False, 'error': '请求体解析失败'})
+        return
+
+    image_url = str(req_data.get('image') or '').strip()
+    if not image_url.startswith(('data:image/png;base64,', 'data:image/jpeg;base64,', 'data:image/webp;base64,')):
+        handler._json_response(400, {'ok': False, 'error': '需要 PNG、JPEG 或 WebP 格式的页面图片'})
+        return
+
+    try:
+        line_count = max(0, min(2000, int(req_data.get('lineCount') or 0)))
+    except (ValueError, TypeError):
+        line_count = 0
+    try:
+        page_w = max(1.0, float(req_data.get('pageWidth') or 595.0))
+        page_h = max(1.0, float(req_data.get('pageHeight') or 842.0))
+    except (ValueError, TypeError):
+        page_w, page_h = 595.0, 842.0
+
+    cfg = handler._api_config('page_grid')
+    if not str(cfg.get('api_key') or '').strip():
+        handler._json_response(400, {'ok': False, 'error': '请先在 API-Manager.bat 的「页面自动分格」中配置或关联 API Key'})
+        return
+
+    base_prompt = (cfg.get('prompt') or '').strip() or api_settings.PAGE_GRID_PROMPT
+    if line_count > 0:
+        user_prompt = (
+            f"{base_prompt}\n\n"
+            f"当前页面尺寸为 {page_w:.1f}×{page_h:.1f}，图片中已标出 {line_count} 个待识别文字行框"
+            f"（编号 [1] 至 [{line_count}]）。请严格按 [1] 到 [{line_count}] 逐行输出各框内的文字内容。"
+        )
+    else:
+        user_prompt = (
+            f"{base_prompt}\n\n"
+            f"当前页面尺寸为 {page_w:.1f}×{page_h:.1f}。请逐行识别页面中的全部文字，"
+            f"每行严格按 [ymin, xmin, ymax, xmax] 文字内容 的格式输出（坐标为 0 至 1000 的归一化整数）。"
+        )
+
+    messages = [{
+        'role': 'user',
+        'content': [
+            {'type': 'text', 'text': user_prompt},
+            {'type': 'image_url', 'image_url': {'url': image_url}},
+        ],
+    }]
+    handler._active_chat_config = cfg
+    print("[自动分格] 模型 %s · 待识别 %d 行 (%.0f×%.0f)" % (cfg['model'], line_count, page_w, page_h))
+    result = handler._chat_once(messages, cfg['model'], None, cfg['temperature'], cfg['max_tokens'])
+    if not result.get('ok'):
+        print("[自动分格] 失败: %s" % result.get('error'))
+        handler._json_response(502, {'ok': False, 'error': result.get('error') or '自动分格识别失败'})
+        return
+
+    lines_map, boxes_list = _parse_page_grid_output(result.get('content', ''))
+    handler._json_response(200, {
+        'ok': True,
+        'model': result.get('model') or cfg['model'],
+        'raw': result.get('content', ''),
+        'lines': lines_map,
+        'boxes': boxes_list,
+    })
+
+
 def handle_open_folder(handler):
     try:
         content_length = int(handler.headers.get('Content-Length', 0))
@@ -542,6 +656,7 @@ POST_ROUTES = {
     '/api/render-tikz': handle_render_tikz,
     '/api/translate': handle_translate,
     '/api/chat': handle_chat,
+    '/api/page-grid': handle_page_grid,
     '/api/open-folder': handle_open_folder,
     '/api/check-folder': handle_check_folder,
     '/api/pick-folder': handle_pick_folder,
@@ -581,7 +696,7 @@ def dispatch_post(handler):
         return True
 
     path = urllib.parse.urlsplit(handler.path).path
-    if path in ('/api/chat', '/api/translate') or path.startswith('/api/formula/'):
+    if path in ('/api/chat', '/api/translate', '/api/page-grid') or path.startswith('/api/formula/'):
         try:
             api_settings.load_document()
         except api_settings.ConfigError as exc:

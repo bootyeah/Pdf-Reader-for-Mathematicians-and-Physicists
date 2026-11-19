@@ -60,7 +60,7 @@ def probe(doc, fid, list_models=False):
     payload = None
     if not list_models:
         content = '这是一条连接测试。请只回复：连接成功。'
-        if fid.startswith('formula_'):
+        if fid.startswith('formula_') or fid == 'page_grid':
             content = [{'type': 'text', 'text': '请用 LaTeX 写出图片中的算式，只输出算式。'},
                        {'type': 'image_url', 'image_url': {'url': test_image()}}]
         payload = settings.apply_parameters({'model': cfg['model'], 'stream': False,

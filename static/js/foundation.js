@@ -120,6 +120,8 @@
             pagesRendered: new Set(),
             renderTasks: {}, 
             annotations: {}, 
+            pageGrids: {},           // 纯图片页自动分格数据（仅存本地 PDF 与 IndexedDB，不上传云端）
+            pageGridBase: '{}',      // PDF 内嵌分格数据基线
             history: [], 
             historyIndex: -1,
             currentTool: 'cursor', 
@@ -185,8 +187,21 @@
             });
             return cleaned;
         }
+        function serializePageGridsClean(grids = state.pageGrids) {
+            if (!grids || typeof grids !== 'object') return {};
+            const cleaned = {};
+            Object.keys(grids).forEach((key) => {
+                if (!/^\d+$/.test(key)) return;
+                const entry = grids[key];
+                if (entry && typeof entry === 'object' && Array.isArray(entry.items) && entry.items.length > 0) {
+                    cleaned[key] = { v: entry.v || 1, items: entry.items };
+                }
+            });
+            return cleaned;
+        }
         window.stripTransientAnnotationFields = stripTransientAnnotationFields;
         window.serializeAnnotationsClean = serializeAnnotationsClean;
+        window.serializePageGridsClean = serializePageGridsClean;
 
         const els = {
             container: document.getElementById('viewer-container'),
@@ -246,7 +261,9 @@
             hudPhysicalTotal: document.getElementById('hud-physical-total'),
             hudPhysicalNumber: document.getElementById('hud-physical-number'),
             setOffsetBtn: document.getElementById('set-offset-btn'),
-            resetOffsetBtn: document.getElementById('reset-offset-btn')
+            resetOffsetBtn: document.getElementById('reset-offset-btn'),
+            autoGridBtn: document.getElementById('auto-grid-btn'),
+            autoGridIcon: document.getElementById('auto-grid-icon')
         };
 
         let _lastAnnotationIdMs = 0;

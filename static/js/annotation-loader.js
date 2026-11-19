@@ -5,6 +5,12 @@ function isAnnotationTable(value) {
             !(/^\d+$/.test(key) || key === 'snippets') ||
             (Array.isArray(list) && list.every(anno => anno && typeof anno === 'object' && anno.id != null)));
 }
+function isPageGridTable(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value) &&
+        Object.entries(value).every(([key, entry]) =>
+            !/^\d+$/.test(key) ||
+            (entry && typeof entry === 'object' && Array.isArray(entry.items)));
+}
 async function readEmbeddedAnnotations(file, loadToken, includeIdentity = false) {
     if (typeof Worker === 'function') {
         try {
@@ -41,7 +47,8 @@ async function readEmbeddedAnnotations(file, loadToken, includeIdentity = false)
     const doc = await PDFLib.PDFDocument.load(buffer, { ignoreEncryption: true });
     if (state.loadToken !== loadToken) return {};
     const fingerprint = includeIdentity ? await readerDocumentFingerprint(doc) : '';
-    const obj = doc.getInfoDict().get(PDFLib.PDFName.of('ReaderProAnnos'));
+    const info = doc.getInfoDict();
+    const obj = info.get(PDFLib.PDFName.of('ReaderProAnnos'));
     let annotations = {};
     try {
         if (obj?.value) {
@@ -50,7 +57,16 @@ async function readEmbeddedAnnotations(file, loadToken, includeIdentity = false)
             annotations = JSON.parse(new TextDecoder().decode(bytes));
         }
     } catch (error) { console.warn('未读取到内嵌批注:', error); }
-    return includeIdentity ? { annotations, fingerprint } : annotations;
+    const gridObj = info.get(PDFLib.PDFName.of('ReaderProGrids'));
+    let pageGrids = {};
+    try {
+        if (gridObj?.value) {
+            const bytes = new Uint8Array(gridObj.value.length / 2);
+            for (let i = 0; i < gridObj.value.length; i += 2) bytes[i / 2] = parseInt(gridObj.value.substring(i, i + 2), 16);
+            pageGrids = JSON.parse(new TextDecoder().decode(bytes));
+        }
+    } catch (_) {}
+    return includeIdentity ? { annotations, pageGrids, fingerprint } : annotations;
 }
 
 function afterPdfPaint(firstPaint) {

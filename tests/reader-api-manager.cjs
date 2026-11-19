@@ -34,11 +34,11 @@ const root = path.resolve(__dirname, '..');
         page.on('pageerror', error => errors.push(error.message));
         await page.goto(info.manager);
         await page.waitForFunction(() => document.getElementById('model').value === 'model-chat');
-        assert.equal(await page.locator('nav button').count(), 7);
+        assert.equal(await page.locator('nav button').count(), 8);
         assert.equal(await page.inputValue('#api_key'), 'test-key-chat');
         assert.equal(await page.locator('#api_key').getAttribute('type'), 'text');
         assert.equal(await page.locator('#key-status').textContent(), 'Key 已配置');
-        for (const fid of ['chat_gemini', 'dictionary', 'translation', 'formula_image', 'formula_handwriting', 'formula_alt', 'chat']) {
+        for (const fid of ['chat_gemini', 'dictionary', 'translation', 'formula_image', 'formula_handwriting', 'formula_alt', 'page_grid', 'chat']) {
             await page.click(`nav button[data-feature="${fid}"]`);
             await page.waitForFunction(() => document.getElementById('thinking').options.length > 1);
         }
@@ -208,7 +208,7 @@ const root = path.resolve(__dirname, '..');
         await page.evaluate(() => scrollTo(0, 0));
         await page.screenshot({path: path.join(__dirname, 'results', 'api-manager-desktop.png'), animations: 'disabled'});
         await page.setViewportSize({width: 390, height: 844});
-        for (const fid of ['dictionary', 'translation', 'formula_image', 'formula_handwriting', 'formula_alt', 'chat']) {
+        for (const fid of ['dictionary', 'translation', 'formula_image', 'formula_handwriting', 'formula_alt', 'page_grid', 'chat']) {
             await page.click('nav button[data-feature="' + fid + '"]');
             assert.equal(await page.locator('nav button[data-feature="' + fid + '"]').getAttribute('aria-current'), 'page');
         }

@@ -19,7 +19,7 @@ const numeric = new Set(['temperature', 'timeout', 'max_tokens']);
 const fields = ['base_url', 'key_source', 'model', 'fallback_model', 'models', 'temperature', 'timeout', 'max_tokens', 'thinking', 'proxy', 'prompt', 'web_search'];
 
 // 功能显示顺序
-const FEATURE_ORDER = ['chat', 'chat_gemini', 'dictionary', 'translation', 'formula_image', 'formula_handwriting', 'formula_alt'];
+const FEATURE_ORDER = ['chat', 'chat_gemini', 'dictionary', 'translation', 'formula_image', 'formula_handwriting', 'formula_alt', 'page_grid'];
 
 // 极简 SVG 图标
 const FEATURE_ICONS = {
@@ -29,7 +29,8 @@ const FEATURE_ICONS = {
     translation: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>',
     formula_image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>',
     formula_handwriting: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>',
-    formula_alt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>'
+    formula_alt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>',
+    page_grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line><line x1="9" y1="3" x2="9" y2="21"></line></svg>'
 };
 
 function dirty() {
@@ -188,7 +189,7 @@ function updateStatus() {
     $('key-status').textContent = ready ? 'Key 已配置' : 'Key 未配置';
     $('key-status').className = 'tag tag-status' + (ready ? '' : ' missing');
 
-    const isVision = selected.startsWith('formula_');
+    const isVision = selected.startsWith('formula_') || selected === 'page_grid';
     const keyWarn = $('key-warning');
     if (!ready && isVision) {
         keyWarn.hidden = false;
@@ -378,10 +379,10 @@ function renderEditor() {
 
     // 专属字段显示/隐藏
     $('chat-models').hidden = selected !== 'chat' && selected !== 'chat_gemini';
-    $('search-field').hidden = selected.startsWith('formula_');
+    $('search-field').hidden = selected.startsWith('formula_') || selected === 'page_grid';
 
     // 备用模型提示微调
-    $('fallback-hint').textContent = selected.startsWith('formula_')
+    $('fallback-hint').textContent = (selected.startsWith('formula_') || selected === 'page_grid')
         ? '主模型限流或拥堵时自动尝试备用模型（如智谱 1305 拥堵报错时降级重试）。'
         : selected === 'chat_gemini'
             ? '主模型（如 gemini-4-argon）不可用或限流时自动降级至备用模型（如 gemini-3.8-flash）；鉴权失败（401）不重试。'

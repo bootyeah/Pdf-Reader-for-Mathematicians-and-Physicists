@@ -375,7 +375,12 @@ function getPdfTextContent(doc, pageNum, page = null) {
         return entry.promise;
     }
     entry = { bytes: 0 };
-    entry.promise = Promise.resolve(page || doc.getPage(pageNum)).then(p => p.getTextContent()).then(content => {
+    entry.promise = Promise.resolve(page || doc.getPage(pageNum)).then(async p => {
+        if (doc === state.pdfDoc && state.pageGrids?.[pageNum]?.items?.length && typeof window.buildPageGridTextContent === 'function') {
+            return window.buildPageGridTextContent(pageNum, p);
+        }
+        return p.getTextContent();
+    }).then(content => {
         entry.bytes = content.items.reduce((sum, item) => sum + item.str.length * 2 + 200, 0);
         cache.bytes += entry.bytes;
         for (const [key, old] of cache.content) {
@@ -389,6 +394,22 @@ function getPdfTextContent(doc, pageNum, page = null) {
     cache.content.set(pageNum, entry);
     return entry.promise;
 }
+function invalidatePdfPageTextCache(pageNum, doc = state.pdfDoc) {
+    if (!doc) return;
+    const cache = pdfTextCaches.get(doc);
+    if (!cache) return;
+    const old = cache.content.get(pageNum);
+    if (old) {
+        cache.content.delete(pageNum);
+        cache.bytes = Math.max(0, cache.bytes - (old.bytes || 0));
+    }
+    const oldSearch = cache.search.get(pageNum);
+    if (oldSearch !== undefined) {
+        cache.search.delete(pageNum);
+        cache.searchBytes = Math.max(0, cache.searchBytes - oldSearch.length * 2);
+    }
+}
+window.invalidatePdfPageTextCache = invalidatePdfPageTextCache;
 async function getPdfSearchText(doc, pageNum) {
     const cache = pdfTextCache(doc);
     if (cache.search.has(pageNum)) {

@@ -483,6 +483,11 @@
                     <i class="ph ph-arrow-counter-clockwise text-[16px]"></i>
                 </button>
 
+                <!-- 自动分格按钮：将当前纯图片页发给 AI 生成可精确框选的文本层 -->
+                <button id="auto-grid-btn" type="button" class="flex items-center justify-center w-6 h-6 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors cursor-pointer" title="当前页自动分格（AI 识别图片文字并生成可框选文本层 · 右键清除本页分格）" aria-label="当前页自动分格">
+                    <i id="auto-grid-icon" class="ph ph-grid-four text-[16px]"></i>
+                </button>
+
                 <div id="hud-physical-total" class="absolute top-[calc(100%+4px)] right-1 bg-white/80 backdrop-blur-sm border border-gray-200 shadow-sm rounded px-1.5 py-0.5 text-[12px] text-gray-400 hidden opacity-0 invisible peer-hover:opacity-100 peer-hover:visible transition-all pointer-events-none whitespace-nowrap">
                     共 <span id="hud-physical-number" class="font-mono">--</span> 页
                 </div>
@@ -620,6 +625,7 @@
     <script src="./js/outline-search.js"></script>  <!-- ③ 目录解析 + 增量撤销包装(performAction) + 全文搜索 -->
     <script src="./js/page-window.js"></script>     <!-- 页面虚拟窗口、近期位图缓存、文本缓存 -->
     <script src="./js/text-layer-precision.js"></script> <!-- 高精度 PDF 文本层对齐与拖选稳定 -->
+    <script src="./js/page-grid.js"></script>       <!-- 纯图片 PDF 页面自动分格：Canvas 像素切行 + AI 识字 + 墨迹对齐 -->
     <script src="./js/pdf-renderer.js"></script>    <!-- ④ PDF 页面：骨架/渲染调度/缩放位图保护 -->
     <script src="./js/render.js"></script>          <!-- ④ 批注/链接跳转/TikZ/LaTeX -->
     <script src="./js/annotate.js"></script>        <!-- ⑤ 批注：绘图工具/工具栏/配色/缩放滑块/HUD/页码雷达 -->

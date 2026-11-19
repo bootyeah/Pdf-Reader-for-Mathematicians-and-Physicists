@@ -605,6 +605,27 @@ class ManagerTests(unittest.TestCase):
             resp = sock.recv(1024)
         self.assertIn(b' 403 ', resp)
 
+    def test_page_grid_endpoint_and_shared_formula_key_upgrade(self):
+        self.update('page_grid', model='grid-glm', fallback_model='grid-fallback',
+                    key_source='formula_image', api_key='', thinking='omit')
+        Upstream.overrides['grid-glm'] = {
+            'json': {
+                'model': 'grid-glm',
+                'choices': [{'message': {'content': '[1] 第一章 函数与极限\n[2] 定理 1.1 设 f(x) ≥ 0'}}]
+            }
+        }
+        status, result = self.request('/api/page-grid', {
+            'image': api_manager.test_image(),
+            'lineCount': 2,
+            'pageWidth': 595,
+            'pageHeight': 842,
+        })
+        self.assertEqual(status, 200)
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['model'], 'grid-glm')
+        self.assertEqual(result['lines'], {'1': '第一章 函数与极限', '2': '定理 1.1 设 f(x) ≥ 0'})
+        self.assertEqual(Upstream.calls[-1]['auth'], 'Bearer test-key-formula_image')
+
 
 if __name__ == '__main__':
     if '--serve-fixture' in sys.argv:

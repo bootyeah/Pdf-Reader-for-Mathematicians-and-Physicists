@@ -292,32 +292,43 @@
                 continue;
             }
 
-            const tx = pdfjsLib.Util.transform(baseTransform, item.transform);
-            let angle = Math.atan2(tx[1], tx[0]);
-            if (meta.vertical) angle += Math.PI / 2;
-            const fontHeight = Math.hypot(tx[2], tx[3]);
-            const horizScale = Math.hypot(tx[0], tx[1]) || fontHeight;
-            if (!(fontHeight > 0)) continue;
+            let angle = 0, fontHeight = 0, horizScale = 0, effectiveFontHeight = 0, baseLeft = 0, baseTop = 0, itemAdvance = 0, angleDeg = 0;
+            if (item._ocrBox) {
+                baseLeft = item._ocrBox.x * pageWidth;
+                baseTop = item._ocrBox.y * pageHeight;
+                itemAdvance = item._ocrBox.w * pageWidth;
+                effectiveFontHeight = item._ocrBox.h * pageHeight;
+                fontHeight = effectiveFontHeight;
+                horizScale = effectiveFontHeight;
+                if (!(fontHeight > 0)) continue;
+            } else {
+                const tx = pdfjsLib.Util.transform(baseTransform, item.transform);
+                angle = Math.atan2(tx[1], tx[0]);
+                if (meta.vertical) angle += Math.PI / 2;
+                fontHeight = Math.hypot(tx[2], tx[3]);
+                horizScale = Math.hypot(tx[0], tx[1]) || fontHeight;
+                if (!(fontHeight > 0)) continue;
 
-            const cssFontSpec = `${meta.css.cssPrefix}${meta.css.family}`;
-            const cssAscentRatio = getCssAscentRatio(cssFontSpec);
+                const cssFontSpec = `${meta.css.cssPrefix}${meta.css.family}`;
+                const cssAscentRatio = getCssAscentRatio(cssFontSpec);
 
-            // 修正悬挂型数学大符号字体（如 CMEX10 的 ∑/∫，ascent≈0.04、descent≈-0.60），
-            // 避免选框悬浮在符号上方
-            let effectiveFontHeight = fontHeight;
-            let ascentOffset = fontHeight * cssAscentRatio;
-            if (!meta.vertical && meta.ascent < 0.35 && meta.descent < -0.35) {
-                const glyphSpan = Math.max(1.0, (meta.ascent - meta.descent) * 1.15);
-                effectiveFontHeight = fontHeight * glyphSpan;
-                ascentOffset = fontHeight * Math.max(meta.ascent, 0.06);
+                // 修正悬挂型数学大符号字体（如 CMEX10 的 ∑/∫，ascent≈0.04、descent≈-0.60），
+                // 避免选框悬浮在符号上方
+                effectiveFontHeight = fontHeight;
+                let ascentOffset = fontHeight * cssAscentRatio;
+                if (!meta.vertical && meta.ascent < 0.35 && meta.descent < -0.35) {
+                    const glyphSpan = Math.max(1.0, (meta.ascent - meta.descent) * 1.15);
+                    effectiveFontHeight = fontHeight * glyphSpan;
+                    ascentOffset = fontHeight * Math.max(meta.ascent, 0.06);
+                }
+
+                const sinA = angle ? Math.sin(angle) : 0;
+                const cosA = angle ? Math.cos(angle) : 1;
+                baseLeft = angle === 0 ? tx[4] : tx[4] + ascentOffset * sinA;
+                baseTop = angle === 0 ? tx[5] - ascentOffset : tx[5] - ascentOffset * cosA;
+                itemAdvance = meta.vertical ? item.height : item.width;
+                angleDeg = angle ? angle * (180 / Math.PI) : 0;
             }
-
-            const sinA = angle ? Math.sin(angle) : 0;
-            const cosA = angle ? Math.cos(angle) : 1;
-            const baseLeft = angle === 0 ? tx[4] : tx[4] + ascentOffset * sinA;
-            const baseTop = angle === 0 ? tx[5] - ascentOffset : tx[5] - ascentOffset * cosA;
-            const itemAdvance = meta.vertical ? item.height : item.width;
-            const angleDeg = angle ? angle * (180 / Math.PI) : 0;
 
             const canSplit = !meta.vertical && Math.abs(angle) < 1e-4 && itemAdvance > 0 && item.str.length > 1;
             const tokens = canSplit ? segmentText(item.str) : [item.str];
