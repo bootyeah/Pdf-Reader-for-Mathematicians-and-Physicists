@@ -238,7 +238,9 @@ async function drawPdfPage(job) {
         textLayer.style.setProperty('--scale-factor', job.scale);
         wrapper.style.setProperty('--scale-factor', job.scale);
         textLayer.replaceChildren();
-        job.textTask = pdfjsLib.renderTextLayer({ textContentSource: textContent, container: textLayer, viewport, textDivs: [] });
+        job.textTask = typeof renderPrecisionTextLayer === 'function'
+            ? renderPrecisionTextLayer(page, textContent, textLayer, viewport)
+            : pdfjsLib.renderTextLayer({ textContentSource: textContent, container: textLayer, viewport, textDivs: [] });
         await Promise.all([job.textTask.promise, renderNativeLinks(page, pageNum, viewport, () => isCurrentRender(job))]);
         if (isCurrentRender(job)) {
             pageRenderFailures.delete(pageNum);

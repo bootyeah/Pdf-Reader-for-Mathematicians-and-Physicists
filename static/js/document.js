@@ -1047,7 +1047,7 @@
                     cMapUrl: cmapsAbsoluteUrl,                
                     cMapPacked: true,
                     standardFontDataUrl: standardFontsAbsoluteUrl, 
-                    fontExtraProperties: false
+                    fontExtraProperties: true
                 });
                 state.loadingTask = loadingTask;
                 const pdfDoc = await loadingTask.promise;

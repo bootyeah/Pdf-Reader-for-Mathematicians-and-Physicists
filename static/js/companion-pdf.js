@@ -1104,7 +1104,7 @@
                 cMapUrl: cmapsAbsoluteUrl,
                 cMapPacked: true,
                 standardFontDataUrl: standardFontsAbsoluteUrl,
-                fontExtraProperties: false
+                fontExtraProperties: true
             });
 
             candidateDoc = await task.promise;
@@ -1330,7 +1330,13 @@
 
             const textContent = await page.getTextContent();
             if (!isCurrent()) return;
-            if (pdfjsLib.renderTextLayer) {
+            if (typeof window.renderPrecisionTextLayer === 'function') {
+                const textTask = window.renderPrecisionTextLayer(page, textContent, textLayerDiv, viewport);
+                info.textTask = textTask;
+                if (textTask && textTask.promise) {
+                    await textTask.promise;
+                }
+            } else if (pdfjsLib.renderTextLayer) {
                 const textTask = pdfjsLib.renderTextLayer({
                     textContentSource: textContent,
                     textContent: textContent,

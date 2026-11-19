@@ -130,9 +130,9 @@
             left: 0; top: 0; right: 0; bottom: 0;
             overflow: hidden;
             line-height: 1.0;
-            pointer-events: text;
+            pointer-events: auto;
             transform-origin: 0 0;
-            opacity: 1;
+            opacity: 0.25;
             mix-blend-mode: multiply;
             z-index: 1; /* 文本层在底层 */
         }
@@ -143,10 +143,11 @@
             white-space: pre;
             cursor: text;
             transform-origin: 0% 0%;
+            font-variant-ligatures: none;
         }
 
         .textLayer ::selection {
-            background: rgba(0, 89, 255, 0.25);
+            background: rgb(0, 89, 255);
             color: transparent;
         }
 
@@ -3654,7 +3655,8 @@ body.eye-protection-mode #handwriting-whiteboard .window-collapse-dir-part.is-ac
     right: 0;
     bottom: 0;
     overflow: hidden;
-    opacity: 1;
+    opacity: 0.35;
+    mix-blend-mode: multiply;
     transform-origin: 0 0;
     line-height: 1.0;
     user-select: text !important;
@@ -3666,10 +3668,11 @@ body.eye-protection-mode #handwriting-whiteboard .window-collapse-dir-part.is-ac
     white-space: pre;
     cursor: text;
     transform-origin: 0% 0%;
+    font-variant-ligatures: none;
 }
 .cp-text-layer span::selection {
-    background: rgba(59, 130, 246, 0.35) !important;
-    color: inherit !important;
+    background: rgb(59, 130, 246) !important;
+    color: transparent !important;
 }
 .cp-page-badge {
     position: absolute;
