@@ -250,6 +250,12 @@ function ensurePdfPage(pageNum) {
         wrapper.innerHTML = `
             <div id="sidecar-bg-${pageNum}" class="sidecar-bg">
                 <div class="absolute inset-0 pointer-events-none" style="background-image:linear-gradient(rgba(0,0,0,0.06) 1px,transparent 1px);background-size:100% 32px"></div>
+                <div class="sidecar-gap-hint">
+                    <button type="button" class="window-shortcut-btn sidecar-shortcut-btn" title="折叠无界草稿本 (快捷键: Y)" aria-label="折叠无界草稿本 (Y)">
+                        <span class="ws-action">折叠</span>
+                        <kbd class="ws-key">Y</kbd>
+                    </button>
+                </div>
             </div>
             <canvas id="canvas-${pageNum}" class="block" width="0" height="0"></canvas>
             <div id="text-layer-${pageNum}" class="textLayer"></div>

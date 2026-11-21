@@ -166,8 +166,16 @@
         }
 
         document.addEventListener('keydown', (e) => {
-            // 智能判断：当前光标是否在输入框(INPUT)或文本域(TEXTAREA)内
-            const isTyping = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
+            // 智能判断：当前光标是否在输入框(INPUT)、文本域(TEXTAREA)、下拉框(SELECT)或可编辑区域内
+            const isTyping = Boolean(
+                e.target && (
+                    e.target.tagName === 'INPUT' ||
+                    e.target.tagName === 'TEXTAREA' ||
+                    e.target.tagName === 'SELECT' ||
+                    e.target.isContentEditable ||
+                    e.target.closest?.('[contenteditable="true"]')
+                )
+            );
 
             if ((e.ctrlKey || e.metaKey) && e.key === 'z') { 
                 if (isTyping) return;
@@ -182,7 +190,7 @@
             if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); performSave(); }
 
             // 只有在非打字状态，且没有按住 Ctrl/Alt/Meta 等修饰键时才触发
-            if (!isTyping && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            if (!isTyping && !e.isComposing && e.keyCode !== 229 && !e.ctrlKey && !e.metaKey && !e.altKey) {
                 const key = e.key.toLowerCase(); // 兼容大小写（开启 CapsLock 也能用）
                 
                 if (key === 'h') {
@@ -195,6 +203,12 @@
                     e.preventDefault();
                     const underlineBtn = document.querySelector('button[data-tool="underline"]');
                     if (underlineBtn) underlineBtn.click(); // 多次按下会自动在下划线/直线间切换，完美继承原生逻辑
+                }
+
+                if (key === 'b' && !e.repeat) {
+                    e.preventDefault();
+                    const parenthesisBtn = document.querySelector('button[data-tool="parenthesis"]');
+                    if (parenthesisBtn) parenthesisBtn.click(); // 多次按下在括号/矩形框/自由括号/关闭间切换
                 }
             }
         });

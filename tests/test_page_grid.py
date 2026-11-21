@@ -297,6 +297,24 @@ function makeSyntheticScannedPagePng(w = 600, h = 840) {
         assert.equal(gridCheck.unsaved, true);
         assert.match(gridCheck.btnTitle, /已完成自动分格/);
 
+        // 3b. Single-click (including 1-3px mouse jitter) in blank margins / inter-line gaps must NEVER select large blocks
+        const wr = await page.evaluate(() => document.getElementById('page-wrapper-1').getBoundingClientRect());
+        for (const [rx, ry, dx, dy] of [
+            [0.03, 0.25, 1, 1],
+            [0.30, 0.19, 2, 1],
+            [0.85, 0.15, 2, 2],
+            [0.30, 0.50, 1, 2],
+        ]) {
+            const cx = wr.left + wr.width * rx;
+            const cy = wr.top + wr.height * ry;
+            await page.mouse.move(cx, cy);
+            await page.mouse.down();
+            await page.mouse.move(cx + dx, cy + dy);
+            await page.mouse.up();
+            const selLen = await page.evaluate(() => window.getSelection().toString().length);
+            assert.equal(selLen, 0, `Blank single-click at (${rx},${ry}) must not select text`);
+        }
+
         // 4. Verify Ctrl+F search finds text on the auto-gridded image page
         await page.click('#toggle-search-btn');
         await page.fill('#search-input', 'Continuity');

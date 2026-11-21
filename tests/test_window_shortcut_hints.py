@@ -18,8 +18,13 @@ class TestWindowShortcutHints(unittest.TestCase):
         self.assertIn('.wb-shortcut-btn', content)
         self.assertIn('.cp-shortcut-btn', content)
         self.assertIn('.mm-shortcut-btn', content)
+        self.assertIn('.ds-shortcut-btn', content)
+        self.assertIn('.sidecar-gap-hint', content)
+        self.assertIn('.sidecar-shortcut-btn', content)
         self.assertIn('.video-panel-title', content)
         self.assertIn('body.eye-protection-mode .wb-shortcut-btn', content)
+        self.assertIn('body.eye-protection-mode .ds-shortcut-btn', content)
+        self.assertIn('body.eye-protection-mode .sidecar-shortcut-btn', content)
 
     def test_html_mindmap_shortcut_btn(self):
         html_path = ROOT / 'static/index.html'
@@ -48,6 +53,19 @@ class TestWindowShortcutHints(unittest.TestCase):
 
         mm_content = (ROOT / 'static/js/mindmap.js').read_text(encoding='utf-8')
         self.assertIn('shortcutBtn: document.getElementById(\'mindmap-shortcut-btn\')', mm_content)
+
+        chat_content = (ROOT / 'static/js/chat.js').read_text(encoding='utf-8')
+        self.assertIn('ds-chat-shortcut-btn', chat_content)
+        self.assertIn('ds-shortcut-btn', chat_content)
+        self.assertIn('<kbd class="ws-key">D</kbd>', chat_content)
+
+        pw_content = (ROOT / 'static/js/page-window.js').read_text(encoding='utf-8')
+        self.assertIn('sidecar-gap-hint', pw_content)
+        self.assertIn('sidecar-shortcut-btn', pw_content)
+        self.assertIn('<kbd class="ws-key">Y</kbd>', pw_content)
+
+        doc_content = (ROOT / 'static/js/document.js').read_text(encoding='utf-8')
+        self.assertIn('button[data-tool="parenthesis"]', doc_content)
 
     def test_browser_dom_and_interactions(self):
         edge_path = Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")
@@ -115,6 +133,36 @@ window.addEventListener('load', () => {
         assert(cpBtn.querySelector('.ws-action').textContent.trim() === '展开', 'Companion action should update to 展开 when collapsed');
         cpBtn.click();
         assert(cpBtn.querySelector('.ws-action').textContent.trim() === '折叠', 'Companion action should update back to 折叠');
+
+        // 5. AI Chat (D toggles open/close, no collapse state)
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', code: 'KeyD', bubbles: true, cancelable: true }));
+        const chatPanel = document.getElementById('ds-chat-panel');
+        const dsBtn = document.getElementById('ds-chat-shortcut-btn');
+        assert(chatPanel && chatPanel.style.display === 'flex', 'Pressing D should open AI chat panel');
+        assert(dsBtn, 'ds-chat-shortcut-btn should exist in DOM');
+        assert(dsBtn.querySelector('.ws-key').textContent.trim() === 'D', 'AI chat key should be D');
+        assert(dsBtn.querySelector('.ws-action').textContent.trim() === '关闭', 'AI chat action should be 关闭');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', code: 'KeyD', bubbles: true, cancelable: true }));
+        assert(chatPanel.style.display === 'none', 'Pressing D again should close AI chat panel');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', code: 'KeyD', bubbles: true, cancelable: true }));
+        dsBtn.click();
+        assert(chatPanel.style.display === 'none', 'Clicking ds-chat-shortcut-btn should close AI chat panel');
+
+        // 6. Sidecar (Y opens/folds)
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', code: 'KeyY', bubbles: true, cancelable: true }));
+        assert(document.body.classList.contains('show-sidecars'), 'Pressing Y should open sidecar');
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', code: 'KeyY', bubbles: true, cancelable: true }));
+        assert(!document.body.classList.contains('show-sidecars'), 'Pressing Y again should fold sidecar');
+
+        // 7. Parenthesis tool (B cycles parenthesis -> rect -> free-parenthesis -> cursor)
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', bubbles: true, cancelable: true }));
+        assert(state.currentTool === 'parenthesis', '1st B should select parenthesis');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', bubbles: true, cancelable: true }));
+        assert(state.currentTool === 'rect', '2nd B should switch to rect');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', bubbles: true, cancelable: true }));
+        assert(state.currentTool === 'free-parenthesis', '3rd B should switch to free-parenthesis');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', bubbles: true, cancelable: true }));
+        assert(state.currentTool === 'cursor', '4th B should return to cursor');
 
         document.title = 'SHORTCUT_HINTS_ALL_OK';
     } catch (e) {

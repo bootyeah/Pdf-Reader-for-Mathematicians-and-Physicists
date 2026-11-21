@@ -500,23 +500,28 @@
             const r = document.caretRangeFromPoint(clientX, clientY);
             if (r && r.startContainer && r.startContainer.nodeType === 3 && textLayer.contains(r.startContainer)) {
                 const parentSpan = r.startContainer.parentElement;
-                // 若落点在独立空格 span 的右半边/末端，锚点对准紧邻下一个词首，避免 Blink 丢失选区锚点
-                if (preferNextOnSpace && parentSpan && parentSpan.tagName === 'SPAN' && /^\s+$/.test(parentSpan.textContent || '')) {
-                    const sr = parentSpan.getBoundingClientRect();
-                    if (clientX >= (sr.left + sr.right) / 2 || r.startOffset >= r.startContainer.nodeValue.length) {
-                        let next = parentSpan.nextElementSibling;
-                        while (next && (next.tagName !== 'SPAN' || !next.firstChild || next.firstChild.nodeType !== 3)) {
-                            next = next.nextElementSibling;
-                        }
-                        if (next && next.firstChild) {
-                            const nr = next.getBoundingClientRect();
-                            if (Math.abs((nr.top + nr.bottom) / 2 - (sr.top + sr.bottom) / 2) <= Math.max(nr.height, sr.height)) {
-                                return { node: next.firstChild, offset: 0 };
+                const pr = parentSpan?.getBoundingClientRect?.();
+                const nearParent = pr && pr.width > 0 && pr.height > 0 &&
+                    clientX >= pr.left - 4 && clientX <= pr.right + 4 &&
+                    clientY >= pr.top - 4 && clientY <= pr.bottom + 4;
+                if (nearParent) {
+                    // 若落点在独立空格 span 的右半边/末端，锚点对准紧邻下一个词首，避免 Blink 丢失选区锚点
+                    if (preferNextOnSpace && parentSpan.tagName === 'SPAN' && /^\s+$/.test(parentSpan.textContent || '')) {
+                        if (clientX >= (pr.left + pr.right) / 2 || r.startOffset >= r.startContainer.nodeValue.length) {
+                            let next = parentSpan.nextElementSibling;
+                            while (next && (next.tagName !== 'SPAN' || !next.firstChild || next.firstChild.nodeType !== 3)) {
+                                next = next.nextElementSibling;
+                            }
+                            if (next && next.firstChild) {
+                                const nr = next.getBoundingClientRect();
+                                if (Math.abs((nr.top + nr.bottom) / 2 - (pr.top + pr.bottom) / 2) <= Math.max(nr.height, pr.height)) {
+                                    return { node: next.firstChild, offset: 0 };
+                                }
                             }
                         }
                     }
+                    return { node: r.startContainer, offset: r.startOffset };
                 }
-                return { node: r.startContainer, offset: r.startOffset };
             }
         }
         const placement = findNearestEndPlacement(textLayer, clientX, clientY);
@@ -529,6 +534,23 @@
             }
         }
         return null;
+    }
+
+    function placementToCaretPoint(placement, preferNextOnSpace) {
+        if (!placement) return null;
+        const targetSpan = (preferNextOnSpace && placement.toEnd && placement.nextSpan) ? placement.nextSpan : placement.span;
+        const tn = targetSpan?.firstChild;
+        if (!tn || tn.nodeType !== 3) return null;
+        const useStart = (targetSpan === placement.nextSpan && preferNextOnSpace) || !placement.toEnd;
+        return { node: tn, offset: useStart ? 0 : tn.nodeValue.length };
+    }
+
+    function isBlankLayerTarget(target, textLayer, endOfContent) {
+        return target === textLayer || target === endOfContent;
+    }
+
+    function hasContainerAnchor(sel, textLayer, endOfContent) {
+        return Boolean(sel && (sel.anchorNode === textLayer || sel.anchorNode === endOfContent));
     }
 
     function resetEndOfContent(entry) {
@@ -544,27 +566,40 @@
         }
     }
 
+    const DRAG_THRESHOLD = 4;
     let bound = false;
     function bindPrecisionTextLayerSelection() {
         if (bound) return;
         bound = true;
 
         document.addEventListener('mousedown', (e) => {
-            if (e.button !== 0 || e.defaultPrevented || e.detail > 1) return;
+            if (e.button !== 0 || e.defaultPrevented || e.shiftKey) return;
             const textLayer = e.target?.closest?.('.textLayer');
             if (!textLayer || !isTextSelectionAllowed(textLayer)) return;
             const endOfContent = textLayer.querySelector(':scope > .endOfContent');
             if (!endOfContent) return;
-            const anchor = resolveCaretPoint(textLayer, e.clientX, e.clientY, true);
+            const startedOnBlank = isBlankLayerTarget(e.target, textLayer, endOfContent);
+            if (e.detail > 1) {
+                // 空白处双/三击不触发跨行或换行符误选；字词 span 上仍保留原生双/三击选词选行
+                if (startedOnBlank) {
+                    e.preventDefault();
+                    try { window.getSelection()?.removeAllRanges(); } catch (_) {}
+                }
+                return;
+            }
+            const anchor = startedOnBlank
+                ? placementToCaretPoint(findNearestEndPlacement(textLayer, e.clientX, e.clientY), true)
+                : resolveCaretPoint(textLayer, e.clientX, e.clientY, true);
             if (endOfContent.nextSibling !== null) textLayer.appendChild(endOfContent);
-            endOfContent.classList.add('active');
             dragState = {
                 textLayer,
                 endOfContent,
                 startX: e.clientX,
                 startY: e.clientY,
                 anchor,
+                startedOnBlank,
                 moveCount: 0,
+                dragging: false,
                 recovering: false,
             };
         }, true);
@@ -572,11 +607,10 @@
         document.addEventListener('mousemove', (e) => {
             if (!dragState) return;
             if ((e.buttons & 1) === 0) {
-                resetEndOfContent(dragState);
-                dragState = null;
+                finishDrag();
                 return;
             }
-            const { textLayer, endOfContent, anchor } = dragState;
+            const { textLayer, endOfContent, anchor, startedOnBlank } = dragState;
             if (!textLayer.isConnected || !endOfContent.isConnected) {
                 dragState = null;
                 return;
@@ -584,20 +618,36 @@
             dragState.moveCount++;
             const movedDist = Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY);
             const sel = window.getSelection();
+            const containerAnchored = hasContainerAnchor(sel, textLayer, endOfContent);
+            const onBlank = isBlankLayerTarget(e.target, textLayer, endOfContent);
 
-            // 1. 仅当经过至少一次原生 mousemove 默认处理后，拖动 > 4px 选区仍然折叠
-            //    （独立空格 span / 词首亚像素边缘 / 留白起拖触发 Blink 丢锚点），才由起点锚点接管。
+            // 单击微小抖动（<= 4px）期间不激活 endOfContent，也不从空白/容器锚点扩展选区，
+            // 避免自动分格页或空白缝隙处轻点一下就把半页内容框选中。
+            if (!dragState.dragging) {
+                if (movedDist <= DRAG_THRESHOLD) {
+                    if (startedOnBlank || containerAnchored || onBlank) {
+                        e.preventDefault();
+                    }
+                    return;
+                }
+                dragState.dragging = true;
+                endOfContent.classList.add('active');
+            }
+
+            // 1. 起点在空白区 / Blink 锚点落在 textLayer 容器上 / 拖动 > 4px 仍折叠
+            //    （独立空格 span / 词首亚像素边缘 / 留白起拖触发 Blink 丢锚点或锚到页尾），由起点锚点接管。
             if (anchor && anchor.node.isConnected && sel &&
-                (dragState.recovering || (dragState.moveCount >= 2 && movedDist > 4 && sel.isCollapsed))) {
+                (dragState.recovering || startedOnBlank || containerAnchored ||
+                 (dragState.moveCount >= 2 && sel.isCollapsed))) {
                 dragState.recovering = true;
                 e.preventDefault();
-                const focus = (e.target === endOfContent || e.target === textLayer)
-                    ? (() => {
-                        const pl = findNearestEndPlacement(textLayer, e.clientX, e.clientY);
-                        const tn = pl?.span?.firstChild;
-                        return (tn && tn.nodeType === 3) ? { node: tn, offset: pl.toEnd ? tn.nodeValue.length : 0 } : null;
-                    })()
-                    : resolveCaretPoint(textLayer, e.clientX, e.clientY, false);
+                let focus = null;
+                if (onBlank) {
+                    focus = placementToCaretPoint(findNearestEndPlacement(textLayer, e.clientX, e.clientY), false);
+                } else {
+                    const targetLayer = e.target?.closest?.('.textLayer') || textLayer;
+                    focus = resolveCaretPoint(targetLayer, e.clientX, e.clientY, false);
+                }
                 if (focus && focus.node.isConnected && typeof sel.setBaseAndExtent === 'function') {
                     try {
                         sel.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
@@ -607,15 +657,16 @@
             }
 
             // 2. 指针落入空白背景（而非具体 span）时，稳定选区终点到光标同行/就近文字边界
-            if (e.target === endOfContent || e.target === textLayer) {
+            if (onBlank) {
                 const placement = findNearestEndPlacement(textLayer, e.clientX, e.clientY);
                 if (placement) {
                     if (placement.ref !== endOfContent && placement.ref !== endOfContent.nextSibling) {
                         textLayer.insertBefore(endOfContent, placement.ref || null);
                     }
                     const textNode = placement.span?.firstChild;
-                    if (sel && sel.anchorNode && textLayer.contains(sel.anchorNode) &&
+                    if (sel && sel.anchorNode && !containerAnchored && textLayer.contains(sel.anchorNode) &&
                         textNode && textNode.nodeType === 3 && typeof sel.extend === 'function') {
+                        e.preventDefault();
                         const offset = placement.toEnd ? textNode.nodeValue.length : 0;
                         if (sel.focusNode !== textNode || sel.focusOffset !== offset) {
                             try { sel.extend(textNode, offset); } catch (_) {}
@@ -625,11 +676,25 @@
             }
         }, false);
 
-        const finishDrag = () => {
+        function finishDrag() {
             if (!dragState) return;
-            resetEndOfContent(dragState);
+            const entry = dragState;
             dragState = null;
-        };
+            if (!entry.dragging) {
+                const sel = window.getSelection();
+                const touchesBadAnchor = sel && (
+                    entry.startedOnBlank ||
+                    sel.anchorNode === entry.textLayer ||
+                    sel.focusNode === entry.textLayer ||
+                    sel.anchorNode === entry.endOfContent ||
+                    sel.focusNode === entry.endOfContent
+                );
+                if (touchesBadAnchor) {
+                    try { sel.removeAllRanges(); } catch (_) {}
+                }
+            }
+            resetEndOfContent(entry);
+        }
         document.addEventListener('mouseup', finishDrag, true);
         window.addEventListener('blur', finishDrag);
     }

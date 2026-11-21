@@ -74,6 +74,7 @@
     let fontInBtn = null;
     let thinkingBtn = null;
     let clearBtn = null;
+    let shortcutBtn = null;
     let closeBtn = null;
     let resizeHandle = null;
     let toolbarBtn = null;
@@ -725,6 +726,10 @@
                     '</button>' +
                     '<div class="ds-chat-model-menu" id="ds-chat-model-menu"></div>' +
                 '</div>' +
+                '<button type="button" class="window-shortcut-btn ds-shortcut-btn" id="ds-chat-shortcut-btn" title="关闭对话 (快捷键: D)" aria-label="关闭对话 (D)">' +
+                    '<span class="ws-action">关闭</span>' +
+                    '<kbd class="ws-key">D</kbd>' +
+                '</button>' +
                 '<div class="ds-chat-spacer"></div>' +
                 '<div class="ds-chat-font-group" title="调节对话排版字号">' +
                     '<button type="button" class="ds-chat-hbtn ds-chat-font-btn" id="ds-chat-font-out-btn" title="缩小字体" aria-label="缩小字体">A-</button>' +
@@ -736,7 +741,7 @@
                 '<button type="button" class="ds-chat-hbtn" id="ds-chat-clear-btn" title="清空对话">' +
                     '<i class="ph ph-broom"></i>' +
                 '</button>' +
-                '<button type="button" class="ds-chat-hbtn ds-chat-hbtn-close" id="ds-chat-close-btn" title="收起对话 (Esc)">' +
+                '<button type="button" class="ds-chat-hbtn ds-chat-hbtn-close" id="ds-chat-close-btn" title="关闭对话 (D / Esc)">' +
                     '<i class="ph ph-x"></i>' +
                 '</button>' +
             '</div>' +
@@ -796,6 +801,7 @@
         fontInBtn = panel.querySelector('#ds-chat-font-in-btn');
         thinkingBtn = panel.querySelector('#ds-chat-thinking-btn');
         clearBtn = panel.querySelector('#ds-chat-clear-btn');
+        shortcutBtn = panel.querySelector('#ds-chat-shortcut-btn');
         closeBtn = panel.querySelector('#ds-chat-close-btn');
         resizeHandle = panel.querySelector('#ds-chat-resize');
         toolbarBtn = document.getElementById('deepseek-chat-btn');
@@ -1289,6 +1295,7 @@
     // =========================================================================
     function bindEvents() {
         closeBtn.addEventListener('click', function (e) { e.stopPropagation(); hidePanel(); });
+        if (shortcutBtn) shortcutBtn.addEventListener('click', function (e) { e.stopPropagation(); hidePanel(); });
         clearBtn.addEventListener('click', function (e) {
             e.stopPropagation();
             if (!history.length && !bodyEl.querySelector('.ds-msg')) return;
@@ -1596,12 +1603,29 @@
             });
         }
 
-        // Esc 收起面板（选页抽屉打开时先收起抽屉；输入框里按下时由上面的 keydown 处理）
+        // Esc 收起面板；D 打开 / 关闭对话面板（输入文字或组合键时不触发）
         document.addEventListener('keydown', function (e) {
-            if (e.key !== 'Escape' || !panelVisible) return;
-            if (pdfPickerOpen) { e.preventDefault(); closePdfPicker(); return; }
-            if (e.target && e.target.closest && e.target.closest('#ds-chat-panel')) return;
-            hidePanel();
+            if (e.key === 'Escape' && panelVisible) {
+                if (pdfPickerOpen) { e.preventDefault(); closePdfPicker(); return; }
+                if (e.target && e.target.closest && e.target.closest('#ds-chat-panel')) return;
+                hidePanel();
+                return;
+            }
+            if (e.defaultPrevented || e.repeat || e.isComposing || e.keyCode === 229 || e.ctrlKey || e.metaKey || e.altKey) return;
+            if (e.code !== 'KeyD' && String(e.key || '').toLowerCase() !== 'd') return;
+            const isEditable = function (el) {
+                return Boolean(el && (
+                    el.tagName === 'INPUT' ||
+                    el.tagName === 'TEXTAREA' ||
+                    el.tagName === 'SELECT' ||
+                    el.isContentEditable ||
+                    (el.closest && el.closest('[contenteditable="true"]'))
+                ));
+            };
+            if (isEditable(e.target) || isEditable(document.activeElement)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            togglePanel({ focusInput: false });
         });
     }
 
@@ -2632,7 +2656,8 @@
         if (panel.offsetTop > maxTop) panel.style.top = maxTop + 'px';
     }
 
-    function showPanel() {
+    function showPanel(opts) {
+        const focusInput = !opts || opts.focusInput !== false;
         ensureDom();
         refreshApiSettings().catch(function () {});
         if (panelVisible) return;
@@ -2662,7 +2687,9 @@
             window.FloatingWindowLayers?.resetViewportBase(panel);
         }
         syncToolbarButton(true);
-        setTimeout(function () { if (inputEl) inputEl.focus(); }, 30);
+        if (focusInput) {
+            setTimeout(function () { if (inputEl) inputEl.focus(); }, 30);
+        }
     }
 
     function hidePanel() {
@@ -2672,8 +2699,8 @@
         syncToolbarButton(false);
     }
 
-    function togglePanel() {
-        if (panelVisible) hidePanel(); else showPanel();
+    function togglePanel(opts) {
+        if (panelVisible) hidePanel(); else showPanel(opts);
     }
 
     function syncToolbarButton(active) {

@@ -1014,7 +1014,7 @@
         .ds-chat-brand { display: inline-flex; color: #2563eb; flex: none; }
         .ds-chat-spacer { flex: 1; min-width: 4px; }
 
-        .ds-chat-model-wrap { position: relative; min-width: 0; }
+        .ds-chat-model-wrap { position: relative; min-width: 0; max-width: 150px; }
         .ds-chat-model {
             display: inline-flex;
             align-items: center;
@@ -1029,9 +1029,10 @@
             font-weight: 600;
             cursor: pointer;
             transition: all 0.15s;
-            max-width: 150px;
+            max-width: 100%;
         }
         .ds-chat-model:hover { background: #eef2f7; border-color: #e2e8f0; color: #1d4ed8; }
+        .ds-chat-model > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .ds-chat-model-caret { font-size: 11px; color: #94a3b8; }
         .ds-chat-model-menu {
             position: absolute;
@@ -6547,17 +6548,21 @@ body.eye-protection-mode .mm-root-badge {
     line-height: 1;
 }
 
-/* 亮色窗口默认风格 (手写白板、思维导图、对照小窗) */
+/* 亮色窗口默认风格 (手写白板、思维导图、对照小窗、AI对话、无界草稿本) */
 .wb-shortcut-btn,
 .cp-shortcut-btn,
-.mm-shortcut-btn {
+.mm-shortcut-btn,
+.ds-shortcut-btn,
+.sidecar-shortcut-btn {
     background: #f1f5f9;
     color: #64748b;
     border-color: #e2e8f0;
 }
 .wb-shortcut-btn .ws-key,
 .cp-shortcut-btn .ws-key,
-.mm-shortcut-btn .ws-key {
+.mm-shortcut-btn .ws-key,
+.ds-shortcut-btn .ws-key,
+.sidecar-shortcut-btn .ws-key {
     background: #ffffff;
     color: #475569;
     border: 1px solid #cbd5e1;
@@ -6565,10 +6570,37 @@ body.eye-protection-mode .mm-root-badge {
 }
 .wb-shortcut-btn:hover,
 .cp-shortcut-btn:hover,
-.mm-shortcut-btn:hover {
+.mm-shortcut-btn:hover,
+.ds-shortcut-btn:hover,
+.sidecar-shortcut-btn:hover {
     background: #e2e8f0;
     color: #1e293b;
     border-color: #cbd5e1;
+}
+
+/* 无界草稿本两页间隔处快捷键提示 */
+.sidecar-gap-hint {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(100% + 1px);
+    height: 24px;
+    display: flex;
+    align-items: center;
+    padding-left: 10px;
+    pointer-events: none;
+    user-select: none;
+}
+.sidecar-shortcut-btn {
+    height: 18px;
+    opacity: 0.78;
+    pointer-events: none;
+}
+body.show-sidecars .sidecar-shortcut-btn {
+    pointer-events: auto;
+}
+.sidecar-shortcut-btn:hover {
+    opacity: 1;
 }
 
 /* 视频伴读窗口暗色风格 */
@@ -6596,21 +6628,27 @@ body.eye-protection-mode .mm-root-badge {
 /* 护眼模式配色兼容 */
 body.eye-protection-mode .wb-shortcut-btn,
 body.eye-protection-mode .cp-shortcut-btn,
-body.eye-protection-mode .mm-shortcut-btn {
+body.eye-protection-mode .mm-shortcut-btn,
+body.eye-protection-mode .ds-shortcut-btn,
+body.eye-protection-mode .sidecar-shortcut-btn {
     background: #FAF7F2;
     border-color: #E6E2D6;
     color: #78716C;
 }
 body.eye-protection-mode .wb-shortcut-btn .ws-key,
 body.eye-protection-mode .cp-shortcut-btn .ws-key,
-body.eye-protection-mode .mm-shortcut-btn .ws-key {
+body.eye-protection-mode .mm-shortcut-btn .ws-key,
+body.eye-protection-mode .ds-shortcut-btn .ws-key,
+body.eye-protection-mode .sidecar-shortcut-btn .ws-key {
     background: #F4EFE6;
     border-color: #DDD6C8;
     color: #57534E;
 }
 body.eye-protection-mode .wb-shortcut-btn:hover,
 body.eye-protection-mode .cp-shortcut-btn:hover,
-body.eye-protection-mode .mm-shortcut-btn:hover {
+body.eye-protection-mode .mm-shortcut-btn:hover,
+body.eye-protection-mode .ds-shortcut-btn:hover,
+body.eye-protection-mode .sidecar-shortcut-btn:hover {
     background: #ECE5D8;
     border-color: #D6CEBE;
     color: #292524;

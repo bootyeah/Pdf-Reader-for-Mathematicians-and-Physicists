@@ -450,6 +450,39 @@ function toggleSidecar(forceOpen = null, skipScroll = false) {
 // 按钮点击依然执行标准展开（带有屏幕滑动反馈）
 els.sidecarBtn.addEventListener('click', () => toggleSidecar());
 
+// Y：打开 / 折叠无界草稿本（与 T 思维导图对称）
+window.addEventListener('keydown', (e) => {
+    if (e.defaultPrevented || e.repeat || e.isComposing || e.keyCode === 229 || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.code !== 'KeyY' && e.key !== 'y' && e.key !== 'Y') return;
+    const isEditable = (el) => Boolean(
+        el && (
+            el.tagName === 'INPUT' ||
+            el.tagName === 'TEXTAREA' ||
+            el.tagName === 'SELECT' ||
+            el.isContentEditable ||
+            el.closest?.('[contenteditable="true"]')
+        )
+    );
+    if (isEditable(e.target) || isEditable(document.activeElement)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    toggleSidecar();
+});
+
+// 草稿纸页间缝隙里的快捷键按钮：点击直接折叠草稿本，不穿透触发标注/文本块
+els.pagesContainer?.addEventListener('mousedown', (e) => {
+    if (e.target.closest?.('.sidecar-shortcut-btn')) e.stopPropagation();
+});
+els.pagesContainer?.addEventListener('mouseup', (e) => {
+    if (e.target.closest?.('.sidecar-shortcut-btn')) e.stopPropagation();
+});
+els.pagesContainer?.addEventListener('click', (e) => {
+    if (!e.target.closest?.('.sidecar-shortcut-btn')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    toggleSidecar(false);
+});
+
 
 // 1. 切换按钮状态 (仅作为左键拖拽的开关)
 els.handToolBtn.addEventListener('click', () => {
