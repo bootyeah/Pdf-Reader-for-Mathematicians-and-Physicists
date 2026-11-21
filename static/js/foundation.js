@@ -154,6 +154,7 @@
             searchAbortController: null, // 用于中断连续搜索
             sidebarMode: 'annotations',   // 记录侧边栏当前所处模式
             isOutlineOpen: false,
+            isTimePanelOpen: false,
             pageOffset: 0,           // 物理页码与逻辑页码的偏移量
             outlineMap: [],          // 解析后的有序目录地图，用于二分定位。
             currentPhysicalPage: 1,  // 记录当前屏幕中心的物理页
@@ -255,6 +256,15 @@
             outlinePanel: document.getElementById('outline-panel'),
             outlineContent: document.getElementById('outline-content'),
             closeOutlineBtn: document.getElementById('close-outline-btn'),
+            timeTriggerBtn: document.getElementById('time-trigger-btn'),
+            timePanel: document.getElementById('time-panel'),
+            closeTimeBtn: document.getElementById('close-time-btn'),
+            currentTimeDisplay: document.getElementById('current-time-display'),
+            countdownDisplay: document.getElementById('countdown-display'),
+            countdownMinInput: document.getElementById('countdown-min-input'),
+            countdownSecInput: document.getElementById('countdown-sec-input'),
+            countdownStartBtn: document.getElementById('countdown-start-btn'),
+            countdownResetBtn: document.getElementById('countdown-reset-btn'),
             pageHud: document.getElementById('page-hud'),
             hudCurrent: document.getElementById('hud-current-page'),
             hudTotal: document.getElementById('hud-total-pages'),

@@ -80,7 +80,7 @@
         }
 
         /* 4. 按钮悬停时，使用匹配淡色背景的 hover 颜色 */
-        body.eye-protection-mode header button:hover:not(.color-btn),
+        body.eye-protection-mode header button:hover:not(.color-btn):not(#countdown-start-btn),
         body.eye-protection-mode aside .sidebar-item:hover,
         body.eye-protection-mode #page-hud button:hover { /* 👈 新增：HUD 里的图钉和重置按钮悬停色 */
             background-color: #F0EBE1 !important; 
@@ -90,6 +90,8 @@
         body.eye-protection-mode #search-bar,
         body.eye-protection-mode #outline-panel, 
         body.eye-protection-mode #outline-trigger-btn, 
+        body.eye-protection-mode #time-panel,
+        body.eye-protection-mode #time-trigger-btn,
         body.eye-protection-mode #page-hud, /* 👈 新增：让右上角页数标识同步护眼底色与边框 */
         body.eye-protection-mode #cloud-panel, /* 👈 新增：云端批注库面板。它带 bg-white 又住在 aside 里，会被上面第 3 条一起抹成透明 */
         body.eye-protection-mode #marker-dropdown-wrapper .absolute,

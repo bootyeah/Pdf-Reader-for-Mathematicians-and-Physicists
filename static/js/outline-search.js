@@ -156,6 +156,9 @@
             const panel = els.outlinePanel;
             
             if (state.isOutlineOpen) {
+                if (state.isTimePanelOpen && typeof toggleTimePanel === 'function') {
+                    toggleTimePanel(false);
+                }
                 // 丝滑展开：解除隐身，恢复原生尺寸与位置，允许点击
                 panel.classList.remove('opacity-0', 'invisible', 'scale-y-95', '-translate-y-2', '-translate-y-3', 'pointer-events-none');
                 panel.classList.add('opacity-100', 'visible', 'scale-y-100', 'translate-y-0', 'pointer-events-auto');
@@ -179,6 +182,158 @@
             e.stopPropagation(); 
             toggleOutline(false); 
         });
+
+        // 4. 时间与倒计时下拉面板
+        function updateCurrentTimeDisplay() {
+            if (!els.currentTimeDisplay) return;
+            const now = new Date();
+            const hh = String(now.getHours()).padStart(2, '0');
+            const mm = String(now.getMinutes()).padStart(2, '0');
+            const ss = String(now.getSeconds()).padStart(2, '0');
+            els.currentTimeDisplay.textContent = `${hh}:${mm}:${ss}`;
+        }
+
+        function toggleTimePanel(forceState = null) {
+            if (!els.timePanel || !els.timeTriggerBtn) return;
+            state.isTimePanelOpen = forceState !== null ? forceState : !state.isTimePanelOpen;
+            const icon = els.timeTriggerBtn.querySelector('svg, i');
+            const panel = els.timePanel;
+            els.timeTriggerBtn.setAttribute('aria-expanded', String(state.isTimePanelOpen));
+
+            if (state.isTimePanelOpen) {
+                if (state.isOutlineOpen) toggleOutline(false);
+                updateCurrentTimeDisplay();
+                panel.classList.remove('opacity-0', 'invisible', 'scale-y-95', '-translate-y-2', '-translate-y-3', 'pointer-events-none');
+                panel.classList.add('opacity-100', 'visible', 'scale-y-100', 'translate-y-0', 'pointer-events-auto');
+                icon?.classList.add('rotate-180');
+            } else {
+                panel.classList.remove('opacity-100', 'visible', 'scale-y-100', 'translate-y-0', 'pointer-events-auto');
+                panel.classList.add('opacity-0', 'invisible', 'scale-y-95', '-translate-y-3', 'pointer-events-none');
+                icon?.classList.remove('rotate-180');
+            }
+        }
+
+        (function initTimeAndCountdown() {
+            if (!els.timeTriggerBtn || !els.timePanel) return;
+
+            updateCurrentTimeDisplay();
+            setInterval(updateCurrentTimeDisplay, 1000);
+
+            let countdownTimerId = null;
+            let countdownEndTime = 0;
+            let countdownRemainingSec = 25 * 60;
+            let countdownRunning = false;
+
+            function formatCountdown(totalSec) {
+                const sec = Math.max(0, Math.ceil(totalSec));
+                const h = Math.floor(sec / 3600);
+                const m = Math.floor((sec % 3600) / 60);
+                const s = sec % 60;
+                if (h > 0) {
+                    return [h, m, s].map(v => String(v).padStart(2, '0')).join(':');
+                }
+                return [m, s].map(v => String(v).padStart(2, '0')).join(':');
+            }
+
+            function readConfiguredCountdownSec() {
+                const minVal = Math.max(0, Math.min(999, parseInt(els.countdownMinInput?.value, 10) || 0));
+                const secVal = Math.max(0, Math.min(59, parseInt(els.countdownSecInput?.value, 10) || 0));
+                return minVal * 60 + secVal;
+            }
+
+            function renderCountdownDisplay(isFinished = false) {
+                if (!els.countdownDisplay) return;
+                els.countdownDisplay.textContent = isFinished ? '00:00' : formatCountdown(countdownRemainingSec);
+                els.countdownDisplay.classList.toggle('text-red-500', isFinished);
+                els.countdownDisplay.classList.toggle('text-blue-600', !isFinished);
+            }
+
+            function syncCountdownFromInputs() {
+                if (countdownRunning) return;
+                countdownRemainingSec = readConfiguredCountdownSec();
+                renderCountdownDisplay(false);
+                if (els.countdownStartBtn) els.countdownStartBtn.textContent = '开始';
+            }
+
+            function tickCountdown() {
+                const leftMs = countdownEndTime - Date.now();
+                if (leftMs <= 0) {
+                    clearInterval(countdownTimerId);
+                    countdownTimerId = null;
+                    countdownRunning = false;
+                    countdownRemainingSec = 0;
+                    if (els.countdownMinInput) els.countdownMinInput.disabled = false;
+                    if (els.countdownSecInput) els.countdownSecInput.disabled = false;
+                    if (els.countdownStartBtn) els.countdownStartBtn.textContent = '开始';
+                    renderCountdownDisplay(true);
+                    if (!state.isTimePanelOpen) toggleTimePanel(true);
+                    return;
+                }
+                countdownRemainingSec = Math.ceil(leftMs / 1000);
+                renderCountdownDisplay(false);
+            }
+
+            function toggleCountdownStartPause() {
+                if (countdownRunning) {
+                    clearInterval(countdownTimerId);
+                    countdownTimerId = null;
+                    countdownRunning = false;
+                    countdownRemainingSec = Math.max(0, Math.ceil((countdownEndTime - Date.now()) / 1000));
+                    if (els.countdownMinInput) els.countdownMinInput.disabled = false;
+                    if (els.countdownSecInput) els.countdownSecInput.disabled = false;
+                    if (els.countdownStartBtn) els.countdownStartBtn.textContent = countdownRemainingSec > 0 ? '继续' : '开始';
+                    renderCountdownDisplay(false);
+                } else {
+                    if (countdownRemainingSec <= 0) {
+                        countdownRemainingSec = readConfiguredCountdownSec();
+                    }
+                    if (countdownRemainingSec <= 0) return;
+                    countdownRunning = true;
+                    countdownEndTime = Date.now() + countdownRemainingSec * 1000;
+                    if (els.countdownMinInput) els.countdownMinInput.disabled = true;
+                    if (els.countdownSecInput) els.countdownSecInput.disabled = true;
+                    if (els.countdownStartBtn) els.countdownStartBtn.textContent = '暂停';
+                    renderCountdownDisplay(false);
+                    clearInterval(countdownTimerId);
+                    countdownTimerId = setInterval(tickCountdown, 250);
+                }
+            }
+
+            function resetCountdown() {
+                clearInterval(countdownTimerId);
+                countdownTimerId = null;
+                countdownRunning = false;
+                if (els.countdownMinInput) els.countdownMinInput.disabled = false;
+                if (els.countdownSecInput) els.countdownSecInput.disabled = false;
+                countdownRemainingSec = readConfiguredCountdownSec();
+                if (els.countdownStartBtn) els.countdownStartBtn.textContent = '开始';
+                renderCountdownDisplay(false);
+            }
+
+            els.timeTriggerBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleTimePanel();
+            });
+            els.closeTimeBtn?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleTimePanel(false);
+            });
+            els.timePanel.addEventListener('click', (e) => e.stopPropagation());
+            els.timePanel.addEventListener('keydown', (e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter' && (e.target === els.countdownMinInput || e.target === els.countdownSecInput)) {
+                    e.preventDefault();
+                    countdownRemainingSec = readConfiguredCountdownSec();
+                    if (!countdownRunning) toggleCountdownStartPause();
+                }
+            });
+            els.countdownMinInput?.addEventListener('input', syncCountdownFromInputs);
+            els.countdownSecInput?.addEventListener('input', syncCountdownFromInputs);
+            els.countdownStartBtn?.addEventListener('click', toggleCountdownStartPause);
+            els.countdownResetBtn?.addEventListener('click', resetCountdown);
+
+            syncCountdownFromInputs();
+        })();
 
         function performAction(actionFn, affectedPages = null) {
             // 普通编辑显式提供受影响的页；导入等整表操作保留完整比较。

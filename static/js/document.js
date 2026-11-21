@@ -230,6 +230,9 @@
             if (state.isOutlineOpen && !e.target.closest('#outline-panel') && !e.target.closest('#outline-trigger-btn')) {
                 toggleOutline(false);
             }
+            if (state.isTimePanelOpen && !e.target.closest('#time-panel') && !e.target.closest('#time-trigger-btn')) {
+                if (typeof toggleTimePanel === 'function') toggleTimePanel(false);
+            }
         });
 
         function updateSaveStatus(isDirty) {

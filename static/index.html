@@ -292,6 +292,15 @@
             <i class="ph ph-caret-down text-gray-400 group-hover:text-blue-500 transition-transform duration-300 ease-out text-[14px]"></i>
         </button>
 
+        <button id="time-trigger-btn" type="button" class="absolute left-1/2 top-full ml-[34px] bg-white border border-gray-300 border-t-0 rounded-b-lg shadow-sm z-40 px-2.5 py-0 hover:bg-gray-50 transition-colors group cursor-pointer h-[16px] flex items-center justify-center" title="时间与倒计时" aria-label="时间与倒计时" aria-expanded="false">
+            <svg viewBox="0 0 20 12" class="w-[17px] h-[10px] text-gray-400 group-hover:text-blue-500 transition-transform duration-300 ease-out" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true">
+                <!-- 时针（较短略粗）+ 分针（较长略细）+ 表芯圆点构成简洁 V 形下拉箭头 -->
+                <line x1="9.2" y1="8.8" x2="4.4" y2="4.8" stroke-width="1.8" />
+                <line x1="9.2" y1="8.8" x2="15.8" y2="2.6" stroke-width="1.2" />
+                <circle cx="9.2" cy="8.8" r="1.45" fill="currentColor" stroke="none" />
+            </svg>
+        </button>
+
         <div id="outline-panel" class="absolute left-1/2 top-full transform -translate-x-1/2 mt-6 w-[480px] max-h-[80vh] bg-white/95 backdrop-blur-md border border-gray-200 shadow-2xl rounded-xl z-50 flex flex-col overflow-hidden transition-all duration-300 ease-out origin-top opacity-0 invisible scale-y-95 -translate-y-3 pointer-events-none">
             <div class="px-4 py-2 border-b border-gray-100 bg-gray-50/80 flex justify-between items-center shrink-0">
                 <span class="text-xs font-bold text-gray-500 uppercase flex items-center gap-1.5"><button id="outline-locate-current-page" type="button" class="flex items-center justify-center rounded p-0.5 text-blue-500 hover:text-blue-600 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 transition-colors" title="定位当前页目录" aria-label="定位当前页目录"><i class="ph ph-list-dashes text-sm" aria-hidden="true"></i></button> 目录</span>
@@ -299,6 +308,35 @@
             </div>
             <!-- 目录列表容器 -->
             <div id="outline-content" class="flex-1 overflow-y-auto p-3 text-[16px] text-gray-700 pb-4 custom-scrollbar"></div>
+        </div>
+
+        <div id="time-panel" class="absolute left-1/2 top-full transform -translate-x-1/2 mt-6 w-[292px] bg-white/95 backdrop-blur-md border border-gray-200 shadow-2xl rounded-xl z-50 flex flex-col overflow-hidden transition-all duration-300 ease-out origin-top opacity-0 invisible scale-y-95 -translate-y-3 pointer-events-none">
+            <div class="px-3.5 py-2 border-b border-gray-100 bg-gray-50/80 flex justify-between items-center shrink-0">
+                <span class="text-xs font-bold text-gray-500 flex items-center gap-1.5"><i class="ph ph-clock text-blue-500 text-sm" aria-hidden="true"></i> 时间</span>
+                <button id="close-time-btn" type="button" class="text-gray-400 hover:text-red-500 hover:bg-red-50 rounded p-0.5 transition"><i class="ph ph-x"></i></button>
+            </div>
+            <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                <span class="text-xs text-gray-500 select-none">当前时间</span>
+                <span id="current-time-display" class="text-lg font-mono font-bold text-gray-800 tabular-nums tracking-tight">--:--:--</span>
+            </div>
+            <div class="px-4 py-3 space-y-2.5">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs text-gray-500 select-none">倒计时</span>
+                    <span id="countdown-display" class="text-lg font-mono font-bold text-blue-600 tabular-nums tracking-tight">25:00</span>
+                </div>
+                <div class="flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-1 text-xs text-gray-500 shrink-0">
+                        <input id="countdown-min-input" type="number" min="0" max="999" value="25" class="w-12 h-7 px-1.5 text-xs font-mono text-center border border-gray-200 rounded-md bg-gray-50 focus:bg-white focus:outline-none focus:border-blue-500 tabular-nums" aria-label="倒计时分钟">
+                        <span class="whitespace-nowrap select-none">分</span>
+                        <input id="countdown-sec-input" type="number" min="0" max="59" value="0" class="w-11 h-7 px-1.5 text-xs font-mono text-center border border-gray-200 rounded-md bg-gray-50 focus:bg-white focus:outline-none focus:border-blue-500 tabular-nums" aria-label="倒计时秒数">
+                        <span class="whitespace-nowrap select-none">秒</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 shrink-0">
+                        <button id="countdown-start-btn" type="button" class="h-7 px-3 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-md transition cursor-pointer whitespace-nowrap shrink-0 flex items-center justify-center">开始</button>
+                        <button id="countdown-reset-btn" type="button" class="h-7 px-2.5 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md border border-gray-200 transition cursor-pointer whitespace-nowrap shrink-0 flex items-center justify-center">重置</button>
+                    </div>
+                </div>
+            </div>
         </div>
         <button type="button" id="toggle-toolbar-btn" class="absolute right-1.5 top-1/2 -translate-y-1/2 w-5 h-7 rounded-md flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors z-30 cursor-pointer" title="隐藏工具栏" aria-label="隐藏工具栏" aria-expanded="true">
             <i class="ph ph-caret-up text-[14px]"></i>
