@@ -326,6 +326,37 @@ class WindowServiceBackendTests(unittest.TestCase):
             self.assertEqual(len(window_service._PINNED_HWNDS), 0)
             self.assertFalse(bool(self.env.windows[2002]['ex_style'] & window_service.WS_EX_TOPMOST))
 
+    def test_minimized_or_cloaked_pinned_window_is_automatically_unpinned(self):
+        apis = self._build_mock_apis()
+        with patch.object(window_service, '_win32_apis', return_value=apis), \
+             patch.object(window_service, '_process_app_name', side_effect=lambda *args: self.env.windows[int(args[-1])]['app']), \
+             patch.object(window_service, '_is_cloaked', side_effect=lambda _c, _d, h: bool(self.env.windows[int(h)]['cloaked'])):
+            # Pin Notepad (2002)
+            res = window_service.pin_window(2002)
+            self.assertTrue(res['ok'])
+            self.assertIn(2002, window_service._PINNED_HWNDS)
+            self.assertTrue(bool(self.env.windows[2002]['ex_style'] & window_service.WS_EX_TOPMOST))
+
+            # User clicks Notepad's own minimize button -> window becomes iconic
+            self.env.windows[2002]['iconic'] = True
+            items = window_service.list_windows()
+            notepad = next(w for w in items if w['hwnd'] == 2002)
+            self.assertFalse(notepad['pinned'])
+            self.assertFalse(notepad['topmost'])
+            self.assertFalse(notepad['pinned_by_reader'])
+            self.assertNotIn(2002, window_service._PINNED_HWNDS)
+            self.assertFalse(bool(self.env.windows[2002]['ex_style'] & window_service.WS_EX_TOPMOST))
+
+            # Pin Notepad again, then simulate UWP cloaked minimize
+            self.env.windows[2002]['iconic'] = False
+            res2 = window_service.pin_window(2002)
+            self.assertTrue(res2['ok'])
+            self.env.windows[2002]['cloaked'] = 2
+            items2 = window_service.list_windows()
+            self.assertFalse(any(w['pinned'] for w in items2))
+            self.assertNotIn(2002, window_service._PINNED_HWNDS)
+            self.assertFalse(bool(self.env.windows[2002]['ex_style'] & window_service.WS_EX_TOPMOST))
+
     def test_cross_site_requests_are_rejected(self):
         req = urllib.request.Request(
             self.origin + '/api/windows',
@@ -381,10 +412,12 @@ window.addEventListener('load', () => {
                 { hwnd: 102, title: '无标题 - 记事本', app: 'notepad', pinned: false, minimized: false, pinned_by_reader: false }
             ];
             let lastPostPayload = null;
+            let getWindowsCount = 0;
             const origFetch = window.fetch.bind(window);
             window.fetch = async (url, opts = {}) => {
                 if (String(url).startsWith('/api/windows')) {
                     if (!opts.method || opts.method === 'GET') {
+                        getWindowsCount += 1;
                         return new Response(JSON.stringify({ ok: true, windows: mockWindows }), {
                             status: 200,
                             headers: { 'Content-Type': 'application/json' }
@@ -440,7 +473,38 @@ window.addEventListener('load', () => {
             assert(cardBg === 'rgb(250, 247, 242)', 'Eye protection card background must be #FAF7F2, got ' + cardBg);
             document.body.classList.remove('eye-protection-mode');
 
-            // 4. Exiting fullscreen automatically triggers unpin_all
+            // 4. External minimize via window minimize button clears blue highlight on focus without hovering dropdown
+            mockWindows[0].pinned = false;
+            mockWindows[0].pinned_by_reader = false;
+            mockWindows[0].minimized = true;
+            window.dispatchEvent(new Event('focus'));
+            await new Promise(r => setTimeout(r, 40));
+            assert(!fsBtn.classList.contains('text-blue-600'),
+                'Fullscreen button blue indicator must clear on window focus after pinned window is minimized');
+            assert(fsBtn.classList.contains('text-gray-600'),
+                'Fullscreen button must restore default text-gray-600 after pinned window is minimized');
+
+            // 5. External minimize WITHOUT focus event or dropdown hover still clears via active pin monitor, then stops polling
+            list.querySelectorAll('.fullscreen-window-item')[0].click();
+            await new Promise(r => setTimeout(r, 40));
+            assert(fsBtn.classList.contains('text-blue-600'),
+                'Fullscreen button should turn blue again when re-pinned');
+            mockWindows[0].pinned = false;
+            mockWindows[0].pinned_by_reader = false;
+            mockWindows[0].minimized = true;
+            await new Promise(r => setTimeout(r, 750));
+            assert(!fsBtn.classList.contains('text-blue-600'),
+                'Fullscreen button blue indicator must clear automatically via active pin monitor without hover/focus');
+            const countAfterStop = getWindowsCount;
+            await new Promise(r => setTimeout(r, 750));
+            assert(getWindowsCount === countAfterStop,
+                `Pin monitor should stop polling once no windows are pinned (got ${getWindowsCount} vs ${countAfterStop})`);
+
+            // 6. Re-pin and verify exiting fullscreen automatically triggers unpin_all
+            list.querySelectorAll('.fullscreen-window-item')[0].click();
+            await new Promise(r => setTimeout(r, 40));
+            assert(fsBtn.classList.contains('text-blue-600'),
+                'Fullscreen button should turn blue before fullscreen exit test');
             document.dispatchEvent(new Event('fullscreenchange'));
             await new Promise(r => setTimeout(r, 40));
             assert(lastPostPayload && lastPostPayload.action === 'unpin_all',
@@ -467,7 +531,7 @@ window.addEventListener('load', () => {
                 "--headless=new",
                 "--disable-gpu",
                 "--window-size=1440,920",
-                "--virtual-time-budget=3000",
+                "--virtual-time-budget=4500",
                 "--dump-dom",
                 temp_path,
             ]

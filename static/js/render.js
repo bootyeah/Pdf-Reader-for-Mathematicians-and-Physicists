@@ -1382,18 +1382,19 @@
                         const thickness = anno.thickness * h;
                         const localX = anno.localX * w;
                         const yOffset = anno.lineOffset * thickness;
+                        const { tipOffset, ctrlOffset, minHitWidth } = getFreeParenthesisMetrics(currentScale);
 
                         g.setAttribute("transform", `translate(${startX}, ${startY}) rotate(${angle})`);
                         g.setAttribute("class", `cursor-pointer group ${isSidecarOnly ? 'sidecar-only-anno' : ''}`);
                         
                         const leftPath = document.createElementNS(svgNS, "path");
-                        leftPath.setAttribute("d", `M 6 0 Q -4 ${thickness/2} 6 ${thickness}`);
+                        leftPath.setAttribute("d", `M ${tipOffset} 0 Q ${-ctrlOffset} ${thickness/2} ${tipOffset} ${thickness}`);
                         leftPath.setAttribute("fill", "none");
                         leftPath.setAttribute("stroke", color);
                         leftPath.setAttribute("stroke-width", strokeWidth);
 
                         const rightPath = document.createElementNS(svgNS, "path");
-                        rightPath.setAttribute("d", `M ${localX - 6} ${yOffset} Q ${localX + 4} ${yOffset + thickness/2} ${localX - 6} ${yOffset + thickness}`);
+                        rightPath.setAttribute("d", `M ${localX - tipOffset} ${yOffset} Q ${localX + ctrlOffset} ${yOffset + thickness/2} ${localX - tipOffset} ${yOffset + thickness}`);
                         rightPath.setAttribute("fill", "none");
                         rightPath.setAttribute("stroke", color);
                         rightPath.setAttribute("stroke-width", strokeWidth);
@@ -1406,7 +1407,7 @@
                         const maxY = Math.max(thickness, yOffset + thickness);
                         hitBox.setAttribute("x", minX);
                         hitBox.setAttribute("y", minY);
-                        hitBox.setAttribute("width", Math.max(12, maxX - minX));
+                        hitBox.setAttribute("width", Math.max(minHitWidth, maxX - minX));
                         hitBox.setAttribute("height", Math.max(thickness, maxY - minY));
                         hitBox.setAttribute("fill", "transparent");
                         hitBox.style.pointerEvents = "all";
@@ -1519,13 +1520,56 @@
         const fullscreenWindowListEl = document.getElementById('fullscreen-window-list');
         let _fullscreenWindows = [];
         let _hasReaderPinnedWindows = false;
+        let _fullscreenWindowListSignature = '';
+        let _fullscreenPinMonitorTimer = null;
+        let _fullscreenFocusRetryTimer = null;
+        let _fullscreenSyncSeq = 0;
+        let _fullscreenPollInFlight = false;
+        const FULLSCREEN_PIN_POLL_MS = 600;
+
+        function stopFullscreenPinMonitor() {
+            if (_fullscreenPinMonitorTimer !== null) {
+                clearInterval(_fullscreenPinMonitorTimer);
+                _fullscreenPinMonitorTimer = null;
+            }
+            if (_fullscreenFocusRetryTimer !== null) {
+                clearTimeout(_fullscreenFocusRetryTimer);
+                _fullscreenFocusRetryTimer = null;
+            }
+        }
+
+        function syncFullscreenPinMonitor() {
+            if (_hasReaderPinnedWindows) {
+                if (_fullscreenPinMonitorTimer === null) {
+                    _fullscreenPinMonitorTimer = setInterval(() => {
+                        if (!_hasReaderPinnedWindows) {
+                            stopFullscreenPinMonitor();
+                            return;
+                        }
+                        if (document.hidden) return;
+                        refreshFullscreenWindows({ isPoll: true });
+                    }, FULLSCREEN_PIN_POLL_MS);
+                }
+            } else {
+                stopFullscreenPinMonitor();
+            }
+        }
 
         function renderFullscreenWindowList(windows) {
             _fullscreenWindows = Array.isArray(windows) ? windows : [];
             const anyPinned = _fullscreenWindows.some(w => !!(w && w.pinned));
             _hasReaderPinnedWindows = anyPinned || _fullscreenWindows.some(w => !!(w && w.pinned_by_reader));
-            els.fullscreenBtn?.classList.toggle('text-blue-600', anyPinned);
+            if (els.fullscreenBtn) {
+                els.fullscreenBtn.classList.toggle('text-blue-600', anyPinned);
+                els.fullscreenBtn.classList.toggle('text-gray-600', !anyPinned);
+            }
+            syncFullscreenPinMonitor();
             if (!fullscreenWindowListEl) return _fullscreenWindows;
+            const nextSignature = JSON.stringify(_fullscreenWindows.map(w => w ? [w.hwnd, w.title || '', w.app || '', !!w.pinned] : null));
+            if (nextSignature === _fullscreenWindowListSignature && fullscreenWindowListEl.childElementCount > 0) {
+                return _fullscreenWindows;
+            }
+            _fullscreenWindowListSignature = nextSignature;
             fullscreenWindowListEl.innerHTML = '';
             if (_fullscreenWindows.length === 0) {
                 const emptyEl = document.createElement('div');
@@ -1566,19 +1610,28 @@
             return _fullscreenWindows;
         }
 
-        async function refreshFullscreenWindows() {
+        async function refreshFullscreenWindows(options = {}) {
+            const isPoll = !!(options && options.isPoll);
+            if (isPoll && _fullscreenPollInFlight) return _fullscreenWindows;
+            const seq = ++_fullscreenSyncSeq;
+            if (isPoll) _fullscreenPollInFlight = true;
             try {
                 const resp = await fetch('/api/windows', { cache: 'no-store' });
                 if (!resp.ok) return _fullscreenWindows;
                 const data = await resp.json();
+                if (seq !== _fullscreenSyncSeq) return _fullscreenWindows;
                 if (data && Array.isArray(data.windows)) {
                     return renderFullscreenWindowList(data.windows);
                 }
-            } catch (_) {}
+            } catch (_) {
+            } finally {
+                if (isPoll) _fullscreenPollInFlight = false;
+            }
             return _fullscreenWindows;
         }
 
         async function toggleFullscreenWindow(hwnd, action = 'toggle') {
+            const seq = ++_fullscreenSyncSeq;
             try {
                 const resp = await fetch('/api/windows', {
                     method: 'POST',
@@ -1586,6 +1639,7 @@
                     body: JSON.stringify({ action, hwnd })
                 });
                 const data = await resp.json().catch(() => null);
+                if (seq !== _fullscreenSyncSeq) return data;
                 if (data && Array.isArray(data.windows)) {
                     renderFullscreenWindowList(data.windows);
                 } else {
@@ -1599,8 +1653,13 @@
 
         async function unpinAllFullscreenWindows() {
             const shouldNotify = _hasReaderPinnedWindows || _fullscreenWindows.some(w => !!(w && (w.pinned || w.pinned_by_reader)));
+            const seq = ++_fullscreenSyncSeq;
             _hasReaderPinnedWindows = false;
-            els.fullscreenBtn?.classList.remove('text-blue-600');
+            stopFullscreenPinMonitor();
+            if (els.fullscreenBtn) {
+                els.fullscreenBtn.classList.remove('text-blue-600');
+                els.fullscreenBtn.classList.add('text-gray-600');
+            }
             if (!shouldNotify) return null;
             try {
                 const resp = await fetch('/api/windows', {
@@ -1610,13 +1669,25 @@
                     keepalive: true
                 });
                 const data = await resp.json().catch(() => null);
-                if (data && Array.isArray(data.windows)) {
+                if (seq === _fullscreenSyncSeq && data && Array.isArray(data.windows)) {
                     renderFullscreenWindowList(data.windows);
                 }
                 return data;
             } catch (_) {
                 return null;
             }
+        }
+
+        function triggerPinnedWindowRecheck() {
+            if (!_hasReaderPinnedWindows || document.hidden) return;
+            refreshFullscreenWindows();
+            if (_fullscreenFocusRetryTimer !== null) clearTimeout(_fullscreenFocusRetryTimer);
+            _fullscreenFocusRetryTimer = setTimeout(() => {
+                _fullscreenFocusRetryTimer = null;
+                if (_hasReaderPinnedWindows && !document.hidden) {
+                    refreshFullscreenWindows({ isPoll: true });
+                }
+            }, 250);
         }
 
         window.FullscreenWindowSwitcher = {
@@ -1633,6 +1704,10 @@
         fullscreenDropdownWrapper?.addEventListener('mouseleave', () => {
             fullscreenDropdownWrapper.classList.remove('dropdown-dismissed');
         });
+        window.addEventListener('focus', triggerPinnedWindowRecheck);
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) triggerPinnedWindowRecheck();
+        });
 
         els.fullscreenBtn.addEventListener('click', () => {
             fullscreenDropdownWrapper?.classList.add('dropdown-dismissed');
@@ -1647,6 +1722,7 @@
         });
 
         window.addEventListener('pagehide', () => {
+            stopFullscreenPinMonitor();
             if (_hasReaderPinnedWindows) {
                 try {
                     navigator.sendBeacon?.('/api/windows', new Blob([JSON.stringify({ action: 'unpin_all' })], { type: 'application/json' }));

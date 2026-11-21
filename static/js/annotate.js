@@ -105,13 +105,14 @@
 
                             state.drawingArrow.finalLocalX = localX;
                             state.drawingArrow.finalLineOffset = lineOffset;
+                            const { tipOffset, ctrlOffset } = getFreeParenthesisMetrics(state.scale);
 
                             if (rightP) {
-                                rightP.setAttribute("d", `M ${localX - 6} ${yOffset} Q ${localX + 4} ${yOffset + h/2} ${localX - 6} ${yOffset + h}`);
+                                rightP.setAttribute("d", `M ${localX - tipOffset} ${yOffset} Q ${localX + ctrlOffset} ${yOffset + h/2} ${localX - tipOffset} ${yOffset + h}`);
                             }
                             if (assistL) {
-                                assistL.setAttribute("x1", 6); assistL.setAttribute("y1", h/2);
-                                assistL.setAttribute("x2", localX - 6); assistL.setAttribute("y2", yOffset + h/2);
+                                assistL.setAttribute("x1", tipOffset); assistL.setAttribute("y1", h/2);
+                                assistL.setAttribute("x2", localX - tipOffset); assistL.setAttribute("y2", yOffset + h/2);
                             }
                         }
                         return; 
@@ -315,23 +316,25 @@
                             state.drawingArrow.thickness = Math.max(12, den === 0 ? 0 : num / den);
                             
                             const h = state.drawingArrow.thickness;
-                            leftP.setAttribute("d", `M 6 0 Q -4 ${h/2} 6 ${h}`);
+                            const { tipOffset, ctrlOffset } = getFreeParenthesisMetrics(state.scale);
+                            leftP.setAttribute("d", `M ${tipOffset} 0 Q ${-ctrlOffset} ${h/2} ${tipOffset} ${h}`);
                             // 辅助线移到下方暗示行高
                             baseL.setAttribute("y1", h); baseL.setAttribute("y2", h);
                         } 
                         else if (state.drawingArrow.phase === 3) {
                             // Phase 3: 右括号自由跟随鼠标吸附（不再做阶梯量子划分，自由平滑移动）
                             const { localX, h, yOffset, lineOffset } = projectFreeParenthesisLocal(state.drawingArrow, currentX, currentY);
+                            const { tipOffset, ctrlOffset } = getFreeParenthesisMetrics(state.scale);
                             
                             state.drawingArrow.finalLocalX = localX;
                             state.drawingArrow.finalLineOffset = lineOffset;
                             
                             // 右括号：X轴平滑，Y轴自由平滑无阶梯跳跃
-                            rightP.setAttribute("d", `M ${localX - 6} ${yOffset} Q ${localX + 4} ${yOffset + h/2} ${localX - 6} ${yOffset + h}`);
+                            rightP.setAttribute("d", `M ${localX - tipOffset} ${yOffset} Q ${localX + ctrlOffset} ${yOffset + h/2} ${localX - tipOffset} ${yOffset + h}`);
                             
                             // 视觉连线指示左右括号对应
-                            assistL.setAttribute("x1", 6); assistL.setAttribute("y1", h/2);
-                            assistL.setAttribute("x2", localX - 6); assistL.setAttribute("y2", yOffset + h/2);
+                            assistL.setAttribute("x1", tipOffset); assistL.setAttribute("y1", h/2);
+                            assistL.setAttribute("x2", localX - tipOffset); assistL.setAttribute("y2", yOffset + h/2);
                         }
                         return; // 🛑 独立闭环，拦截后续常规图形代码
                     }
@@ -529,7 +532,7 @@
                         // 🚀 跃迁至阶段二
                         state.drawingArrow.phase = 2; 
                         // 自由括号的默认厚度（行高）可以稍微设大一点，高亮块较小
-                        state.drawingArrow.thickness = state.drawingArrow.type === 'free-parenthesis' ? 24 : 10; 
+                        state.drawingArrow.thickness = state.drawingArrow.type === 'free-parenthesis' ? 24 * state.scale : 10; 
                     }
                     return; // 强制拦截！不能走到下面的保存逻辑中去
                 }

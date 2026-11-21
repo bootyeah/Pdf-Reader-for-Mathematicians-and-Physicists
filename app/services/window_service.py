@@ -204,10 +204,25 @@ def list_windows():
     console_hwnd = int(kernel32.GetConsoleWindow() or 0)
 
     with _LOCK:
-        stale = [h for h in _PINNED_HWNDS if not user32.IsWindow(h)]
-        for h in stale:
-            _PINNED_HWNDS.discard(h)
         pinned_snapshot = set(_PINNED_HWNDS)
+
+    unpinned_now = set()
+    for h in list(pinned_snapshot):
+        if not user32.IsWindow(h):
+            unpinned_now.add(h)
+            continue
+        if not user32.IsWindowVisible(h) or user32.IsIconic(h) or _is_cloaked(ctypes, dwmapi, h):
+            user32.SetWindowPos(
+                h, HWND_NOTOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+            unpinned_now.add(h)
+
+    if unpinned_now:
+        with _LOCK:
+            for h in unpinned_now:
+                _PINNED_HWNDS.discard(h)
+        pinned_snapshot.difference_update(unpinned_now)
 
     visible_items = []
     tray_candidates = []
@@ -249,6 +264,8 @@ def list_windows():
 
         visible = bool(user32.IsWindowVisible(hwnd))
         minimized = bool(user32.IsIconic(hwnd))
+        if hwnd in unpinned_now:
+            ex_style &= ~WS_EX_TOPMOST
         if hwnd in pinned_snapshot and (not visible or minimized):
             user32.SetWindowPos(
                 hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,

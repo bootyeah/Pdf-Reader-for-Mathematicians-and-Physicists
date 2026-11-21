@@ -72,6 +72,15 @@
                     M ${wing1X} ${wing1Y} L ${tipX} ${tipY} L ${wing2X} ${wing2Y} ${startHead}`;
         }
 
+        function getFreeParenthesisMetrics(scale = 1) {
+            const safeScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+            return {
+                tipOffset: 6 * safeScale,
+                ctrlOffset: 4 * safeScale,
+                minHitWidth: 12 * safeScale,
+            };
+        }
+
         function updateBubbleTail(pathEl, cx, cy, ax, ay, scale) {
             const dx = ax - cx;
             const dy = ay - cy;
