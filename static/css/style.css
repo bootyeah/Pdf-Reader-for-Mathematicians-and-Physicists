@@ -977,6 +977,60 @@
            DeepSeek 对话 (DeepSeek Chat) —— 浅色磨砂卡片，与词典面板/笔记弹窗同一套配色
            配色只用阅读器里已有的中性灰 + 蓝，不用品牌深蓝，避免和护眼模式打架
            ========================================================================= */
+        /* ---------- 顶栏 AI 对话入口按钮状态反馈（生成中克制呼吸闪烁 / 出错变红） ---------- */
+        @keyframes dsChatBtnBlink {
+            0%, 100% {
+                color: #2563eb;
+                background-color: #eff6ff;
+                border-color: #93c5fd;
+            }
+            50% {
+                color: #93c5fd;
+                background-color: #f9fafb;
+                border-color: #d1d5db;
+            }
+        }
+        @keyframes dsChatIconBlink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.35; }
+        }
+        body:not(.toolbar-collapsed) #deepseek-chat-btn.is-streaming {
+            color: #2563eb;
+            background-color: #eff6ff;
+            border-color: #93c5fd;
+            transition: none !important;
+            animation: dsChatBtnBlink 1.5s ease-in-out infinite;
+        }
+        body:not(.toolbar-collapsed) #deepseek-chat-btn.is-streaming > svg {
+            animation: dsChatIconBlink 1.5s ease-in-out infinite;
+        }
+        body.eye-protection-mode:not(.toolbar-collapsed) #deepseek-chat-btn.is-streaming {
+            color: #2563eb !important;
+            border-color: #93c5fd !important;
+        }
+        body:not(.toolbar-collapsed) #deepseek-chat-btn.is-error {
+            color: #dc2626 !important;
+            background-color: #fef2f2 !important;
+            border-color: #fca5a5 !important;
+            transition: none !important;
+            animation: none !important;
+        }
+        body:not(.toolbar-collapsed) #deepseek-chat-btn.is-error:hover {
+            color: #b91c1c !important;
+            background-color: #fee2e2 !important;
+            border-color: #f87171 !important;
+        }
+        body.eye-protection-mode:not(.toolbar-collapsed) #deepseek-chat-btn.is-error {
+            color: #dc2626 !important;
+            background-color: #f9ebe8 !important;
+            border-color: #eba8a8 !important;
+        }
+        body.eye-protection-mode:not(.toolbar-collapsed) #deepseek-chat-btn.is-error:hover {
+            color: #b91c1c !important;
+            background-color: #f5dfdb !important;
+            border-color: #e08b8b !important;
+        }
+
         .ds-chat-panel {
             position: fixed;
             z-index: 2044;               /* 小窗层级见 window-layers.js（点击哪个小窗就置顶），始终低于词典气泡 */
@@ -6878,6 +6932,39 @@ body.toolbar-collapsed .color-btn[data-color="#4ade80"]:hover::after { backgroun
 body.toolbar-collapsed .color-btn[data-color="#60a5fa"]:hover::after { background-color: #60a5fa !important; }
 body.toolbar-collapsed .color-btn[data-color="#000000"]:hover::after { background-color: #000000 !important; }
 body.toolbar-collapsed #custom-color-wrapper:hover::after { background-color: var(--custom-color, #fde047) !important; }
+
+/* 折叠态 AI 对话横条状态反馈：回答中简洁呼吸闪烁，报错时横条变红 */
+@keyframes dsChatBarBlink {
+    0%, 100% {
+        background-color: #2563eb;
+        opacity: 1;
+    }
+    50% {
+        background-color: #93c5fd;
+        opacity: 0.32;
+    }
+}
+body.toolbar-collapsed #deepseek-chat-btn.is-streaming::after,
+body.toolbar-collapsed #deepseek-chat-btn.text-blue-600.is-streaming::after,
+body.eye-protection-mode.toolbar-collapsed #deepseek-chat-btn.is-streaming::after,
+body.eye-protection-mode.toolbar-collapsed #deepseek-chat-btn.text-blue-600.is-streaming::after {
+    background-color: #2563eb;
+    transition: none !important;
+    animation: dsChatBarBlink 1.5s ease-in-out infinite;
+}
+body.toolbar-collapsed #deepseek-chat-btn.is-error::after,
+body.toolbar-collapsed #deepseek-chat-btn.text-blue-600.is-error::after,
+body.eye-protection-mode.toolbar-collapsed #deepseek-chat-btn.is-error::after,
+body.eye-protection-mode.toolbar-collapsed #deepseek-chat-btn.text-blue-600.is-error::after {
+    background-color: #dc2626 !important;
+    transition: none !important;
+    animation: none !important;
+    opacity: 1;
+}
+body.toolbar-collapsed #deepseek-chat-btn.is-error:hover::after,
+body.eye-protection-mode.toolbar-collapsed #deepseek-chat-btn.is-error:hover::after {
+    background-color: #b91c1c !important;
+}
 
 /* 标记悬停下拉防断触透明桥接层 */
 body.toolbar-collapsed #marker-dropdown-wrapper > .absolute::before {

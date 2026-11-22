@@ -95,6 +95,7 @@
     let attachments = [];          // 待发送图片 [{id, dataUrl, name, pdfPage?, pdfDoc?, pdfToken?}]
     let pendingImages = 0;         // 正在异步读取中的图片数，防止并发超额
     let streaming = false;         // 正在生成
+    let chatStatus = 'idle';       // 'idle' | 'streaming' | 'error'
     let abortController = null;
     let panelVisible = false;
     let isComposing = false;       // 中文输入法组词中（此时回车不算发送）
@@ -813,6 +814,7 @@
         closeBtn = panel.querySelector('#ds-chat-close-btn');
         resizeHandle = panel.querySelector('#ds-chat-resize');
         toolbarBtn = document.getElementById('deepseek-chat-btn');
+        setChatStatus(chatStatus);
 
         applyFontScale(fontScale);
         buildModelMenu();
@@ -909,6 +911,9 @@
         paintedMessages.clear();
         openTikzSources.clear();
         selectingBody = null;
+        if (!streaming && chatStatus === 'error') {
+            setChatStatus('idle');
+        }
     }
 
     function showWelcome() {
@@ -1085,6 +1090,9 @@
             saveState();
             requestAssistantReply(function () { resendFromUserMsg(wrap); });
         } else {
+            if (!bodyEl.querySelector('.dict-error') && chatStatus === 'error') {
+                setChatStatus('idle');
+            }
             saveState();
         }
     }
@@ -1112,6 +1120,10 @@
             const idx = history.indexOf(entry);
             if (idx !== -1) history.splice(idx, 1);
         }
+        const nextEl = wrap.nextElementSibling;
+        if (nextEl && !msgEntryMap.has(nextEl) && nextEl.querySelector && nextEl.querySelector('.dict-error')) {
+            nextEl.remove();
+        }
         const contentEl = wrap.querySelector('.ds-content');
         if (contentEl) paintedMessages.delete(contentEl);
         wrap.remove();
@@ -1119,6 +1131,8 @@
             history = [];
             clearBody();
             showWelcome();
+        } else if (!bodyEl.querySelector('.dict-error') && chatStatus === 'error') {
+            setChatStatus('idle');
         }
         saveState();
     }
@@ -2475,13 +2489,14 @@
         }
     }
 
-    function setStreaming(on) {
+    function setStreaming(on, hasError) {
         streaming = on;
         sendBtn.style.display = on ? 'none' : '';
         stopBtn.style.display = on ? '' : 'none';
         clearBtn.disabled = on;
         inputEl.disabled = false;      // 允许边生成边打下一句
         panel.classList.toggle('is-streaming', on);
+        setChatStatus(on ? 'streaming' : (hasError ? 'error' : 'idle'));
     }
 
     async function send(text, images) {
@@ -2590,7 +2605,7 @@
         } finally {
             state.alive = false;
             if (state.renderTimer) { clearTimeout(state.renderTimer); state.renderTimer = null; }
-            setStreaming(false);
+            setStreaming(false, failed);
             abortController = null;
             // 流式结束按「最终态」再画一次：半途截断的 TikZ 会从占位符换成可折叠的源码块
             if (state.text && !settled) paintMessageBody(state.bodyEl, state.text, {});
@@ -2749,6 +2764,22 @@
         } else {
             toolbarBtn.classList.remove('bg-white', 'shadow-sm', 'text-blue-600');
             toolbarBtn.classList.add('text-gray-600');
+        }
+    }
+
+    function setChatStatus(nextStatus) {
+        chatStatus = nextStatus === 'streaming' || nextStatus === 'error' ? nextStatus : 'idle';
+        if (!toolbarBtn) toolbarBtn = document.getElementById('deepseek-chat-btn');
+        if (!toolbarBtn) return;
+        toolbarBtn.classList.toggle('is-streaming', chatStatus === 'streaming');
+        toolbarBtn.classList.toggle('is-error', chatStatus === 'error');
+        toolbarBtn.dataset.chatStatus = chatStatus;
+        if (chatStatus === 'streaming') {
+            toolbarBtn.title = 'DeepSeek 对话 · 正在回答… (可粘贴图片 · D)';
+        } else if (chatStatus === 'error') {
+            toolbarBtn.title = 'DeepSeek 对话 · 回答出错 (可粘贴图片 · D)';
+        } else {
+            toolbarBtn.title = 'DeepSeek 对话 (可粘贴图片 · D)';
         }
     }
 

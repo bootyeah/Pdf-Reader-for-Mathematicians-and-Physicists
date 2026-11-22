@@ -297,6 +297,165 @@ window.addEventListener('load', () => {
             assert(!document.body.classList.contains('toolbar-collapsed') && header.offsetHeight === 72,
                 'Pressing Shift + Minus (_) key must expand toolbar back');
 
+            // =================================================================
+            // 3. AI Chat Toolbar Button Status: streaming blink & error red state
+            //    (in both expanded toolbar and collapsed horizontal bar modes)
+            // =================================================================
+            await new Promise(r => setTimeout(r, 30));
+            assert(aiBtn.dataset.chatStatus === 'idle', 'Initial AI button status should be idle');
+            assert(!aiBtn.classList.contains('is-streaming') && !aiBtn.classList.contains('is-error'),
+                'Initial AI button should not have streaming or error class');
+
+            let activeStreamCtrl = null;
+            let shouldFailHttp = false;
+            const origFetch = window.fetch.bind(window);
+            window.fetch = (input, init) => {
+                const urlStr = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+                if (urlStr.includes('/api/ai-config')) {
+                    return Promise.resolve(new Response(JSON.stringify({
+                        model: 'deepseek-flash',
+                        models: ['deepseek-flash'],
+                        thinking: 'disabled',
+                        revision: 'test-rev'
+                    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+                }
+                if (urlStr.includes('/api/chat')) {
+                    if (shouldFailHttp) {
+                        return Promise.resolve(new Response(JSON.stringify({ error: '模拟服务异常' }), {
+                            status: 500,
+                            headers: { 'Content-Type': 'application/json' }
+                        }));
+                    }
+                    return Promise.resolve(new Response(new ReadableStream({
+                        start(controller) {
+                            activeStreamCtrl = controller;
+                            if (init && init.signal) {
+                                init.signal.addEventListener('abort', () => {
+                                    try { controller.error(new DOMException('Stopped', 'AbortError')); } catch (e) {}
+                                }, { once: true });
+                            }
+                        }
+                    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
+                }
+                return origFetch(input, init);
+            };
+
+            // 3a. Open chat, send message -> button starts blinking in expanded mode
+            aiBtn.click();
+            assert(getComputedStyle(chatPanel).display === 'flex', 'Chat panel should be open');
+            const chatInput = document.getElementById('ds-chat-input');
+            const chatSendBtn = document.getElementById('ds-chat-send-btn');
+            const chatCloseBtn = document.getElementById('ds-chat-close-btn');
+            const chatClearBtn = document.getElementById('ds-chat-clear-btn');
+
+            chatInput.value = '测试回答中闪烁';
+            chatSendBtn.click();
+            await new Promise(r => setTimeout(r, 40));
+
+            assert(aiBtn.classList.contains('is-streaming'),
+                'AI button must have is-streaming while answering; status=' + aiBtn.dataset.chatStatus + ' body=' + document.getElementById('ds-chat-body').textContent);
+            assert(!aiBtn.classList.contains('is-error'), 'AI button must not have is-error while answering');
+            assert(aiBtn.dataset.chatStatus === 'streaming', 'dataset.chatStatus should be streaming');
+            assert(getComputedStyle(aiBtn).animationName === 'dsChatBtnBlink',
+                'Expanded AI button should run dsChatBtnBlink animation, got ' + getComputedStyle(aiBtn).animationName);
+            assert(getComputedStyle(aiBtn.querySelector('svg')).animationName === 'dsChatIconBlink',
+                'Expanded AI button svg should run dsChatIconBlink animation');
+
+            // Close chat window while AI is still answering -> button keeps blinking
+            chatCloseBtn.click();
+            assert(getComputedStyle(chatPanel).display === 'none', 'Chat panel should be closed');
+            assert(aiBtn.classList.contains('is-streaming'), 'AI button must keep blinking after closing chat panel');
+            assert(getComputedStyle(aiBtn).animationName === 'dsChatBtnBlink',
+                'Closed panel AI button must continue dsChatBtnBlink animation');
+
+            // Collapse toolbar while AI is still answering -> collapsed bar blinks
+            toggleBtn.click();
+            void header.offsetHeight;
+            assert(document.body.classList.contains('toolbar-collapsed'), 'Toolbar should be collapsed');
+            assert(getComputedStyle(aiBtn, '::after').animationName === 'dsChatBarBlink',
+                'Collapsed AI horizontal bar ::after should run dsChatBarBlink animation, got ' + getComputedStyle(aiBtn, '::after').animationName);
+            assert(getComputedStyle(aiBtn).backgroundColor === 'rgba(0, 0, 0, 0)',
+                'Collapsed AI button container background must stay transparent');
+
+            // Finish stream -> blinking stops immediately in collapsed mode & expanded mode
+            const enc = new TextEncoder();
+            activeStreamCtrl.enqueue(enc.encode('data: {"delta":"回答完毕"}\n\ndata: {"done":true}\n\n'));
+            activeStreamCtrl.close();
+            await new Promise(r => setTimeout(r, 50));
+
+            assert(!aiBtn.classList.contains('is-streaming'), 'AI button must stop blinking when answer completes');
+            assert(!aiBtn.classList.contains('is-error'), 'AI button must not be in error state on normal completion');
+            assert(aiBtn.dataset.chatStatus === 'idle', 'dataset.chatStatus should return to idle');
+            assert(getComputedStyle(aiBtn, '::after').animationName === 'none',
+                'Collapsed AI bar animation should stop after completion');
+
+            // Expand toolbar back
+            toggleBtn.click();
+            void header.offsetHeight;
+            assert(getComputedStyle(aiBtn).animationName === 'none',
+                'Expanded AI button animation should be none after completion');
+
+            // 3b. Send a message that returns an error -> button turns red in both expanded and collapsed modes
+            shouldFailHttp = true;
+            aiBtn.click();
+            chatInput.value = '测试报错变红';
+            chatSendBtn.click();
+            await new Promise(r => setTimeout(r, 50));
+
+            assert(!aiBtn.classList.contains('is-streaming'), 'AI button must not be streaming after error');
+            assert(aiBtn.classList.contains('is-error'), 'AI button must have is-error class on error');
+            assert(aiBtn.dataset.chatStatus === 'error', 'dataset.chatStatus should be error');
+            assert(getComputedStyle(aiBtn).color === 'rgb(220, 38, 38)',
+                'Expanded AI button icon color should be red rgb(220, 38, 38), got ' + getComputedStyle(aiBtn).color);
+            assert(getComputedStyle(aiBtn).backgroundColor === 'rgb(254, 242, 242)',
+                'Expanded AI button background should be soft red rgb(254, 242, 242), got ' + getComputedStyle(aiBtn).backgroundColor);
+
+            // Collapse toolbar while in error state -> horizontal bar is red
+            toggleBtn.click();
+            void header.offsetHeight;
+            assert(getComputedStyle(aiBtn, '::after').backgroundColor === 'rgb(220, 38, 38)',
+                'Collapsed AI horizontal bar ::after should be red rgb(220, 38, 38), got ' + getComputedStyle(aiBtn, '::after').backgroundColor);
+            assert(getComputedStyle(aiBtn, '::after').animationName === 'none',
+                'Collapsed AI horizontal bar ::after should not blink in error state');
+            assert(getComputedStyle(aiBtn).backgroundColor === 'rgba(0, 0, 0, 0)',
+                'Collapsed AI button container background must remain transparent in error state');
+
+            // Eye-protection mode in collapsed error state -> horizontal bar remains red
+            document.body.classList.add('eye-protection-mode');
+            assert(getComputedStyle(aiBtn, '::after').backgroundColor === 'rgb(220, 38, 38)',
+                'Eye-protection collapsed AI bar ::after should be red rgb(220, 38, 38)');
+            document.body.classList.remove('eye-protection-mode');
+
+            // Expand toolbar and click Retry button -> transitions from error (red) to streaming (blinking) -> idle
+            toggleBtn.click();
+            void header.offsetHeight;
+            shouldFailHttp = false;
+            const retryBtn = document.querySelector('#ds-chat-body .ds-chat-retry');
+            assert(retryBtn !== null, 'Retry button should exist after error');
+            retryBtn.click();
+            await new Promise(r => setTimeout(r, 30));
+            assert(aiBtn.classList.contains('is-streaming') && !aiBtn.classList.contains('is-error'),
+                'Retrying should transition AI button from error to streaming');
+            activeStreamCtrl.enqueue(enc.encode('data: {"delta":"重试成功"}\n\ndata: {"done":true}\n\n'));
+            activeStreamCtrl.close();
+            await new Promise(r => setTimeout(r, 40));
+            assert(!aiBtn.classList.contains('is-streaming') && !aiBtn.classList.contains('is-error') && aiBtn.dataset.chatStatus === 'idle',
+                'Successful retry should return AI button to idle');
+
+            // 3c. Manual stop button -> stops blinking and returns to idle (not error)
+            chatInput.value = '测试手动停止';
+            chatSendBtn.click();
+            await new Promise(r => setTimeout(r, 30));
+            assert(aiBtn.classList.contains('is-streaming'), 'AI button should be streaming before stop');
+            document.getElementById('ds-chat-stop-btn').click();
+            await new Promise(r => setTimeout(r, 40));
+            assert(!aiBtn.classList.contains('is-streaming') && !aiBtn.classList.contains('is-error') && aiBtn.dataset.chatStatus === 'idle',
+                'Manual stop should return AI button to idle without error');
+
+            chatClearBtn.click();
+            assert(!aiBtn.classList.contains('is-error') && aiBtn.dataset.chatStatus === 'idle',
+                'Clearing chat should keep AI button in idle');
+
             document.title = 'TOOLBAR_AND_MINDMAP_OPT_OK';
         } catch (err) {
             document.title = 'TOOLBAR_AND_MINDMAP_OPT_ERR: ' + (err && err.stack ? err.stack : err);
