@@ -8,6 +8,9 @@ let cachedPdfBytes = 0;
 let pdfHeightIndex = new Float64Array(0);
 let pdfWindowFrame = 0;
 let pdfWindowWidth = 0;
+let lastPdfWindowScale = 0;
+let lastPdfScrollTop = -1;
+let lastPdfViewportHeight = -1;
 // 起点页离开窗口后，只为仍经过阅读区域的跨页批注保留轻量 SVG（保留窗口为当前视口前后各 5 页）。
 const CROSS_PAGE_RETAIN_PAGES = 5;
 const crossPageArrows = new Map();
@@ -103,6 +106,7 @@ function removeDetachedArrowLayer(pageNum) {
 }
 function refreshDetachedArrows() {
     if (!state.pdfDoc || !state.pageDimensions.length) return;
+    if (!crossPageArrows.size && !detachedArrowLayers.size) return;
     const rawViewTop = Math.max(0, els.container.scrollTop - els.pagesContainer.offsetTop);
     const rawViewBottom = rawViewTop + els.container.clientHeight;
     const firstViewPage = pdfPageAtOffset(rawViewTop);
@@ -221,12 +225,27 @@ function layoutPdfPage(pageNum, wrapper) {
     }
     scaleAnnotationLayer(pageNum);
 }
-function layoutPdfWindow() {
+function layoutPdfWindow(skipDetachedArrows = false) {
     if (!state.pdfDoc) return;
     pdfWindowWidth = els.pagesContainer.clientWidth;
+    lastPdfWindowScale = state.scale;
+    lastPdfScrollTop = -1;
+    lastPdfViewportHeight = -1;
     setPdfStyle(els.pagesContainer, 'height', pdfPageTop(state.pageDimensions.length + 1) + 80 + 'px');
     for (const [pageNum, wrapper] of pageWrappers) layoutPdfPage(pageNum, wrapper);
-    refreshDetachedArrows();
+    if (!skipDetachedArrows) refreshDetachedArrows();
+}
+function recenterPdfWindow(nextWidth) {
+    if (!state.pdfDoc) return;
+    pdfWindowWidth = nextWidth;
+    for (const [pageNum, wrapper] of pageWrappers) {
+        const dim = state.pageDimensions[pageNum - 1];
+        if (!dim) continue;
+        const width = dim.width * state.scale;
+        setPdfStyle(wrapper, 'left', Math.max(0, (pdfWindowWidth - width) / 2) + 'px');
+        if (crossPageArrows.has(pageNum)) scaleAnnotationLayer(pageNum);
+    }
+    if (detachedArrowLayers.size > 0 || crossPageArrows.size > 0) refreshDetachedArrows();
 }
 function ensurePdfPage(pageNum) {
     pageNum = Number(pageNum);
@@ -249,7 +268,7 @@ function ensurePdfPage(pageNum) {
         wrapper.id = `page-wrapper-${pageNum}`;
         wrapper.innerHTML = `
             <div id="sidecar-bg-${pageNum}" class="sidecar-bg">
-                <div class="absolute inset-0 pointer-events-none" style="background-image:linear-gradient(rgba(0,0,0,0.06) 1px,transparent 1px);background-size:100% 32px"></div>
+                <div class="absolute inset-0 pointer-events-none" style="contain:strict;background-image:linear-gradient(rgba(0,0,0,0.06) 1px,transparent 1px);background-size:100% 32px"></div>
                 <div class="sidecar-gap-hint">
                     <button type="button" class="window-shortcut-btn sidecar-shortcut-btn" title="折叠无界草稿本 (快捷键: Y)" aria-label="折叠无界草稿本 (Y)">
                         <span class="ws-action">折叠</span>
@@ -355,11 +374,31 @@ function queuePdfWindowRefresh() {
         refreshPdfRenderWindow(true);
     });
 }
-els.container.addEventListener('scroll', queuePdfWindowRefresh, { passive: true });
+els.container.addEventListener('scroll', () => {
+    const top = els.container.scrollTop;
+    const ch = els.container.clientHeight;
+    if (top === lastPdfScrollTop && ch === lastPdfViewportHeight && state.pagesRendered.size >= pageWrappers.size) return;
+    lastPdfScrollTop = top;
+    lastPdfViewportHeight = ch;
+    queuePdfWindowRefresh();
+}, { passive: true });
 new ResizeObserver(() => {
     if (!state.pdfDoc) return;
-    layoutPdfWindow();
-    queuePdfWindowRefresh();
+    const nextWidth = els.pagesContainer.clientWidth;
+    const nextHeight = els.container.clientHeight;
+    const widthChanged = nextWidth !== pdfWindowWidth;
+    const heightChanged = nextHeight !== lastPdfViewportHeight;
+    if (widthChanged) {
+        if (lastPdfWindowScale === state.scale && !state.isZooming && pageWrappers.size > 0) {
+            recenterPdfWindow(nextWidth);
+        } else {
+            layoutPdfWindow();
+        }
+    }
+    if (heightChanged || pageWrappers.size === 0) {
+        lastPdfViewportHeight = nextHeight;
+        queuePdfWindowRefresh();
+    }
 }).observe(els.container);
 
 // 渲染与搜索共用提取 Promise。文字层预算 16 MiB，搜索文本预算 32 MiB。

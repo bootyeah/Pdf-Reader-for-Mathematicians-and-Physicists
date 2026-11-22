@@ -29,7 +29,13 @@
     const PDF_HIGHRES_MAX_PX = 2400;
     const PDF_THUMB_CACHE_MAX = 150;
     const HEADER_HEIGHT = 72;          // 顶栏高度（与 LOCALPdfReader.html 的 h-[72px] 一致）
-    function getHeaderHeight() { const h = document.querySelector('header'); return h ? h.offsetHeight : HEADER_HEIGHT; }
+    function getHeaderHeight() {
+        if (document.getElementById('main-toolbar')) {
+            return document.body.classList.contains('toolbar-collapsed') ? 12 : HEADER_HEIGHT;
+        }
+        const h = document.querySelector('header');
+        return h ? h.offsetHeight : HEADER_HEIGHT;
+    }
 
     // TikZ：公共渲染层由 render.js 暴露（动态获取，确保脚本加载时序稳健）
     function getTikz() { return window.TikzRender || null; }
@@ -699,6 +705,8 @@
     }
 
     function resumeSelectedMessages() {
+        if (!panelVisible && !selectingBody) return;
+        if (!paintedMessages.size) return;
         paintedMessages.forEach(function (record, el) {
             if (!el.isConnected) { paintedMessages.delete(el); return; }
             if (record.pending && selectingBody !== el && !selectionTouches(el)) {
@@ -893,7 +901,10 @@
     // =========================================================================
     // 三、渲染会话
     // =========================================================================
+    let historyDomPending = false;
+
     function clearBody() {
+        historyDomPending = false;
         bodyEl.innerHTML = '';
         paintedMessages.clear();
         openTikzSources.clear();
@@ -1131,16 +1142,27 @@
         });
     }
 
-    // 流式渲染：一帧最多重排一次（每个 token 都重排会让长回答明显卡顿）
+    // 流式渲染：短回答每帧最多重排一次；超长回答（>2000 字符）按 ~48ms 节流，降低全量 Markdown+KaTeX 重排开销
     function streamTick(state) {
         if (state.renderQueued) return;
         state.renderQueued = true;
-        requestAnimationFrame(function () {
-            state.renderQueued = false;
-            if (!state.alive) return;
-            paintStream(state);
-            scheduleScroll(false);
-        });
+        const flush = function () {
+            state.renderTimer = null;
+            requestAnimationFrame(function () {
+                state.renderQueued = false;
+                if (!state.alive) return;
+                state.lastPaintAt = performance.now();
+                paintStream(state);
+                scheduleScroll(false);
+            });
+        };
+        const minGap = state.text.length > 2000 ? 48 : 0;
+        const wait = minGap > 0 && state.lastPaintAt ? Math.max(0, minGap - (performance.now() - state.lastPaintAt)) : 0;
+        if (wait > 0) {
+            state.renderTimer = setTimeout(flush, wait);
+        } else {
+            flush();
+        }
     }
 
     // 把当前累积的文本铺进气泡：思考块（若有）在上，正文在下
@@ -1216,6 +1238,38 @@
         } catch (e) { /* 存储不可用时静默 */ }
     }
 
+    function renderRestoredHistoryIfNeeded() {
+        if (!historyDomPending) return;
+        historyDomPending = false;
+        if (!history.length) return;
+        clearBody();
+        history.forEach(function (entry) {
+            if (entry.role === 'user') {
+                const userEl = userMessageEl(entry.content, []);
+                msgEntryMap.set(userEl.wrap, entry);
+            } else {
+                const el = messageEl('assistant');
+                msgEntryMap.set(el.wrap, entry);
+                if (entry.reasoning_content && String(entry.reasoning_content).trim()) {
+                    const reasoningEl = document.createElement('div');
+                    reasoningEl.className = 'ds-reasoning collapsed';
+                    reasoningEl.innerHTML =
+                        '<div class="ds-reasoning-head"><i class="ph ph-brain"></i><span>思考过程</span>' +
+                        '<i class="ph ph-caret-down ds-reasoning-caret"></i></div>' +
+                        '<div class="ds-reasoning-body"></div>';
+                    reasoningEl.querySelector('.ds-reasoning-body').innerHTML =
+                        markdownToHtml(entry.reasoning_content, { tikz: false });
+                    el.bubble.appendChild(reasoningEl);
+                }
+                const content = document.createElement('div');
+                content.className = 'ds-content';
+                el.bubble.appendChild(content);
+                paintMessageBody(content, entry.content, {});
+            }
+        });
+        scrollToBottom(true);
+    }
+
     function restoreState() {
         let data = null;
         try { data = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (e) { data = null; }
@@ -1243,35 +1297,15 @@
         syncThinkingAvailability();
 
         if (Array.isArray(data.history) && data.history.length) {
-            clearBody();
             data.history.forEach(function (m) {
                 if (!['user', 'assistant'].includes(m.role) || typeof m.content !== 'string') return;
-                const entry = storedEntry(m);
-                history.push(entry);
-                if (m.role === 'user') {
-                    const userEl = userMessageEl(m.content, []);
-                    msgEntryMap.set(userEl.wrap, entry);
-                } else {
-                    const el = messageEl('assistant');
-                    msgEntryMap.set(el.wrap, entry);
-                    if (m.reasoning_content && String(m.reasoning_content).trim()) {
-                        const reasoningEl = document.createElement('div');
-                        reasoningEl.className = 'ds-reasoning collapsed';
-                        reasoningEl.innerHTML =
-                            '<div class="ds-reasoning-head"><i class="ph ph-brain"></i><span>思考过程</span>' +
-                            '<i class="ph ph-caret-down ds-reasoning-caret"></i></div>' +
-                            '<div class="ds-reasoning-body"></div>';
-                        reasoningEl.querySelector('.ds-reasoning-body').innerHTML =
-                            markdownToHtml(m.reasoning_content, { tikz: false });
-                        el.bubble.appendChild(reasoningEl);
-                    }
-                    const content = document.createElement('div');
-                    content.className = 'ds-content';
-                    el.bubble.appendChild(content);
-                    paintMessageBody(content, m.content, {});
-                }
+                history.push(storedEntry(m));
             });
-            scrollToBottom(true);
+            if (history.length) {
+                // 延迟到首次打开对话面板时再渲染历史 DOM 与 KaTeX 公式，加快冷启动速度
+                historyDomPending = true;
+                if (panelVisible) renderRestoredHistoryIfNeeded();
+            }
         }
         restoringState = false;
     }
@@ -1553,11 +1587,11 @@
         });
 
         // ---------- 右下角缩放 ----------
-        let resizing = false, rw = 0, rh = 0, rmx = 0, rmy = 0;
+        let resizing = false, rw = 0, rh = 0, rmx = 0, rmy = 0, rLeft = 0, rTop = 0;
         function onResizeMove(e) {
             if (!resizing) return;
-            const maxW = Math.max(300, window.innerWidth - panel.offsetLeft - 8);
-            const maxH = Math.max(220, window.innerHeight - panel.offsetTop - 8);
+            const maxW = Math.max(300, window.innerWidth - rLeft - 8);
+            const maxH = Math.max(220, window.innerHeight - rTop - 8);
             panel.style.width = Math.max(300, Math.min(maxW, rw + e.clientX - rmx)) + 'px';
             panel.style.height = Math.max(220, Math.min(maxH, rh + e.clientY - rmy)) + 'px';
         }
@@ -1576,6 +1610,7 @@
             e.stopPropagation();
             resizing = true;
             rw = panel.offsetWidth; rh = panel.offsetHeight;
+            rLeft = panel.offsetLeft; rTop = panel.offsetTop;
             rmx = e.clientX; rmy = e.clientY;
             document.body.style.userSelect = 'none';
             document.body.style.cursor = 'nwse-resize';
@@ -2554,6 +2589,7 @@
             }
         } finally {
             state.alive = false;
+            if (state.renderTimer) { clearTimeout(state.renderTimer); state.renderTimer = null; }
             setStreaming(false);
             abortController = null;
             // 流式结束按「最终态」再画一次：半途截断的 TikZ 会从占位符换成可折叠的源码块
@@ -2663,6 +2699,7 @@
         if (panelVisible) return;
         panel.style.display = 'flex';
         panelVisible = true;
+        renderRestoredHistoryIfNeeded();
         window.FloatingWindowLayers?.bringToFront(panel);
 
         // 首次打开：贴在鲸鱼按钮正下方（左对齐按钮，越界时回收进屏幕）

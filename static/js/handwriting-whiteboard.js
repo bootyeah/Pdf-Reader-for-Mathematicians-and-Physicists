@@ -58,11 +58,19 @@
         const emptyHint = $('empty-hint');
         if (emptyHint) emptyHint.style.display = strokes > 0 ? 'none' : 'flex';
     }
+    let drawFrame = 0;
     function draw() {
         if (!panel.hidden && !collapsed) {
             PhoneHandwriting.draw($('pad'), board, whole, 6);
             updateEmptyState();
         }
+    }
+    function scheduleDraw() {
+        if (drawFrame) return;
+        drawFrame = requestAnimationFrame(() => {
+            drawFrame = 0;
+            draw();
+        });
     }
     function pairing(show) {
         $('pairing').hidden = !show;
@@ -537,23 +545,36 @@
         panel.addEventListener('pointermove', e => {
             if (!gesture || gesture.pointer !== e.pointerId) return;
             const { edge, r, x, y } = gesture, dx = e.clientX - x, dy = e.clientY - y;
-            let left = r.left, top = r.top, right = r.right, bottom = r.bottom;
-            if (!edge) { left += dx; top += dy; }
-            else {
-                const minW = Math.min(MIN_W, innerWidth - 16), minH = Math.min(MIN_H, innerHeight - 88);
+            const maxW = Math.max(1, innerWidth - 16);
+            const maxH = Math.max(42, innerHeight - 88);
+            if (!edge) {
+                const w = Math.max(Math.min(MIN_W, maxW), Math.min(r.width, maxW));
+                const h = collapsed ? 42 : Math.max(Math.min(MIN_H, maxH), Math.min(r.height, maxH));
+                const left = Math.max(8, Math.min(r.left + dx, innerWidth - w - 8));
+                const top = Math.max(0, Math.min(r.top + dy, innerHeight - h - 8));
+                panel.style.left = left + 'px';
+                panel.style.top = top + 'px';
+            } else {
+                let left = r.left, top = r.top, right = r.right, bottom = r.bottom;
+                const minW = Math.min(MIN_W, maxW), minH = Math.min(MIN_H, maxH);
                 if (edge.includes('e')) right = Math.min(innerWidth - 8, Math.max(left + minW, r.right + dx));
                 if (edge.includes('s')) bottom = Math.min(innerHeight - 8, Math.max(top + minH, r.bottom + dy));
                 if (edge.includes('w')) left = Math.max(8, Math.min(right - minW, r.left + dx));
                 if (edge.includes('n')) top = Math.max(0, Math.min(bottom - minH, r.top + dy));
-                const newW = right - left, newH = bottom - top;
-                panel.style.width = newW + 'px'; panel.style.height = newH + 'px';
+                const newW = Math.max(minW, Math.min(right - left, maxW));
+                const newH = collapsed ? 42 : Math.max(minH, Math.min(bottom - top, maxH));
+                if (!collapsed && newH < expandedHeight) expandedHeight = Math.max(MIN_H, newH);
+                panel.style.width = newW + 'px';
+                panel.style.height = newH + 'px';
+                panel.style.left = Math.max(8, Math.min(left, innerWidth - newW - 8)) + 'px';
+                panel.style.top = Math.max(0, Math.min(top, innerHeight - newH - 8)) + 'px';
                 updateResponsive(newW);
             }
-            panel.style.left = left + 'px'; panel.style.top = top + 'px'; clamp();
         });
         for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) panel.addEventListener(event, e => {
             if (gesture?.pointer !== e.pointerId) return;
             gesture = null; if (panel.hasPointerCapture(e.pointerId)) panel.releasePointerCapture(e.pointerId);
+            clamp();
             window.FloatingWindowLayers?.resetViewportBase(panel);
             save();
         });
@@ -577,8 +598,14 @@
         });
         // 窗口内操作不穿透到 PDF 的批注、快捷键和外部点击逻辑。
         for (const event of ['click', 'mousedown', 'pointerdown', 'keydown', 'keyup', 'wheel']) panel.addEventListener(event, e => e.stopPropagation());
-        new ResizeObserver(() => { if (!panel.hidden) { updateResponsive(); draw(); } }).observe(panel);
-        new ResizeObserver(draw).observe($('pad'));
+        new ResizeObserver(entries => {
+            if (!panel.hidden) {
+                const w = entries[0]?.borderBoxSize?.[0]?.inlineSize;
+                updateResponsive(w);
+                scheduleDraw();
+            }
+        }).observe(panel);
+        new ResizeObserver(scheduleDraw).observe($('pad'));
         const syncLayoutOnViewportChange = () => {
             if (panel.hidden) return;
             window.FloatingWindowLayers?.syncViewportBottom(panel);

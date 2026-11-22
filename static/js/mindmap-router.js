@@ -15,9 +15,25 @@
 
     function routeHitsObstacles(allCardBounds, pts, fromId, toId) {
         const hits = [];
+        if (!allCardBounds || !allCardBounds.length || !pts || pts.length < 2) return hits;
+        const pad = 3;
+        const seen = new Set();
         for (let i = 0; i < pts.length - 1; i++) {
-            const segHits = segmentHitsAnyCard(allCardBounds, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], fromId, toId, 3);
-            segHits.forEach(h => { if (!hits.some(x => x.id === h.id)) hits.push(h); });
+            const x1 = pts[i][0], y1 = pts[i][1];
+            const x2 = pts[i + 1][0], y2 = pts[i + 1][1];
+            const minX = x1 < x2 ? x1 : x2;
+            const maxX = x1 > x2 ? x1 : x2;
+            const minY = y1 < y2 ? y1 : y2;
+            const maxY = y1 > y2 ? y1 : y2;
+            for (let j = 0; j < allCardBounds.length; j++) {
+                const c = allCardBounds[j];
+                if (c.id === fromId || c.id === toId || seen.has(c.id)) continue;
+                if (maxX > c.left - pad && minX < c.right + pad &&
+                    maxY > c.top - pad && minY < c.bottom + pad) {
+                    seen.add(c.id);
+                    hits.push(c);
+                }
+            }
         }
         return hits;
     }
@@ -99,87 +115,210 @@
     }
 
     function sampleCubicBezier(p1, cp1, cp2, p2, steps = 24) {
-        const pts = [];
+        const pts = new Array(steps + 1);
         let length = 0;
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        let prevX = 0, prevY = 0;
         for (let k = 0; k <= steps; k++) {
             const t = k / steps;
             const mt = 1 - t;
-            const x = mt * mt * mt * p1.x + 3 * mt * mt * t * cp1.x + 3 * mt * t * t * cp2.x + t * t * t * p2.x;
-            const y = mt * mt * mt * p1.y + 3 * mt * mt * t * cp1.y + 3 * mt * t * t * cp2.y + t * t * t * p2.y;
-            if (k > 0) length += Math.hypot(x - pts[k - 1].x, y - pts[k - 1].y);
-            pts.push({ x, y });
+            const mt2 = mt * mt;
+            const t2 = t * t;
+            const c0 = mt2 * mt;
+            const c1 = 3 * mt2 * t;
+            const c2 = 3 * mt * t2;
+            const c3 = t2 * t;
+            const x = c0 * p1.x + c1 * cp1.x + c2 * cp2.x + c3 * p2.x;
+            const y = c0 * p1.y + c1 * cp1.y + c2 * cp2.y + c3 * p2.y;
+            if (k > 0) {
+                const dx = x - prevX, dy = y - prevY;
+                length += Math.sqrt(dx * dx + dy * dy);
+            }
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+            pts[k] = { x, y };
+            prevX = x;
+            prevY = y;
         }
-        return { pts, length };
+        return { pts, length, minX, maxX, minY, maxY };
     }
 
-    function scoreMergeCandidate(cand, fromId, toId, ctx) {
-        const { allCardBounds = [], solidEndpoints = [], solidSegments = [], placedMergeRoutes = [] } = ctx || {};
+    function scoreMergeCandidate(cand, fromId, toId, ctx, bestScore = Infinity) {
+        const {
+            allCardBounds = [],
+            solidEndpoints = [],
+            solidEndpointsByNode = null,
+            solidSegments = [],
+            placedMergeRoutes = []
+        } = ctx || {};
         const { p1, cp1, cp2, p2, basePenalty } = cand;
         let score = basePenalty || 0;
+        if (score >= bestScore) return score;
 
         // 1. 避免与实线共用同一卡片锚点（防止虚线起点/终点压在实线箭头上）
-        for (const ep of solidEndpoints) {
-            if (ep.nodeId === fromId) {
-                const d = Math.hypot(p1.x - ep.x, p1.y - ep.y);
-                if (d < 11) score += (11 - d) * 48;
-            } else if (ep.nodeId === toId) {
-                const d = Math.hypot(p2.x - ep.x, p2.y - ep.y);
-                if (d < 11) score += (11 - d) * 48;
+        if (solidEndpointsByNode) {
+            const fromEps = solidEndpointsByNode.get(fromId);
+            if (fromEps) {
+                for (let i = 0; i < fromEps.length; i++) {
+                    const ep = fromEps[i];
+                    const dx = p1.x - ep.x, dy = p1.y - ep.y;
+                    const d2 = dx * dx + dy * dy;
+                    if (d2 < 121) score += (11 - Math.sqrt(d2)) * 48;
+                }
+            }
+            if (toId !== fromId) {
+                const toEps = solidEndpointsByNode.get(toId);
+                if (toEps) {
+                    for (let i = 0; i < toEps.length; i++) {
+                        const ep = toEps[i];
+                        const dx = p2.x - ep.x, dy = p2.y - ep.y;
+                        const d2 = dx * dx + dy * dy;
+                        if (d2 < 121) score += (11 - Math.sqrt(d2)) * 48;
+                    }
+                }
+            }
+        } else {
+            for (let i = 0; i < solidEndpoints.length; i++) {
+                const ep = solidEndpoints[i];
+                if (ep.nodeId === fromId) {
+                    const dx = p1.x - ep.x, dy = p1.y - ep.y;
+                    const d2 = dx * dx + dy * dy;
+                    if (d2 < 121) score += (11 - Math.sqrt(d2)) * 48;
+                } else if (ep.nodeId === toId) {
+                    const dx = p2.x - ep.x, dy = p2.y - ep.y;
+                    const d2 = dx * dx + dy * dy;
+                    if (d2 < 121) score += (11 - Math.sqrt(d2)) * 48;
+                }
             }
         }
-        for (const mr of placedMergeRoutes) {
-            if (Math.hypot(p1.x - mr.p1.x, p1.y - mr.p1.y) < 9) score += 220;
-            if (Math.hypot(p2.x - mr.p2.x, p2.y - mr.p2.y) < 9) score += 220;
+        if (score >= bestScore) return score;
+
+        for (let i = 0; i < placedMergeRoutes.length; i++) {
+            const mr = placedMergeRoutes[i];
+            const dx1 = p1.x - mr.p1.x, dy1 = p1.y - mr.p1.y;
+            if (dx1 * dx1 + dy1 * dy1 < 81) score += 220;
+            const dx2 = p2.x - mr.p2.x, dy2 = p2.y - mr.p2.y;
+            if (dx2 * dx2 + dy2 * dy2 < 81) score += 220;
+        }
+        if (score >= bestScore) return score;
+
+        // 2. 沿贝塞尔曲线采样检测卡片穿透与实线平行重叠（AABB 预裁剪 + 分支定界剪枝）
+        const { pts, length, minX: cMinX, maxX: cMaxX, minY: cMinY, maxY: cMaxY } = sampleCubicBezier(p1, cp1, cp2, p2, 24);
+        score += length * 0.025;
+        if (score >= bestScore) return score;
+
+        const localCards = [];
+        for (let i = 0; i < allCardBounds.length; i++) {
+            const c = allCardBounds[i];
+            if (cMaxX > c.left - 6 && cMinX < c.right + 6 && cMaxY > c.top - 6 && cMinY < c.bottom + 6) {
+                localCards.push(c);
+            }
+        }
+        const localSegments = [];
+        for (let i = 0; i < solidSegments.length; i++) {
+            const seg = solidSegments[i];
+            const sMinX = seg.minX !== undefined ? seg.minX : (seg.x1 < seg.x2 ? seg.x1 : seg.x2);
+            const sMaxX = seg.maxX !== undefined ? seg.maxX : (seg.x1 > seg.x2 ? seg.x1 : seg.x2);
+            const sMinY = seg.minY !== undefined ? seg.minY : (seg.y1 < seg.y2 ? seg.y1 : seg.y2);
+            const sMaxY = seg.maxY !== undefined ? seg.maxY : (seg.y1 > seg.y2 ? seg.y1 : seg.y2);
+            if (cMaxX > sMinX - 15 && cMinX < sMaxX + 15 && cMaxY > sMinY - 15 && cMinY < sMaxY + 15) {
+                localSegments.push(seg);
+            }
+        }
+        const localMergeRoutes = [];
+        for (let i = 0; i < placedMergeRoutes.length; i++) {
+            const mr = placedMergeRoutes[i];
+            if (mr.maxX === undefined || (cMaxX > mr.minX - 12 && cMinX < mr.maxX + 12 && cMaxY > mr.minY - 12 && cMinY < mr.maxY + 12)) {
+                localMergeRoutes.push(mr);
+            }
         }
 
-        // 2. 沿贝塞尔曲线采样检测卡片穿透与实线平行重叠
-        const { pts, length } = sampleCubicBezier(p1, cp1, cp2, p2, 24);
-        score += length * 0.025;
+        const nCards = localCards.length;
+        const nSegs = localSegments.length;
+        const nMerges = localMergeRoutes.length;
+        const lastIdx = pts.length - 1;
 
-        for (let k = 1; k < pts.length - 1; k++) {
+        for (let k = 1; k < lastIdx; k++) {
             const pt = pts[k];
-            const prev = pts[k - 1];
-            const next = pts[k + 1];
-            const tLen = Math.hypot(next.x - prev.x, next.y - prev.y) || 1;
-            const tx = (next.x - prev.x) / tLen;
-            const ty = (next.y - prev.y) / tLen;
+            const px = pt.x, py = pt.y;
 
-            if (k >= 2 && k <= pts.length - 3) {
-                for (const c of allCardBounds) {
+            if (nCards > 0 && k >= 2 && k <= lastIdx - 2) {
+                const allowSelf = k >= 3 && k <= lastIdx - 3;
+                for (let i = 0; i < nCards; i++) {
+                    const c = localCards[i];
                     if (c.id === fromId || c.id === toId) {
-                        if (k >= 3 && k <= pts.length - 4 &&
-                            pt.x > c.left + 2 && pt.x < c.right - 2 &&
-                            pt.y > c.top + 2 && pt.y < c.bottom - 2) {
+                        if (allowSelf &&
+                            px > c.left + 2 && px < c.right - 2 &&
+                            py > c.top + 2 && py < c.bottom - 2) {
                             score += 1200;
                         }
-                    } else if (pt.x > c.left - 6 && pt.x < c.right + 6 &&
-                               pt.y > c.top - 6 && pt.y < c.bottom + 6) {
+                    } else if (px > c.left - 6 && px < c.right + 6 &&
+                               py > c.top - 6 && py < c.bottom + 6) {
                         score += 950;
                     }
                 }
+                if (score >= bestScore) return score;
             }
 
-            for (const seg of solidSegments) {
-                const d = pointToSolidSegDist(pt.x, pt.y, seg);
-                if (d < 15) {
-                    const align = Math.abs(tx * seg.ux + ty * seg.uy);
-                    if (align > 0.68) {
-                        score += (15 - d) * 40 * align;
-                    } else if (d < 6) {
-                        score += (6 - d) * 10;
+            if (nSegs > 0) {
+                const prev = pts[k - 1];
+                const next = pts[k + 1];
+                const dtx = next.x - prev.x, dty = next.y - prev.y;
+                const tLen = Math.sqrt(dtx * dtx + dty * dty) || 1;
+                const tx = dtx / tLen;
+                const ty = dty / tLen;
+                for (let i = 0; i < nSegs; i++) {
+                    const seg = localSegments[i];
+                    const sMinX = seg.minX !== undefined ? seg.minX : (seg.x1 < seg.x2 ? seg.x1 : seg.x2);
+                    if (px < sMinX - 15) continue;
+                    const sMaxX = seg.maxX !== undefined ? seg.maxX : (seg.x1 > seg.x2 ? seg.x1 : seg.x2);
+                    if (px > sMaxX + 15) continue;
+                    const sMinY = seg.minY !== undefined ? seg.minY : (seg.y1 < seg.y2 ? seg.y1 : seg.y2);
+                    if (py < sMinY - 15) continue;
+                    const sMaxY = seg.maxY !== undefined ? seg.maxY : (seg.y1 > seg.y2 ? seg.y1 : seg.y2);
+                    if (py > sMaxY + 15) continue;
+                    let proj = (px - seg.x1) * seg.ux + (py - seg.y1) * seg.uy;
+                    if (proj < 0) proj = 0;
+                    else if (proj > seg.len) proj = seg.len;
+                    const dx = px - (seg.x1 + seg.ux * proj);
+                    const dy = py - (seg.y1 + seg.uy * proj);
+                    const d2 = dx * dx + dy * dy;
+                    if (d2 < 225) {
+                        const d = Math.sqrt(d2);
+                        const align = Math.abs(tx * seg.ux + ty * seg.uy);
+                        if (align > 0.68) {
+                            score += (15 - d) * 40 * align;
+                        } else if (d < 6) {
+                            score += (6 - d) * 10;
+                        }
                     }
                 }
+                if (score >= bestScore) return score;
             }
 
-            for (const mr of placedMergeRoutes) {
-                const dm = Math.hypot(pt.x - mr.pts[k].x, pt.y - mr.pts[k].y);
-                if (dm < 12) {
-                    score += (12 - dm) * 24;
+            if (nMerges > 0) {
+                for (let i = 0; i < nMerges; i++) {
+                    const mrPt = localMergeRoutes[i].pts[k];
+                    const dx = px - mrPt.x;
+                    if (dx <= -12 || dx >= 12) continue;
+                    const dy = py - mrPt.y;
+                    if (dy <= -12 || dy >= 12) continue;
+                    const d2 = dx * dx + dy * dy;
+                    if (d2 < 144) {
+                        score += (12 - Math.sqrt(d2)) * 24;
+                    }
                 }
+                if (score >= bestScore) return score;
             }
         }
 
         cand.pts = pts;
+        cand.minX = cMinX;
+        cand.maxX = cMaxX;
+        cand.minY = cMinY;
+        cand.maxY = cMaxY;
         return score;
     }
 

@@ -79,17 +79,23 @@
             mirror.remove();
         }
 
-        let timer, frame = 0, positioning = false, lastText, lastCursor, lastPosition, closed = false;
+        let timer, frame = 0, positioning = false, lastText, lastCursor, lastInjectedHtml = null, lastPosition, closed = false;
         function paint() {
             const index = input.selectionStart ?? 0;
             if (closed || (input.value === lastText && index === lastCursor)) return;
-            lastText = input.value;
+            const nextText = input.value;
+            const nextInjectedHtml = injectPhantomCursor(nextText, index, 'latex-preview-phantom');
+            const sameDom = nextText === lastText && nextInjectedHtml === lastInjectedHtml && body.childNodes.length > 0;
+            lastText = nextText;
             lastCursor = index;
-            body.classList.toggle('is-empty', !lastText.trim());
-            // 独立的幻影节点命名，避免与正文红标的清理、定位相互干扰。
-            body.innerHTML = injectPhantomCursor(lastText, index, 'latex-preview-phantom');
-            if (!lastText) body.appendChild(document.createTextNode('输入内容后在此预览'));
-            renderLatex(body);
+            if (!sameDom) {
+                lastInjectedHtml = nextInjectedHtml;
+                body.classList.toggle('is-empty', !lastText.trim());
+                // 独立的幻影节点命名，避免与正文红标的清理、定位相互干扰。
+                body.innerHTML = nextInjectedHtml;
+                if (!lastText) body.appendChild(document.createTextNode('输入内容后在此预览'));
+                renderLatex(body);
+            }
             followCursor = true;
             if (!positioning) schedulePosition();
         }
@@ -237,7 +243,7 @@
         inputSyncEvents.forEach(ev => input.addEventListener(ev, schedulePosition));
         document.addEventListener('selectionchange', onSelectionChange);
         window.addEventListener('resize', schedulePosition);
-        window.addEventListener('scroll', schedulePosition, true);
+        window.addEventListener('scroll', schedulePosition, { capture: true, passive: true });
         resizeObserver?.observe(anchor);
         if (input !== anchor) resizeObserver?.observe(input);
         mutationObserver?.observe(anchor, { attributes: true, attributeFilter: ['style', 'class', 'hidden'] });

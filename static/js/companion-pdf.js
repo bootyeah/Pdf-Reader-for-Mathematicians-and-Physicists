@@ -31,7 +31,13 @@
     const MIN_W = 340;
     const MIN_H = 240;
     const HEADER_HEIGHT = 72; // 与主界面顶栏保持安全间距
-    function getHeaderHeight() { const h = document.querySelector('header'); return h ? h.offsetHeight : HEADER_HEIGHT; }
+    function getHeaderHeight() {
+        if (document.getElementById('main-toolbar')) {
+            return document.body.classList.contains('toolbar-collapsed') ? 12 : HEADER_HEIGHT;
+        }
+        const h = document.querySelector('header');
+        return h ? h.offsetHeight : HEADER_HEIGHT;
+    }
 
     // 内部 DOM 引用
     let panel = null;
@@ -860,12 +866,15 @@
             const dy = e.clientY - y;
 
             if (!edge) {
-                // 平移移动
-                const newLeft = r.left + dx;
-                const newTop = r.top + dy;
+                // 平移移动：直接基于初始 rect 计算夹紧边界，避免每帧 clampPosition 触发同步回流
+                const maxW = Math.max(1, window.innerWidth - 16);
+                const maxH = Math.max(40, window.innerHeight - 16);
+                const w = Math.max(Math.min(MIN_W, maxW), Math.min(r.width, maxW));
+                const h = isCollapsed ? 40 : Math.max(Math.min(MIN_H, maxH), Math.min(r.height, maxH));
+                const newLeft = Math.max(8, Math.min(r.left + dx, window.innerWidth - w - 8));
+                const newTop = Math.max(0, Math.min(r.top + dy, window.innerHeight - h - 8));
                 panel.style.left = newLeft + 'px';
                 panel.style.top = newTop + 'px';
-                clampPosition();
             } else {
                 // 调整大小
                 if (isDocked) {
@@ -883,22 +892,25 @@
                     dockBtn.classList.remove('active');
                 }
                 let left = r.left, top = r.top, right = r.right, bottom = r.bottom;
-                const minW = Math.min(MIN_W, window.innerWidth - 16);
-                const minH = Math.min(MIN_H, window.innerHeight - 16);
+                const maxW = Math.max(1, window.innerWidth - 16);
+                const maxH = Math.max(40, window.innerHeight - 16);
+                const minW = Math.min(MIN_W, maxW);
+                const minH = Math.min(MIN_H, maxH);
 
                 if (edge.includes('e')) right = Math.min(window.innerWidth - 8, Math.max(left + minW, r.right + dx));
                 if (edge.includes('s')) bottom = Math.min(window.innerHeight - 8, Math.max(top + minH, r.bottom + dy));
                 if (edge.includes('w')) left = Math.max(8, Math.min(right - minW, r.left + dx));
                 if (edge.includes('n')) top = Math.max(0, Math.min(bottom - minH, r.top + dy));
 
-                panel.style.width = (right - left) + 'px';
+                const w = Math.max(minW, Math.min(right - left, maxW));
+                const h = isCollapsed ? 40 : Math.max(minH, Math.min(bottom - top, maxH));
+                panel.style.width = w + 'px';
                 if (!isCollapsed) {
-                    panel.style.height = (bottom - top) + 'px';
-                    expandedHeight = bottom - top;
+                    panel.style.height = h + 'px';
+                    expandedHeight = h;
                 }
-                panel.style.left = left + 'px';
-                panel.style.top = top + 'px';
-                clampPosition();
+                panel.style.left = Math.max(8, Math.min(left, window.innerWidth - w - 8)) + 'px';
+                panel.style.top = Math.max(0, Math.min(top, window.innerHeight - h - 8)) + 'px';
             }
         });
 
@@ -907,7 +919,10 @@
             document.body.style.userSelect = gesture.userSelect;
             gesture = null;
             if (panel.hasPointerCapture(e.pointerId)) panel.releasePointerCapture(e.pointerId);
-            if (!isDocked) window.FloatingWindowLayers?.resetViewportBase(panel);
+            if (!isDocked) {
+                clampPosition();
+                window.FloatingWindowLayers?.resetViewportBase(panel);
+            }
             saveState();
         };
 
@@ -1385,8 +1400,20 @@
         const x = point?.x ?? view.left + view.width / 2;
         const y = point?.y ?? view.top + 14;
         let page = currentPage;
-        for (const [pageNum, info] of pageWrappers) {
-            if (info.wrapper.getBoundingClientRect().bottom > y) { page = pageNum; break; }
+        const delta = getLayoutViewportDelta();
+        if (delta !== null) {
+            let found = findFirstPageBottomAfter(y, delta);
+            if (found !== -1) {
+                const fInfo = pageWrappers.get(found);
+                if (fInfo && fInfo.wrapper.offsetTop + delta + fInfo.wrapper.offsetHeight <= y && found < numPages) {
+                    found++;
+                }
+                page = found;
+            }
+        } else {
+            for (const [pageNum, info] of pageWrappers) {
+                if (info.wrapper.getBoundingClientRect().bottom > y) { page = pageNum; break; }
+            }
         }
         const rect = pageWrappers.get(page)?.wrapper.getBoundingClientRect();
         if (!rect?.width || !rect.height) return null;
@@ -1494,6 +1521,7 @@
             for (const [pageNum, info] of pageWrappers) {
                 if (visible.has(pageNum)) renderPage(pageNum);
                 else {
+                    if (!info.rendered && !info.rendering && info.canvas.width <= 1) continue;
                     const rect = info.wrapper.getBoundingClientRect();
                     if (rect.bottom < view.top - 1200 || rect.top > view.bottom + 1200) recyclePage(pageNum);
                 }

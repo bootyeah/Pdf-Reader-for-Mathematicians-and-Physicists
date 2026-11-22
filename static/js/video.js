@@ -61,6 +61,7 @@
     let cropRegion = null; // 原视频坐标，x/y/w/h 均为 0–1 的比例。
     let cropGesture = null;
     let cropFrame = null;
+    let cropTimer = null;
 
     let videoBlobUrl = null;
     let playlist = [];
@@ -83,7 +84,13 @@
     // 顶部工具栏高度（与 LOCALPdfReader.html 里 header 的 h-[72px] 保持一致）：
     // 悬浮播放器首次居中显示时的 top 下限，避免初始打开时压住顶栏
     const HEADER_HEIGHT = 72;
-    function getHeaderHeight() { const h = document.querySelector('header'); return h ? h.offsetHeight : HEADER_HEIGHT; }
+    function getHeaderHeight() {
+        if (document.getElementById('main-toolbar')) {
+            return document.body.classList.contains('toolbar-collapsed') ? 12 : HEADER_HEIGHT;
+        }
+        const h = document.querySelector('header');
+        return h ? h.offsetHeight : HEADER_HEIGHT;
+    }
 
     // 倍速边界（以 0.1 为步进的十分位整数表示，避免浮点误差累积）
     const RATE_MIN_TENTHS = 5;    // 0.5x
@@ -487,7 +494,7 @@
 
         // ---------- 右下角等比例缩放（锁定视频宽高比，杜绝黑边与黑底） ----------
         let resizing = false;
-        let startW = 0, startH = 0, startMouseX = 0, startMouseY = 0;
+        let startW = 0, startH = 0, startLeft = 0, startTop = 0, startRatio = 16 / 9, startMouseX = 0, startMouseY = 0;
 
         function getVideoAspectRatio() {
             if (video && video.videoWidth && video.videoHeight) {
@@ -499,10 +506,10 @@
         function onResizeMove(e) {
             if (!resizing) return;
             const dx = e.clientX - startMouseX;
-            const ratio = getVideoAspectRatio();
+            const ratio = startRatio;
             const minW = 280;
-            const maxW = Math.max(320, window.innerWidth - panel.offsetLeft - 16);
-            const maxH = Math.max(180, window.innerHeight - panel.offsetTop - 16);
+            const maxW = Math.max(320, window.innerWidth - startLeft - 16);
+            const maxH = Math.max(180, window.innerHeight - startTop - 16);
 
             let newW = Math.max(minW, Math.min(maxW, startW + dx));
             let contentH = Math.round(newW / ratio);
@@ -537,6 +544,9 @@
                 resizing = true;
                 startW = panel.offsetWidth;
                 startH = panel.offsetHeight;
+                startLeft = panel.offsetLeft;
+                startTop = panel.offsetTop;
+                startRatio = getVideoAspectRatio();
                 startMouseX = e.clientX;
                 startMouseY = e.clientY;
                 document.body.style.userSelect = 'none';
@@ -725,8 +735,8 @@
         }
     }
 
-    function cropPoint(e) {
-        const rect = cropSurface.getBoundingClientRect();
+    function cropPoint(e, cachedRect) {
+        const rect = cachedRect || cropSurface.getBoundingClientRect();
         return { x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)) };
     }
 
@@ -734,7 +744,8 @@
         if (e.button !== 0 || cropGesture) return;
         e.preventDefault();
         e.stopPropagation();
-        const point = cropPoint(e);
+        const surfaceRect = cropSurface.getBoundingClientRect();
+        const point = cropPoint(e, surfaceRect);
         if (!cropSelecting) {
             const r = cropRegion;
             if (point.x < r.x || point.x > r.x + r.w || point.y < r.y || point.y > r.y + r.h) {
@@ -743,17 +754,20 @@
                 applyCrop();
             }
         }
-        cropGesture = { id: e.pointerId, point: point, region: cropRegion && Object.assign({}, cropRegion) };
+        const aspectK = (video.clientHeight > 0 && video.videoWidth > 0 && video.videoHeight > 0)
+            ? (video.clientWidth / video.clientHeight) / (video.videoWidth / video.videoHeight)
+            : 1;
+        cropGesture = { id: e.pointerId, point: point, rect: surfaceRect, aspectK: aspectK, region: cropRegion && Object.assign({}, cropRegion) };
         cropSurface.setPointerCapture(e.pointerId);
     }
 
     function moveCropGesture(e) {
         if (!cropGesture || e.pointerId !== cropGesture.id) return;
         e.preventDefault();
-        const p = cropPoint(e), start = cropGesture.point;
+        const p = cropPoint(e, cropGesture.rect), start = cropGesture.point;
         if (cropSelecting) {
             const dx = p.x - start.x, dy = p.y - start.y;
-            const k = video.clientWidth / video.clientHeight / (video.videoWidth / video.videoHeight);
+            const k = cropGesture.aspectK;
             const w = Math.min(Math.max(Math.abs(dx), Math.abs(dy) * k), dx < 0 ? start.x : 1 - start.x, (dy < 0 ? start.y : 1 - start.y) * k);
             const h = w / k;
             cropRegion = { x: start.x - (dx < 0 ? w : 0), y: start.y - (dy < 0 ? h : 0), w: w, h: h };
@@ -794,18 +808,16 @@
     }
 
     function refreshCropPreview() {
-        if (cropFrame !== null) cancelAnimationFrame(cropFrame);
-        cropFrame = null;
+        if (cropFrame !== null) { cancelAnimationFrame(cropFrame); cropFrame = null; }
+        if (cropTimer !== null) { clearTimeout(cropTimer); cropTimer = null; }
         if (!cropRegion || cropSelecting || !panelVisible || isCollapsed || document.hidden || video.readyState < 2) return;
         cropPreview.getContext('2d').drawImage(video, 0, 0, cropPreview.width, cropPreview.height);
-        // 小预览最多每秒重绘 10 次，不增加视频解码器，暂停/隐藏时停止。
+        // 小预览最多每秒重绘 10 次，使用 100ms 定时 + rAF，避免 60fps 空转 rAF 唤醒主线程。
         if (!video.paused && !video.ended) {
-            let last = performance.now();
-            function frame(now) {
-                if (now - last >= 100) { refreshCropPreview(); return; }
-                cropFrame = requestAnimationFrame(frame);
-            }
-            cropFrame = requestAnimationFrame(frame);
+            cropTimer = setTimeout(function () {
+                cropTimer = null;
+                cropFrame = requestAnimationFrame(refreshCropPreview);
+            }, 100);
         }
     }
 

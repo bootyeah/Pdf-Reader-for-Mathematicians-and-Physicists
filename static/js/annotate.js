@@ -1032,12 +1032,16 @@
         const sliderTrack = document.getElementById('zoom-slider-track');
         const sliderThumb = document.getElementById('zoom-slider-thumb');
         let isSliderDragging = false;
+        let lastSliderAnimate = null;
 
         // 根据 scale 计算滑块的物理 top 百分比 (3.0在0%，1.0在100%)
         function updateSliderUI(scale, animate = true) {
             if (!sliderThumb) return;
-            if (animate) sliderThumb.classList.add('transition-all', 'duration-200');
-            else sliderThumb.classList.remove('transition-all', 'duration-200');
+            if (lastSliderAnimate !== animate) {
+                lastSliderAnimate = animate;
+                if (animate) sliderThumb.classList.add('transition-all', 'duration-200');
+                else sliderThumb.classList.remove('transition-all', 'duration-200');
+            }
             
             let clampedScale = Math.min(Math.max(scale, 1.0), 3.0);
             let ratio = (3.0 - clampedScale) / 2.0; // 转换为 0.0 到 1.0
@@ -1052,7 +1056,10 @@
             if (ratio < 0) ratio = 0;
             if (ratio > 1) ratio = 1;
             
-            sliderThumb.classList.remove('transition-all', 'duration-200');
+            if (lastSliderAnimate !== false) {
+                lastSliderAnimate = false;
+                sliderThumb.classList.remove('transition-all', 'duration-200');
+            }
             sliderThumb.style.top = `${ratio * 100}%`;
         };
 
@@ -1089,6 +1096,8 @@
         // 🚀 核心视界侦测引擎 (Viewport Radar Engine)
         // =========================================================================
         let scrollRadarFrameId = null;
+        let lastHudScrollTop = -1;
+        let lastHudViewportHeight = -1;
 
         function updateHUDAndOutline() {
             if (state.pageDimensions.length === 0 || !state.pdfDoc) return;
@@ -1122,10 +1131,19 @@
             }
         }
 
-        // 绑定容器的 Scroll 事件（使用 rAF 节流，保证绝对 60fps 不掉帧）
+        // 绑定容器的 Scroll 事件（使用 rAF 节流，横向拖动直接短路，保证绝对 60fps 不掉帧）
         els.container.addEventListener('scroll', () => {
-            if (scrollRadarFrameId) cancelAnimationFrame(scrollRadarFrameId);
-            scrollRadarFrameId = requestAnimationFrame(updateHUDAndOutline);
+            const top = els.container.scrollTop;
+            const ch = els.container.clientHeight;
+            if (top === lastHudScrollTop && ch === lastHudViewportHeight) return;
+            lastHudScrollTop = top;
+            lastHudViewportHeight = ch;
+            if (!scrollRadarFrameId) {
+                scrollRadarFrameId = requestAnimationFrame(() => {
+                    scrollRadarFrameId = null;
+                    updateHUDAndOutline();
+                });
+            }
         }, { passive: true });
 
         // HUD 偏移控制逻辑
@@ -1198,8 +1216,10 @@
             els.zoomLevel.textContent = Math.round(state.scale * 100) + '%';
             if (typeof updateSliderUI === 'function') updateSliderUI(state.scale);
 
-            // 只更新 DOM 骨架尺寸
-            generatePageSkeletons();
+            // 只更新 DOM 骨架尺寸（下方 refreshPdfRenderWindow 会统一刷新跨页箭头）
+            generatePageSkeletons(false, true);
+            lastHudScrollTop = -1;
+            lastHudViewportHeight = -1;
             
             // 2. 缩放后：利用缩放后的新尺寸，将屏幕正中央完美还原
             if (state.pageDimensions.length > 0) {

@@ -943,6 +943,14 @@
         };
         const visit = node => {
             if (node.nodeType === Node.TEXT_NODE) {
+                if (node.length > 12 && best.dy < Infinity) {
+                    range.selectNodeContents(node);
+                    const nr = range.getBoundingClientRect();
+                    if (nr.height > 0 && Math.max(nr.top - clientY, clientY - nr.bottom, 0) > best.dy + 2) {
+                        offset += node.length;
+                        return;
+                    }
+                }
                 // 使用 UTF-16 偏移，且不把光标放在一个 emoji 的代理对中间。
                 for (let i = 0; i <= node.length;) {
                     range.setStart(node, i);
@@ -990,6 +998,13 @@
                     });
                 }
                 if (delimiter) {
+                    if (best.dy < Infinity) {
+                        const kr = node.getBoundingClientRect();
+                        if (kr.height > 0 && Math.max(kr.top - clientY, clientY - kr.bottom, 0) > best.dy + 12) {
+                            offset += spanLength;
+                            return;
+                        }
+                    }
                     const innerStart = offset + delimiter[0].length;
                     const innerEnd = offset + spanLength - delimiter[1].length;
                     const displayMode = delimiter[0] === '$$' || delimiter[0] === '\\[';
@@ -1094,21 +1109,36 @@
         return null;
     }
 
+    const katexAlignCache = new WeakMap();
+    let sharedMeasureRange = null;
+    let activeEntryRectCache = null;
+
+    function getMeasureRange() {
+        if (!sharedMeasureRange) sharedMeasureRange = document.createRange();
+        return sharedMeasureRange;
+    }
+
     function entryClientRect(entry) {
         if (!entry) return null;
+        if (activeEntryRectCache && activeEntryRectCache.has(entry)) {
+            return activeEntryRectCache.get(entry);
+        }
+        let result = null;
         if (entry.kind === 'char' && entry.textNode) {
             const len = entry.textNode.data.length;
             const s = Math.max(0, Math.min(len, entry.charStart));
             const e = Math.max(s, Math.min(len, entry.charEnd));
-            const range = document.createRange();
+            const range = getMeasureRange();
             range.setStart(entry.textNode, s);
             range.setEnd(entry.textNode, e);
             const r = range.getBoundingClientRect();
-            if (r.width > 0 || r.height > 0) return r;
-            if (entry.textNode.parentElement) return entry.textNode.parentElement.getBoundingClientRect();
+            if (r.width > 0 || r.height > 0) result = r;
+            else if (entry.textNode.parentElement) result = entry.textNode.parentElement.getBoundingClientRect();
+        } else if (entry.el) {
+            result = entry.el.getBoundingClientRect();
         }
-        if (entry.el) return entry.el.getBoundingClientRect();
-        return null;
+        if (activeEntryRectCache) activeEntryRectCache.set(entry, result);
+        return result;
     }
 
     /** Compute a text-offset caret rect via Range inside raw unrendered math or `.katex-error`. */
@@ -1494,19 +1524,30 @@
         }
 
         try {
-            const entries = [];
-            const ast = katex.__parse(inner, { displayMode: block.displayMode, throwOnError: false });
-            const mhSpans = findKatexMhchemSpans(inner);
-            const infos = ast.map(n => buildKatexAstInfo(n, inner.length, false, false)).filter(Boolean);
-            assignKatexSeqSpans(infos, 0, inner.length, inner, mhSpans);
-            const bases = Array.from(katexHtml.children || []).filter(c => c.classList.contains('base'));
-            alignKatexSequence(infos, bases, entries, inner, true);
+            let cached = katexAlignCache.get(katexNode);
+            if (!cached || cached.inner !== inner || cached.displayMode !== block.displayMode || cached.katexHtml !== katexHtml) {
+                const entries = [];
+                const ast = katex.__parse(inner, { displayMode: block.displayMode, throwOnError: false });
+                const mhSpans = findKatexMhchemSpans(inner);
+                const infos = ast.map(n => buildKatexAstInfo(n, inner.length, false, false)).filter(Boolean);
+                assignKatexSeqSpans(infos, 0, inner.length, inner, mhSpans);
+                const bases = Array.from(katexHtml.children || []).filter(c => c.classList.contains('base'));
+                alignKatexSequence(infos, bases, entries, inner, true);
+                cached = { inner, displayMode: block.displayMode, katexHtml, infos, entries };
+                katexAlignCache.set(katexNode, cached);
+            }
+            const { infos, entries } = cached;
             if (!entries.length && infos.length === 0) {
                 const emptySlot = findEmptySlotElement([katexHtml]);
                 if (emptySlot) return emptySlotCaretRect(emptySlot);
             }
-            const rect = resolveCaretInSequence(infos, innerOffset, inner, entries, fallbackBox);
-            return rect || fallbackBox;
+            activeEntryRectCache = new Map();
+            try {
+                const rect = resolveCaretInSequence(infos, innerOffset, inner, entries, fallbackBox);
+                return rect || fallbackBox;
+            } finally {
+                activeEntryRectCache = null;
+            }
         } catch {
             return fallbackBox;
         }

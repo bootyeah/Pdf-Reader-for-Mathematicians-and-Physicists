@@ -7,6 +7,7 @@
             margin-left: auto;
             margin-right: auto;
             transition: filter 0.3s ease;
+            contain: style;
         }
 
 
@@ -28,6 +29,7 @@
             z-index: 0; /* 置于底层，让文本块可以凌驾其上 */
             border-top-right-radius: 4px;
             border-bottom-right-radius: 4px;
+            contain: layout style;
         }
 
         body.show-sidecars .sidecar-bg {
@@ -147,6 +149,7 @@
             opacity: 0.25;
             mix-blend-mode: multiply;
             z-index: 1; /* 文本层在底层 */
+            contain: layout style;
         }
 
         .textLayer span {
@@ -433,7 +436,7 @@
         ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
         aside { transition: width 0.3s ease, transform 0.3s ease; }
-        .sidebar-item { transition: all 0.2s; border-left: 3px solid transparent; }
+        .sidebar-item { transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s; border-left: 3px solid transparent; }
         .sidebar-item:hover { background-color: #f1f5f9; }
         .sidebar-item.active { background-color: #eff6ff; border-left-color: #2563eb; }
         .compact-prose p { margin-top: 0.25em; margin-bottom: 0.25em; }
@@ -992,6 +995,7 @@
             box-shadow: 0 18px 44px -14px rgba(15, 23, 42, 0.32), 0 0 0 1px rgba(15, 23, 42, 0.03);
             outline: none !important;
             animation: dsChatIn 0.16s ease-out;
+            contain: layout style;
         }
         @keyframes dsChatIn {
             from { opacity: 0; transform: translateY(-6px) scale(0.985); }
@@ -1862,9 +1866,13 @@
         body.eye-protection-mode .ds-message-copy:hover,
         body.eye-protection-mode .ds-msg-action:not(.ds-msg-delete):hover { background: #EFE9DD !important; }
 
-        /* 侧栏折叠过渡微动效 */
+        /* 侧栏折叠过渡微动效：固定内部子容器宽度避免折叠动画每帧触发批注文本重折行 */
         aside#sidebar {
             transition: width 0.18s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            contain: layout paint;
+        }
+        aside#sidebar > :not(#cloud-panel) {
+            min-width: calc(16rem - 1px);
         }
 
         /* ============================================================
@@ -2094,6 +2102,7 @@ body.eye-protection-mode #formula-code { background: #FAF7F2; border-color: #E6E
     min-height: 42px;
     container-name: wb;
     animation: wbIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    contain: layout style;
 }
 @keyframes wbIn {
     from { opacity: 0; transform: translateY(-6px) scale(0.985); }
@@ -3263,6 +3272,7 @@ body.eye-protection-mode #handwriting-whiteboard.wb-pure-mode #whiteboard-pure:h
     animation: cpPanelIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
     transition: box-shadow 0.2s, border-color 0.2s;
     user-select: none;
+    contain: layout style;
 }
 .companion-pdf-panel[hidden] {
     display: none !important;
@@ -3653,6 +3663,7 @@ body.eye-protection-mode #handwriting-whiteboard .window-collapse-dir-part.is-ac
     overflow: hidden;
     user-select: text;
     flex-shrink: 0;
+    isolation: isolate;
 }
 .cp-page-canvas {
     display: block;
@@ -4486,6 +4497,9 @@ body.eye-protection-mode .mm-page-tab.is-active {
 #mindmap-viewport.is-panning * {
     cursor: grabbing !important;
     user-select: none;
+}
+#mindmap-viewport.is-panning #mindmap-canvas {
+    pointer-events: none;
 }
 
 /* 自由合并连线与挂载切换模式下视口提示 */

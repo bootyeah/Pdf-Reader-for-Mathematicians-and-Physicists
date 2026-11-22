@@ -444,10 +444,13 @@
 
         // 2. 物理坐标侦测与高频雷达追踪 (rAF Loop)
         let cursorSyncFrameId = null;
+        let cachedVCursor = null;
+        let cachedVInnerCursor = null;
+        let virtualCursorVisible = false;
 
         // 画面上当前承载幻影光标的文本块。光标只认它，绝不认文档里其它块残留的幻影节点；
         // 否则切换文本块时红光标会停在上一个块上，直到重排（缩放/刷新）把残留节点抹掉。
-        let phantomMemo = { div: null, annotationId: null, pageNum: null, version: -1, cursor: -1, text: null };
+        let phantomMemo = { div: null, annotationId: null, pageNum: null, version: -1, cursor: -1, text: null, injectedHtml: null };
 
         function findTextAnnotationDiv(annotationId, pageNum = state.activePageNum) {
             const container = document.getElementById(`annotation-layer-${pageNum}`);
@@ -481,17 +484,31 @@
             const source = String(text ?? '');
             const index = Math.max(0, Math.min(Number(cursorIndex) || 0, source.length));
             const isPlaceholder = !source || source === '点击编辑文本';
+            const nextHtml = isPlaceholder
+                ? `<span id="phantom-cursor" style="display:inline-block;width:0px;height:1em;vertical-align:middle;">&#8203;</span><span style="color:#9ca3af;">点击编辑文本</span>`
+                : (injectPhantomCursor(source, index) || '点击编辑文本');
+
+            // 同一公式内移动光标时幻影包裹 HTML 完全不变：跳过 innerHTML 重写与 KaTeX 全量重建，仅更新偏移
+            if (phantomMemo.div === div && div.isConnected
+                && phantomMemo.annotationId === annotationId && phantomMemo.pageNum === pageNum
+                && phantomMemo.version === textAnnotationRenderVersion
+                && phantomMemo.text === source && phantomMemo.injectedHtml === nextHtml
+                && phantomCursorIn(div)) {
+                phantomMemo.cursor = index;
+                return;
+            }
+
             if (isPlaceholder) {
-                div.innerHTML = `<span id="phantom-cursor" style="display:inline-block;width:0px;height:1em;vertical-align:middle;">&#8203;</span><span style="color:#9ca3af;">点击编辑文本</span>`;
+                div.innerHTML = nextHtml;
                 div.style.color = '#9ca3af';
                 div.classList.add('text-placeholder');
             } else {
                 div.style.color = anno.color || '#000000';
                 div.classList.remove('text-placeholder');
-                div.innerHTML = injectPhantomCursor(source, index) || '点击编辑文本';
+                div.innerHTML = nextHtml;
             }
             renderLatex(div, anno, pageNum);
-            phantomMemo = { div, annotationId, pageNum, version: textAnnotationRenderVersion, cursor: index, text: source };
+            phantomMemo = { div, annotationId, pageNum, version: textAnnotationRenderVersion, cursor: index, text: source, injectedHtml: nextHtml };
         }
 
         // 让画面上的幻影节点回到与输入框光标一致的位置。没有任何失效时保持不动，避免空转重绘。
@@ -541,18 +558,21 @@
         // 摘掉幻影节点并作废位置缓存。节点的宿主块已由 endCursorTracking() 重建。
         function clearPhantomCursor() {
             for (const phantom of document.querySelectorAll('#phantom-cursor, #phantom-cursor-block')) phantom.remove();
-            phantomMemo = { div: null, annotationId: null, pageNum: null, version: -1, cursor: -1, text: null };
+            phantomMemo = { div: null, annotationId: null, pageNum: null, version: -1, cursor: -1, text: null, injectedHtml: null };
         }
 
         window.syncVirtualCursor = function() {
             if (cursorSyncFrameId) cancelAnimationFrame(cursorSyncFrameId);
             cursorSyncFrameId = null;
-            let vCursor = document.getElementById('virtual-cursor');
-            let vInnerCursor = document.getElementById('virtual-inner-cursor');
+            let vCursor = (cachedVCursor && cachedVCursor.isConnected) ? cachedVCursor : document.getElementById('virtual-cursor');
+            let vInnerCursor = (cachedVInnerCursor && cachedVInnerCursor.isConnected) ? cachedVInnerCursor : document.getElementById('virtual-inner-cursor');
+            cachedVCursor = vCursor;
+            cachedVInnerCursor = vInnerCursor;
             // 1. 如果退出了编辑模式，彻底清理光标并终止调度
             if (!state.isEditingNote) {
                 if (vCursor) vCursor.style.display = 'none';
                 if (vInnerCursor) vInnerCursor.style.display = 'none';
+                virtualCursorVisible = false;
                 return;
             }
 
@@ -567,6 +587,7 @@
             if (!phantom) {
                 if (vCursor) vCursor.style.display = 'none';
                 if (vInnerCursor) vInnerCursor.style.display = 'none';
+                virtualCursorVisible = false;
                 return;
             }
 
@@ -576,10 +597,12 @@
                 vCursor.id = 'virtual-cursor';
                 vCursor.className = 'fixed pointer-events-none z-[100]';
                 document.body.appendChild(vCursor);
+                cachedVCursor = vCursor;
             }
 
             const isBlock = phantom.id === 'phantom-cursor-block';
             vCursor.style.display = 'block';
+            virtualCursorVisible = true;
             paintVirtualCursor(vCursor, phantom.getBoundingClientRect(), !isBlock);
 
             if (!isBlock) {
@@ -594,6 +617,7 @@
                         vInnerCursor.id = 'virtual-inner-cursor';
                         vInnerCursor.className = 'fixed pointer-events-none z-[100]';
                         document.body.appendChild(vInnerCursor);
+                        cachedVInnerCursor = vInnerCursor;
                     }
                     vInnerCursor.style.display = 'block';
                     paintVirtualCursor(vInnerCursor, innerRect, true, { left: 0, top: 0 }, 6);
@@ -605,7 +629,7 @@
 
         function scheduleVirtualCursorSync() {
             if (!state.isEditingNote) {
-                if (typeof window.syncVirtualCursor === 'function') window.syncVirtualCursor();
+                if (virtualCursorVisible && typeof window.syncVirtualCursor === 'function') window.syncVirtualCursor();
                 return;
             }
             if (cursorSyncFrameId) return;
@@ -650,30 +674,42 @@
                 if (textDiv) {
                     const cursorPos = els.noteInput.selectionStart ?? 0;
                     const isPlaceholder = !newText || newText === '点击编辑文本';
-                    if (isPlaceholder) {
-                        textDiv.innerHTML = `<span id="phantom-cursor" style="display:inline-block;width:0px;height:1em;vertical-align:middle;">&#8203;</span><span style="color:#9ca3af;">点击编辑文本</span>`;
-                        textDiv.style.color = '#9ca3af';
-                        textDiv.classList.add('text-placeholder');
-                    } else {
-                        textDiv.style.color = anno.color || '#000000';
-                        textDiv.classList.remove('text-placeholder');
-                        const injectedHTML = injectPhantomCursor(newText, cursorPos);
-                        textDiv.innerHTML = injectedHTML || '';
+                    const nextHtml = isPlaceholder
+                        ? `<span id="phantom-cursor" style="display:inline-block;width:0px;height:1em;vertical-align:middle;">&#8203;</span><span style="color:#9ca3af;">点击编辑文本</span>`
+                        : (injectPhantomCursor(newText, cursorPos) || '');
+                    const sameDom = !contentChanged && phantomMemo.div === textDiv && textDiv.isConnected
+                        && phantomMemo.annotationId === targetId && phantomMemo.pageNum === targetPage
+                        && phantomMemo.version === textAnnotationRenderVersion
+                        && phantomMemo.text === newText && phantomMemo.injectedHtml === nextHtml
+                        && phantomCursorIn(textDiv);
+                    if (!sameDom) {
+                        if (isPlaceholder) {
+                            textDiv.innerHTML = nextHtml;
+                            textDiv.style.color = '#9ca3af';
+                            textDiv.classList.add('text-placeholder');
+                        } else {
+                            textDiv.style.color = anno.color || '#000000';
+                            textDiv.classList.remove('text-placeholder');
+                            textDiv.innerHTML = nextHtml;
+                        }
+                        // 3. 调用原生的渲染引擎重新生成
+                        renderLatex(textDiv, anno, targetPage);
                     }
-                    
-                    // 3. 调用原生的渲染引擎重新生成
-                    renderLatex(textDiv, anno, targetPage);
-                    phantomMemo = { div: textDiv, annotationId: targetId, pageNum: targetPage, version: textAnnotationRenderVersion, cursor: cursorPos, text: newText };
+                    phantomMemo = { div: textDiv, annotationId: targetId, pageNum: targetPage, version: textAnnotationRenderVersion, cursor: cursorPos, text: newText, injectedHtml: nextHtml };
                     scheduleVirtualCursorSync();
                 }
             }, delay); 
         });
 
         const triggerCursorSync = () => {
-            if (state.isEditingNote && state.activeAnnotationId) {
-                // 主动抛出一个轻量级的 input 事件，触发上面的防抖渲染和位置计算
-                els.noteInput.dispatchEvent(new Event('input', { bubbles: true }));
+            if (!state.isEditingNote || !state.activeAnnotationId) return;
+            const anno = state.annotations[state.activePageNum]?.find(a => a.id === state.activeAnnotationId);
+            if (anno && anno.type === 'text' && (anno.text ?? '') === els.noteInput.value) {
+                refreshActiveTextCursor();
+                scheduleVirtualCursorSync();
+                return;
             }
+            els.noteInput.dispatchEvent(new Event('input', { bubbles: true }));
         };
         // 监听方向键移动
         els.noteInput.addEventListener('keyup', (e) => {

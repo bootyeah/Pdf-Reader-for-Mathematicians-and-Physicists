@@ -79,6 +79,9 @@ function resetPdfRendering() { if (typeof hideLinkPreview === 'function') hideLi
     crossPageArrows.clear();
     cancelAnimationFrame(pdfWindowFrame);
     pdfWindowFrame = 0;
+    lastPdfWindowScale = 0;
+    lastPdfScrollTop = -1;
+    lastPdfViewportHeight = -1;
     pdfTextCaches = new WeakMap();
     renderedPageScales.clear();
     pageRenderFailures.clear();
@@ -89,13 +92,13 @@ function resetPdfRendering() { if (typeof hideLinkPreview === 'function') hideLi
     state.firstPagePaint = null;
 }
 
-function generatePageSkeletons(forceRebuild = false) {
+function generatePageSkeletons(forceRebuild = false, skipDetachedArrows = false) {
     if (forceRebuild) {
         resetPdfHeightIndex();
         els.pagesContainer.replaceChildren();
         els.pagesContainer.classList.add('pdf-virtual-pages');
     }
-    layoutPdfWindow();
+    layoutPdfWindow(skipDetachedArrows);
 }
 
 function pageIntersectsRoot(wrapper, margin = 0) {
@@ -150,7 +153,7 @@ function refreshPdfRenderWindow(reclaim = false) {
 }
 function beginPdfZoom() { if (typeof hideLinkPreview === 'function') hideLinkPreview(true);
     renderGeneration++;
-    zoomRenderNotBefore = performance.now() + 100;
+    zoomRenderNotBefore = performance.now() + 160;
     for (const pageNum of [...renderTimers.keys()]) clearPageTimer(pageNum);
     for (const pageNum of [...pageRenderJobs.keys()]) cancelPageRendering(pageNum);
     state.pagesRendered.clear();
@@ -158,7 +161,7 @@ function beginPdfZoom() { if (typeof hideLinkPreview === 'function') hideLinkPre
 function scheduleZoomRefresh() {
     clearTimeout(zoomRenderTimer);
     // 与原版一样，从同步尺寸/定位更新结束后计时；长文档布局不能吃掉防抖窗口。
-    zoomRenderNotBefore = performance.now() + 100;
+    zoomRenderNotBefore = performance.now() + 160;
     const loadToken = state.loadToken;
     zoomRenderTimer = setTimeout(() => {
         if (state.loadToken === loadToken) refreshPdfRenderWindow();

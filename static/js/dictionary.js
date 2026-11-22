@@ -343,11 +343,10 @@
         window.FloatingWindowLayers?.noteViewportClamped(panel);
     }
 
-    function onScrollOrResize(e) {
-        // 面板内部滚动不应触发关闭
-        if (e && e.target && e.target.closest && e.target.closest('#dict-panel, #dict-bubble')) return;
-        if (e && e.type === 'resize') syncDraggedPanelViewport();
-        
+    let scrollSyncFrame = 0;
+
+    function syncSelectionOnScroll() {
+        scrollSyncFrame = 0;
         // 当用户滚动或缩放屏幕时，尝试重新获取选区位置以使浮窗“附着”在文本上
         const sel = window.getSelection();
         if (sel && !sel.isCollapsed && sel.rangeCount > 0) {
@@ -374,6 +373,18 @@
         }
         
         hideAll();
+    }
+
+    function onScrollOrResize(e) {
+        // 面板内部滚动不应触发关闭
+        if (e && e.target && e.target.closest && e.target.closest('#dict-panel, #dict-bubble')) return;
+        if (e && e.type === 'resize') syncDraggedPanelViewport();
+        const bubbleOn = !!(bubble && bubble.style.display !== 'none');
+        const panelOn = !!(panel && panel.style.display !== 'none');
+        if (!current && !bubbleOn && !panelOn) return;
+        if (!scrollSyncFrame) {
+            scrollSyncFrame = requestAnimationFrame(syncSelectionOnScroll);
+        }
     }
 
     // ---------- 气泡缩放：与 PDF 文字保持固定比例 ----------
@@ -650,6 +661,10 @@
         hidePanel(); hideBubble(); stopSelectionRestore(); current = null;
     } };
     function hideAll() {
+        if (scrollSyncFrame) {
+            cancelAnimationFrame(scrollSyncFrame);
+            scrollSyncFrame = 0;
+        }
         stopSelectionRestore();      // 收起时别再惦记着还原选区
         hideBubble();
         hidePanel();
@@ -662,7 +677,7 @@
     function init() {
         ensureDom();
         document.addEventListener('mouseup', onDocumentMouseUp);
-        window.addEventListener('scroll', onScrollOrResize, true);
+        window.addEventListener('scroll', onScrollOrResize, { capture: true, passive: true });
         window.addEventListener('resize', onScrollOrResize);
         // 页面缩放时（工具栏的 % 读数会被改写）立即同步气泡尺寸：
         //   · 选区还在 → 量一次新位置把气泡贴回去

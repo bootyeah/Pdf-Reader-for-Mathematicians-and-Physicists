@@ -12,9 +12,6 @@
     <!-- 不要去请求图标就用 <link rel="icon" href="data:,">，否则用下面这个-->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><path d='M20,5 h40 l25,25 v60 a10,10 0 0,1 -10,10 h-55 a10,10 0 0,1 -10,-10 v-75 a10,10 0 0,1 10,-10 z' fill='%23ef4444'/><path d='M60,5 v25 h25 z' fill='%23b91c1c'/><text x='50' y='72' font-family='system-ui, sans-serif' font-weight='900' font-size='32' fill='%23ffffff' text-anchor='middle'>PDF</text></svg>">
 
-    <!-- 样式库: Tailwind CSS -->
-    <script src="./lib/tailwindcss.js"></script>
-    
     <!-- 图标库: Phosphor Icons (本地离线版) -->
     <link rel="stylesheet" href="./lib/phosphor/regular/style.css">
     <link rel="stylesheet" href="./lib/phosphor/fill/style.css">
@@ -36,6 +33,8 @@
     <script src="./config.js"></script>
 
     <link rel="stylesheet" href="./css/style.css">
+    <!-- 预编译静态 Tailwind CSS（由 tools/build_tailwind.cjs 离线生成，置于 style.css 后以保持与原运行时注入完全一致的层叠顺序） -->
+    <link rel="stylesheet" href="./css/tailwind.min.css">
 </head>
 <body class="bg-gray-100 h-screen flex flex-col overflow-hidden text-gray-800 font-sans">
 

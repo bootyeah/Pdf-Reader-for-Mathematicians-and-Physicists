@@ -20,6 +20,7 @@
     let selectedNodeIds = new Set();
     let editingNodeId = null;
     let draggingNodeId = null;
+    let draggingNodeObj = null;
     let activePopoverNodeId = null;
     let isSpaceDown = false;
     let isPanning = false;
@@ -28,6 +29,18 @@
     let didPanMove = false;
     // 仅用于视图排版，不写入批注；撤销、保存仍沿用原始树与连线模型。
     let convergenceLayouts = [];
+    // 规范化缓存、DOM 脏标记、SVG 预览上下文缓存与公式 HTML 缓存
+    let _lastNormalizedMindmapData = null;
+    let _lastNormalizedPageCount = -1;
+    let _lastNormalizedActivePageId = null;
+    let _lastNormalizedActivePage = null;
+    let _lastNormalizedNodeCount = -1;
+    let _mindmapDomDirty = true;
+    let _lastRenderedMindmapRef = null;
+    let _lastRenderedActivePageId = null;
+    let _svgLayoutCache = null;
+    const _nodeContentHtmlCache = new Map();
+    const MAX_NODE_CONTENT_CACHE = 500;
 
     // 交互式自由合并连线状态
     let mergingSourceNodeId = null;
@@ -40,6 +53,7 @@
     // 交互式更改挂载父节点（画布点选挂载）状态
     let reparentingSourceNodeId = null;
     let reparentingTargetNodeId = null;
+    let lastRawReparentTargetId = undefined;
     let reparentPreviewFrame = null;
     let reparentMouseX = 0;
     let reparentMouseY = 0;
@@ -201,12 +215,33 @@
         if (!state.annotations) state.annotations = {};
         let data = state.annotations['mindmap'];
 
+        if (data && data === _lastNormalizedMindmapData &&
+            Array.isArray(data.pages) && data.pages.length === _lastNormalizedPageCount &&
+            data.activePageId === _lastNormalizedActivePageId &&
+            _lastNormalizedActivePage && _lastNormalizedActivePage.id === data.activePageId &&
+            Array.isArray(data.nodes) && data.nodes === _lastNormalizedActivePage.nodes &&
+            data.nodes.length === _lastNormalizedNodeCount && data.nodes.length > 0 &&
+            data.root === data.nodes[0]) {
+            data.page = _lastNormalizedActivePage.page;
+            if (!Number.isFinite(Number(data.zoom))) {
+                data.zoom = _lastNormalizedActivePage.zoom || 1.0;
+            } else {
+                _lastNormalizedActivePage.zoom = Number(data.zoom);
+            }
+            return data;
+        }
+
         const hasPages = data && Array.isArray(data.pages) && data.pages.length > 0;
         const hasNodes = data && (data.root || (Array.isArray(data.nodes) && data.nodes.length > 0));
 
         if (!data || (!hasPages && !hasNodes)) {
             data = createDefaultMindMapData();
             state.annotations['mindmap'] = data;
+            _lastNormalizedMindmapData = data;
+            _lastNormalizedPageCount = data.pages.length;
+            _lastNormalizedActivePageId = data.activePageId;
+            _lastNormalizedActivePage = data.pages[0];
+            _lastNormalizedNodeCount = data.nodes.length;
             return data;
         }
 
@@ -223,6 +258,11 @@
             data.activePageId = firstPage.id;
             data.page = firstPage.page;
             data.zoom = firstPage.zoom;
+            _lastNormalizedMindmapData = data;
+            _lastNormalizedPageCount = 1;
+            _lastNormalizedActivePageId = firstPage.id;
+            _lastNormalizedActivePage = firstPage;
+            _lastNormalizedNodeCount = data.nodes.length;
             return data;
         }
 
@@ -250,6 +290,11 @@
             data.root = fallbackPage.root;
             data.page = fallbackPage.page;
             data.zoom = fallbackPage.zoom;
+            _lastNormalizedMindmapData = data;
+            _lastNormalizedPageCount = 1;
+            _lastNormalizedActivePageId = fallbackPage.id;
+            _lastNormalizedActivePage = fallbackPage;
+            _lastNormalizedNodeCount = data.nodes.length;
             return data;
         }
         if (validPages.length !== data.pages.length) {
@@ -282,6 +327,11 @@
         } else {
             activePage.zoom = Number(data.zoom);
         }
+        _lastNormalizedMindmapData = data;
+        _lastNormalizedPageCount = data.pages.length;
+        _lastNormalizedActivePageId = activePage.id;
+        _lastNormalizedActivePage = activePage;
+        _lastNormalizedNodeCount = data.nodes.length;
         return data;
     }
 
@@ -306,6 +356,7 @@
     function commitMindMapChange(mutatorFn, options = {}) {
         getMindMapData();
         const runMutator = () => {
+            _lastNormalizedMindmapData = null;
             const data = getMindMapData();
             mutatorFn(data);
             if (!Array.isArray(data.nodes) || data.nodes.length === 0) {
@@ -321,6 +372,8 @@
                 data.zoom = activePage.zoom || currentZoom || 1.0;
             }
             state.annotations['mindmap'] = data;
+            _lastNormalizedMindmapData = null;
+            _mindmapDomDirty = true;
         };
 
         if (typeof performAction === 'function') {
@@ -626,6 +679,136 @@
             return tips;
         }
         return [];
+    }
+
+    // 单次 O(N) 预扫描：收集节点总数、节点表、入向连线数、自动合流来源数、主干节点集合及同级移动能力，消除 O(N^2) 渲染遍历
+    function buildRenderIndex(data) {
+        const chains = getAllMainChains(data);
+        const nodeMap = new Map();
+        const incomingMergeCount = new Map();
+        const forkConvergenceCount = new Map();
+        const verticalSpineIds = new Set();
+        const moveStepFlags = new Map();
+        let total = 0;
+
+        function countNonEmptyTracks(branches) {
+            if (!Array.isArray(branches) || !branches.length) return 0;
+            let count = 0;
+            for (let i = 0; i < branches.length; i++) {
+                if (Array.isArray(branches[i]) && branches[i].length > 0) count++;
+            }
+            return count;
+        }
+
+        function visit(node, isVerticalSpine, listInfo) {
+            if (!node) return;
+            total++;
+            nodeMap.set(node.id, node);
+            if (isVerticalSpine) verticalSpineIds.add(node.id);
+
+            if (listInfo) {
+                const { index, length, isForkTrack, trackIndex, trackCount } = listInfo;
+                const canUp = index > 0 || (isForkTrack && trackCount > 1 && trackIndex > 0);
+                const canDown = index + 1 < length || (isForkTrack && trackCount > 1 && trackIndex + 1 < trackCount);
+                moveStepFlags.set(node.id, { canUp, canDown });
+            }
+
+            if ((Array.isArray(node.mergeTo) && node.mergeTo.length) ||
+                (Array.isArray(node.convergeTo) && node.convergeTo.length)) {
+                const seenTargets = new Set();
+                if (Array.isArray(node.mergeTo)) {
+                    for (let i = 0; i < node.mergeTo.length; i++) seenTargets.add(node.mergeTo[i]);
+                }
+                if (Array.isArray(node.convergeTo)) {
+                    for (let i = 0; i < node.convergeTo.length; i++) seenTargets.add(node.convergeTo[i]);
+                }
+                seenTargets.forEach(tId => {
+                    incomingMergeCount.set(tId, (incomingMergeCount.get(tId) || 0) + 1);
+                });
+            }
+
+            const nonEmptyTracks = (node.forkConverge !== false) ? countNonEmptyTracks(node.branches) : 0;
+
+            if (Array.isArray(node.branches)) {
+                const trackCount = node.branches.length;
+                for (let tIdx = 0; tIdx < trackCount; tIdx++) {
+                    const track = node.branches[tIdx];
+                    if (!Array.isArray(track)) continue;
+                    const tLen = track.length;
+                    for (let sIdx = 0; sIdx < tLen; sIdx++) {
+                        const bNode = track[sIdx];
+                        if (isVerticalSpine && sIdx > 0) {
+                            const prevB = track[sIdx - 1];
+                            if (prevB && prevB.forkConverge !== false) {
+                                const prevTracks = countNonEmptyTracks(prevB.branches);
+                                if (prevTracks > 0) forkConvergenceCount.set(bNode.id, prevTracks);
+                            }
+                        }
+                        visit(bNode, isVerticalSpine, {
+                            index: sIdx,
+                            length: tLen,
+                            isForkTrack: true,
+                            trackIndex: tIdx,
+                            trackCount
+                        });
+                    }
+                }
+            }
+
+            if (Array.isArray(node.convergeChildren) && node.convergeChildren.length) {
+                const cLen = node.convergeChildren.length;
+                if (nonEmptyTracks > 0 && node.convergeChildren[0]) {
+                    forkConvergenceCount.set(node.convergeChildren[0].id, nonEmptyTracks);
+                }
+                for (let i = 0; i < cLen; i++) {
+                    visit(node.convergeChildren[i], false, {
+                        index: i,
+                        length: cLen,
+                        isForkTrack: false,
+                        trackIndex: 0,
+                        trackCount: 0
+                    });
+                }
+            }
+
+            if (Array.isArray(node.children) && node.children.length) {
+                const chLen = node.children.length;
+                const childIsSpine = Boolean(listInfo && listInfo.isChainRoot);
+                for (let i = 0; i < chLen; i++) {
+                    const ch = node.children[i];
+                    if (childIsSpine && i > 0) {
+                        const prevCh = node.children[i - 1];
+                        if (prevCh && prevCh.forkConverge !== false) {
+                            const prevTracks = countNonEmptyTracks(prevCh.branches);
+                            if (prevTracks > 0) forkConvergenceCount.set(ch.id, prevTracks);
+                        }
+                    }
+                    visit(ch, childIsSpine, {
+                        index: i,
+                        length: chLen,
+                        isForkTrack: false,
+                        trackIndex: 0,
+                        trackCount: 0
+                    });
+                }
+            }
+        }
+
+        for (let cIdx = 0; cIdx < chains.length; cIdx++) {
+            const chainRoot = chains[cIdx];
+            if (chainRoot) {
+                visit(chainRoot, true, {
+                    index: cIdx,
+                    length: chains.length,
+                    isForkTrack: false,
+                    trackIndex: 0,
+                    trackCount: 0,
+                    isChainRoot: true
+                });
+            }
+        }
+
+        return { total, nodeMap, incomingMergeCount, forkConvergenceCount, verticalSpineIds, moveStepFlags };
     }
 
     function isNodeInSubtree(parent, searchId) {
@@ -1633,8 +1816,9 @@
         if (!createdPage) return null;
         selectedNodeId = createdPage.root ? createdPage.root.id : null;
         selectedNodeIds = new Set(selectedNodeId ? [selectedNodeId] : []);
-        renderTree();
-        centerView(false, false);
+        renderTree({ skipSvg: true });
+        centerView(false, false, { skipSvg: true });
+        updateSvgConnections();
         createdPage.panX = panX;
         createdPage.panY = panY;
         if (selectedNodeId) selectNode(selectedNodeId, false);
@@ -1679,6 +1863,7 @@
             ? Math.min(2.5, Math.max(0.35, Number(targetPage.zoom)))
             : 1.0;
         data.zoom = currentZoom;
+        _lastNormalizedMindmapData = null;
 
         selectedNodeId = null;
         selectedNodeIds.clear();
@@ -1687,11 +1872,11 @@
         if (hasSavedPan) {
             panX = targetPage.panX;
             panY = targetPage.panY;
-        }
-
-        renderTree();
-        if (!hasSavedPan) {
-            centerView(false, false);
+            renderTree();
+        } else {
+            renderTree({ skipSvg: true });
+            centerView(false, false, { skipSvg: true });
+            updateSvgConnections();
             targetPage.panX = panX;
             targetPage.panY = panY;
         }
@@ -2001,6 +2186,7 @@
 
         reparentingSourceNodeId = targetId;
         reparentingTargetNodeId = null;
+        lastRawReparentTargetId = undefined;
         reparentMouseX = 0;
         reparentMouseY = 0;
 
@@ -2058,6 +2244,7 @@
     function stopInteractiveReparentMode() {
         reparentingSourceNodeId = null;
         reparentingTargetNodeId = null;
+        lastRawReparentTargetId = undefined;
         reparentMouseX = 0;
         reparentMouseY = 0;
         if (reparentPreviewFrame !== null) cancelAnimationFrame(reparentPreviewFrame);
@@ -3043,7 +3230,6 @@
                 cardEl.classList.remove('is-editing');
                 cardEl.draggable = true;
                 updateSvgConnections();
-                requestAnimationFrame(updateSvgConnections);
                 if (refocus) cardEl.focus({ preventScroll: true });
             } else {
                 renderTree();
@@ -3164,7 +3350,6 @@
     }
 
     function renderNodeContent(targetEl, text) {
-        targetEl.innerHTML = '';
         if (!text || text.trim() === '') {
             targetEl.classList.add('mm-empty-prompt');
             targetEl.textContent = '双击编辑节点内容...';
@@ -3172,7 +3357,47 @@
         }
         targetEl.classList.remove('mm-empty-prompt');
         const source = String(text).replace(/\r\n?/g, '\n');
-        const blocks = window.TikzRender ? window.TikzRender.scanTikzBlocks(source, false) : [];
+        const mayHaveTikz = Boolean(window.TikzRender && source.includes('\\begin{'));
+        const blocks = mayHaveTikz ? window.TikzRender.scanTikzBlocks(source, false) : [];
+        const hasMath = source.includes('$') || source.includes('\\(') || source.includes('\\[');
+
+        if (blocks.length === 0) {
+            if (!hasMath || !window.renderMathInElement) {
+                targetEl.textContent = source;
+                return;
+            }
+            const cachedHtml = _nodeContentHtmlCache.get(source);
+            if (cachedHtml !== undefined) {
+                // LRU 命中：直接复用已渲染的 KaTeX HTML，跳过重复公式解析
+                _nodeContentHtmlCache.delete(source);
+                _nodeContentHtmlCache.set(source, cachedHtml);
+                targetEl.innerHTML = cachedHtml;
+                return;
+            }
+            targetEl.textContent = source;
+            try {
+                window.renderMathInElement(targetEl, {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '$', right: '$', display: false },
+                        { left: '\\(', right: '\\)', display: false },
+                        { left: '\\[', right: '\\]', display: true }
+                    ],
+                    throwOnError: false,
+                    strict: false,
+                    ignoredClasses: ['ignored-by-katex']
+                });
+                if (_nodeContentHtmlCache.size >= MAX_NODE_CONTENT_CACHE) {
+                    _nodeContentHtmlCache.delete(_nodeContentHtmlCache.keys().next().value);
+                }
+                _nodeContentHtmlCache.set(source, targetEl.innerHTML);
+            } catch (err) {
+                console.warn('KaTeX render warning:', err);
+            }
+            return;
+        }
+
+        targetEl.innerHTML = '';
         let offset = 0;
         blocks.forEach(block => {
             targetEl.appendChild(document.createTextNode(source.slice(offset, block.start)));
@@ -3181,7 +3406,7 @@
         });
         targetEl.appendChild(document.createTextNode(source.slice(offset)));
 
-        if (window.renderMathInElement) {
+        if (hasMath && window.renderMathInElement) {
             try {
                 window.renderMathInElement(targetEl, {
                     delimiters: [
@@ -3211,10 +3436,15 @@
         const forkLabel = options.forkLabel || null;
         const isLateralFork = !!options.isLateralFork;
         const hasForkBranches = Array.isArray(node.branches) && node.branches.some(t => Array.isArray(t) && t.length > 0);
-        const data = getMindMapData();
-        const incomingMerges = getIncomingMergeSources(data, node.id);
-        const forkConvergenceSources = getForkConvergenceSources(data, node.id);
-        const totalIncomingCount = incomingMerges.length + (forkConvergenceSources.length > 1 ? forkConvergenceSources.length : 0);
+        const data = options.data || getMindMapData();
+        const renderIndex = options.renderIndex || null;
+        const incomingCount = renderIndex
+            ? (renderIndex.incomingMergeCount.get(node.id) || 0)
+            : getIncomingMergeSources(data, node.id).length;
+        const forkConvCount = renderIndex
+            ? (renderIndex.forkConvergenceCount.get(node.id) || 0)
+            : getForkConvergenceSources(data, node.id).length;
+        const totalIncomingCount = incomingCount + (forkConvCount > 1 ? forkConvCount : 0);
 
         const branchContainer = document.createElement('div');
         branchContainer.className = 'mm-tree-branch'
@@ -3255,6 +3485,7 @@
                 return;
             }
             draggingNodeId = node.id;
+            draggingNodeObj = node;
             card.classList.add('dragging');
             if (e.dataTransfer) {
                 e.dataTransfer.effectAllowed = 'move';
@@ -3263,6 +3494,7 @@
         });
         card.addEventListener('dragend', () => {
             draggingNodeId = null;
+            draggingNodeObj = null;
             card.classList.remove('dragging');
             document.querySelectorAll('.mm-card[data-drop-hint]').forEach(el => {
                 el.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-child', 'drag-over-merge');
@@ -3271,24 +3503,29 @@
         });
         card.addEventListener('dragover', (e) => {
             if (!draggingNodeId || draggingNodeId === node.id) return;
-            const dragSrcNode = findNodeInTree(data, draggingNodeId);
+            const dragSrcNode = draggingNodeObj || findNodeInTree(data, draggingNodeId);
             if (dragSrcNode && isNodeInSubtree(dragSrcNode, node.id)) return;
             e.preventDefault();
             const rect = card.getBoundingClientRect();
             const relY = (e.clientY - rect.top) / Math.max(1, rect.height);
-            card.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-child', 'drag-over-merge');
+            let nextClass, nextHint;
             if (e.shiftKey) {
-                card.classList.add('drag-over-merge');
-                card.dataset.dropHint = '松开连线汇入';
+                nextClass = 'drag-over-merge';
+                nextHint = '松开连线汇入';
             } else if (e.altKey || isRoot || (relY >= 0.28 && relY <= 0.72)) {
-                card.classList.add('drag-over-child');
-                card.dataset.dropHint = '移为子节点';
+                nextClass = 'drag-over-child';
+                nextHint = '移为子节点';
             } else if (relY < 0.28) {
-                card.classList.add('drag-over-top');
-                card.dataset.dropHint = '插入此节点之前';
+                nextClass = 'drag-over-top';
+                nextHint = '插入此节点之前';
             } else {
-                card.classList.add('drag-over-bottom');
-                card.dataset.dropHint = '插入此节点之后';
+                nextClass = 'drag-over-bottom';
+                nextHint = '插入此节点之后';
+            }
+            if (card.dataset.dropHint !== nextHint || !card.classList.contains(nextClass)) {
+                card.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-child', 'drag-over-merge');
+                card.classList.add(nextClass);
+                card.dataset.dropHint = nextHint;
             }
         });
         card.addEventListener('dragleave', () => {
@@ -3297,7 +3534,7 @@
         });
         card.addEventListener('drop', (e) => {
             if (!draggingNodeId || draggingNodeId === node.id) return;
-            const dragSrcNode = findNodeInTree(data, draggingNodeId);
+            const dragSrcNode = draggingNodeObj || findNodeInTree(data, draggingNodeId);
             if (dragSrcNode && isNodeInSubtree(dragSrcNode, node.id)) return;
             e.preventDefault();
             e.stopPropagation();
@@ -3307,6 +3544,7 @@
             card.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-child', 'drag-over-merge');
             delete card.dataset.dropHint;
             draggingNodeId = null;
+            draggingNodeObj = null;
 
             if (e.shiftKey) {
                 // Shift+拖拽释放：直接建立自由汇合连线
@@ -3480,8 +3718,9 @@
         actions.className = 'mm-card-actions';
 
         if (!isRoot) {
-            const canUp = canMoveNodeStep(data, node.id, -1);
-            const canDown = canMoveNodeStep(data, node.id, 1);
+            const stepFlags = renderIndex ? renderIndex.moveStepFlags.get(node.id) : null;
+            const canUp = stepFlags ? stepFlags.canUp : canMoveNodeStep(data, node.id, -1);
+            const canDown = stepFlags ? stepFlags.canDown : canMoveNodeStep(data, node.id, 1);
 
             const upBtn = document.createElement('button');
             upBtn.type = 'button';
@@ -3630,7 +3869,7 @@
             toggleBtn.type = 'button';
             toggleBtn.className = 'mm-branch-toggle' + (node.collapsed ? ' is-collapsed' : '');
             toggleBtn.setAttribute('aria-expanded', String(!node.collapsed));
-            const childCount = Math.max(1, countCollapsedDescendants(node, isSpine));
+            const childCount = node.collapsed ? Math.max(1, countCollapsedDescendants(node, isSpine)) : 0;
             toggleBtn.title = node.collapsed ? `已折叠 ${childCount} 个下属节点，点击展开` : '折叠右侧分支';
             toggleBtn.innerHTML = node.collapsed
                 ? `<i class="ph ph-caret-right text-xs"></i><span>${childCount}</span>`
@@ -3654,12 +3893,12 @@
             if (isRoot) {
                 childrenRow.className = 'mm-children-row mm-spine-column';
                 node.children.forEach((child, idx) => {
-                    childrenRow.appendChild(createBranchDOM(child, node, 1, idx, { chainIdx }));
+                    childrenRow.appendChild(createBranchDOM(child, node, 1, idx, { chainIdx, data, renderIndex }));
                 });
             } else {
                 childrenRow.className = 'mm-children-row mm-lateral-column';
                 node.children.forEach(child => {
-                    childrenRow.appendChild(createBranchDOM(child, node, level + 1, null, { chainIdx }));
+                    childrenRow.appendChild(createBranchDOM(child, node, level + 1, null, { chainIdx, data, renderIndex }));
                 });
             }
             branchContainer.appendChild(childrenRow);
@@ -3684,7 +3923,9 @@
                     const label = track.length > 1 ? `${trackLetter}${bIdx + 1}` : `支线 ${trackLetter}`;
                     trackCol.appendChild(createBranchDOM(branchNode, node, 1, bIdx, {
                         chainIdx,
-                        forkLabel: label
+                        forkLabel: label,
+                        data,
+                        renderIndex
                     }));
                 });
 
@@ -3717,7 +3958,9 @@
                     trackCol.appendChild(createBranchDOM(branchNode, node, level + 1, bIdx, {
                         chainIdx,
                         forkLabel: label,
-                        isLateralFork: true
+                        isLateralFork: true,
+                        data,
+                        renderIndex
                     }));
                 });
 
@@ -3730,7 +3973,7 @@
                 const convCol = document.createElement('div');
                 convCol.className = 'mm-lateral-converge-col';
                 node.convergeChildren.forEach((convNode, cIdx) => {
-                    convCol.appendChild(createBranchDOM(convNode, node, level + 1, cIdx, { chainIdx }));
+                    convCol.appendChild(createBranchDOM(convNode, node, level + 1, cIdx, { chainIdx, data, renderIndex }));
                 });
                 forkRow.appendChild(convCol);
             }
@@ -3799,6 +4042,7 @@
     }
 
     function positionConvergenceLayouts() {
+        if (!convergenceLayouts.length) return;
         for (const { row, entries, ordered } of convergenceLayouts) {
             if (!row.isConnected) continue;
             const columns = [];
@@ -3866,14 +4110,16 @@
         });
     }
 
-    function updateSvgConnections() {
+    function updateSvgConnections(options = {}) {
         if (svgUpdateRaf) {
             cancelAnimationFrame(svgUpdateRaf);
             svgUpdateRaf = 0;
         }
         const els = getEls();
         if (!els.canvas || !els.treeRoot) return;
-        positionConvergenceLayouts();
+        if (!options.skipConvergencePosition) {
+            positionConvergenceLayouts();
+        }
 
         let svg = els.svgCanvas || document.getElementById('mindmap-svg-canvas');
         if (!svg) {
@@ -3897,9 +4143,12 @@
                 stroke-width="${id.endsWith('-active') ? '1.8' : '1.5'}" stroke-linecap="round" />
         </marker>`).join('')}</defs>`;
 
-        const data = getMindMapData();
+        const data = options.data || getMindMapData();
         const chains = getAllMainChains(data);
-        if (!chains || chains.length === 0) return;
+        if (!chains || chains.length === 0) {
+            _svgLayoutCache = null;
+            return;
+        }
 
         const canvasRect = els.canvas.getBoundingClientRect();
         const zoom = currentZoom || 1.0;
@@ -3925,8 +4174,23 @@
             return getCardEl(id)?.closest('.mm-tree-branch')?.querySelector(':scope > .mm-fork-branches-row');
         }
 
-        // 预收集每个节点的入向实线来源数（树父节点 + convergeTo），用于通道共享与防重叠避让
+        // O(N) 预收集纵向主干集合与入向实线来源数，避免绘制过程中 O(N^2) 重复查找
         const incomingCountMap = new Map();
+        const verticalSpineIds = new Set();
+        (function markSpines(list, isRootLevel) {
+            if (!Array.isArray(list)) return;
+            for (let i = 0; i < list.length; i++) {
+                const n = list[i];
+                if (!n) continue;
+                verticalSpineIds.add(n.id);
+                if (isRootLevel && Array.isArray(n.children)) markSpines(n.children, false);
+                if (Array.isArray(n.branches)) {
+                    for (let t = 0; t < n.branches.length; t++) {
+                        markSpines(n.branches[t], false);
+                    }
+                }
+            }
+        })(chains, true);
         walkAllNodes(data, n => {
             (n.children || []).forEach(c => incomingCountMap.set(c.id, (incomingCountMap.get(c.id) || 0) + 1));
             (n.convergeTo || []).forEach(tId => incomingCountMap.set(tId, (incomingCountMap.get(tId) || 0) + 1));
@@ -3976,9 +4240,6 @@
             if (b) allCardBounds.push({ id, ...b });
         });
 
-        function segmentHitsAnyCard(x1, y1, x2, y2, ignoreId1, ignoreId2, pad = 4) {
-            return window.MindMapRouter.segmentHitsAnyCard(allCardBounds, x1, y1, x2, y2, ignoreId1, ignoreId2, pad);
-        }
         function routeHitsObstacles(pts, fromId, toId) {
             return window.MindMapRouter.routeHitsObstacles(allCardBounds, pts, fromId, toId);
         }
@@ -3988,13 +4249,29 @@
         // 记录所有实线折线段与卡片端口占用情况，供按 M 建立的虚线箭头智能避让，防止与实线重合
         const solidSegments = [];
         const solidEndpoints = [];
+        const solidEndpointsByNode = new Map();
         const placedMergeRoutes = [];
+        const pathFrag = document.createDocumentFragment();
+        const solidPaths = [];
+        const convergenceTargets = new Set();
+
+        function pushSolidEndpoint(nodeId, x, y) {
+            const ep = { nodeId, x, y };
+            solidEndpoints.push(ep);
+            let list = solidEndpointsByNode.get(nodeId);
+            if (!list) {
+                list = [];
+                solidEndpointsByNode.set(nodeId, list);
+            }
+            list.push(ep);
+        }
+
         function recordSolidRoute(fromId, toId, pts) {
             if (!Array.isArray(pts) || pts.length < 2) return;
             const first = pts[0];
             const last = pts[pts.length - 1];
-            solidEndpoints.push({ nodeId: fromId, x: first[0], y: first[1] });
-            solidEndpoints.push({ nodeId: toId, x: last[0], y: last[1] });
+            pushSolidEndpoint(fromId, first[0], first[1]);
+            pushSolidEndpoint(toId, last[0], last[1]);
             for (let i = 0; i < pts.length - 1; i++) {
                 const x1 = pts[i][0], y1 = pts[i][1];
                 const x2 = pts[i + 1][0], y2 = pts[i + 1][1];
@@ -4002,6 +4279,10 @@
                 if (len >= 1) {
                     solidSegments.push({
                         x1, y1, x2, y2, len,
+                        minX: x1 < x2 ? x1 : x2,
+                        maxX: x1 > x2 ? x1 : x2,
+                        minY: y1 < y2 ? y1 : y2,
+                        maxY: y1 > y2 ? y1 : y2,
                         ux: (x2 - x1) / len,
                         uy: (y2 - y1) / len,
                         fromId, toId
@@ -4031,7 +4312,8 @@
             path.setAttribute('marker-end', 'url(#mm-spine-arrow)');
             path.dataset.parentId = fromId;
             path.dataset.childId = toId;
-            svg.appendChild(path);
+            solidPaths.push(path);
+            pathFrag.appendChild(path);
         }
         function tracksOf(node) {
             return (node.branches || []).filter(track => Array.isArray(track) && track.length);
@@ -4045,7 +4327,7 @@
                 appendFlow(node.id, child.id, 'horizontal', first ? first.left - 20 : null, true);
                 drawLateralConnections(child);
             });
-            if (!isVerticalSpineNode(data, node.id)) drawHorizontalFork(node);
+            if (!verticalSpineIds.has(node.id)) drawHorizontalFork(node);
         }
         function drawHorizontalFork(node, nextId = null, exitLane = null) {
             if (node.collapsed) return false;
@@ -4174,7 +4456,11 @@
             path.setAttribute('marker-end', 'url(#mm-spine-arrow)');
             path.dataset.parentId = fromId;
             path.dataset.childId = toId;
-            svg.appendChild(path);
+            if (!preview) {
+                convergenceTargets.add(toId);
+                solidPaths.push(path);
+            }
+            pathFrag.appendChild(path);
         }
 
         walkAllNodes(data, (node) => {
@@ -4190,21 +4476,19 @@
         });
 
         // 3.2 绘制跨分支 / 跨主链自由合并虚线箭头 (node.mergeTo，智能避让已有实线与卡片)
+        const routerCtx = {
+            allCardBounds,
+            solidEndpoints,
+            solidEndpointsByNode,
+            solidSegments,
+            placedMergeRoutes
+        };
         const getMergeCardPort = (rect, side, isTarget, shift = 0) =>
             window.MindMapRouter.getMergeCardPort(rect, side, isTarget, shift);
-        const pointToSolidSegDist = (px, py, seg) =>
-            window.MindMapRouter.pointToSolidSegDist(px, py, seg);
-        const sampleCubicBezier = (p1, cp1, cp2, p2, steps = 24) =>
-            window.MindMapRouter.sampleCubicBezier(p1, cp1, cp2, p2, steps);
-        const scoreMergeCandidate = (cand, fromId, toId) =>
-            window.MindMapRouter.scoreMergeCandidate(cand, fromId, toId, {
-                allCardBounds,
-                solidEndpoints,
-                solidSegments,
-                placedMergeRoutes
-            });
+        const scoreMergeCandidate = (cand, fromId, toId, bestScore = Infinity) =>
+            window.MindMapRouter.scoreMergeCandidate(cand, fromId, toId, routerCtx, bestScore);
 
-        function drawCustomMergeLinks(fromCard, toCard, fromId, toId, preview = false) {
+        function drawCustomMergeLinks(fromCard, toCard, fromId, toId, preview = false, targetContainer = pathFrag) {
             if (!fromCard || !toCard) return;
             const f = cardBounds(fromId) || bounds(fromCard);
             const t = cardBounds(toId) || bounds(toCard);
@@ -4364,7 +4648,7 @@
             let best = candidates[0];
             let bestScore = Infinity;
             for (const cand of candidates) {
-                const sc = scoreMergeCandidate(cand, fromId, toId);
+                const sc = scoreMergeCandidate(cand, fromId, toId, bestScore);
                 if (sc < bestScore) {
                     bestScore = sc;
                     best = cand;
@@ -4372,7 +4656,15 @@
             }
 
             if (!preview && best && best.pts) {
-                placedMergeRoutes.push({ p1: best.p1, p2: best.p2, pts: best.pts });
+                placedMergeRoutes.push({
+                    p1: best.p1,
+                    p2: best.p2,
+                    pts: best.pts,
+                    minX: best.minX,
+                    maxX: best.maxX,
+                    minY: best.minY,
+                    maxY: best.maxY
+                });
             }
 
             const { p1, cp1, cp2, p2 } = best;
@@ -4385,7 +4677,7 @@
             path.setAttribute('marker-end', isHighlighted || preview ? 'url(#mm-merge-arrow-active)' : 'url(#mm-merge-arrow)');
             path.dataset.parentId = fromId;
             path.dataset.childId = toId;
-            svg.appendChild(path);
+            targetContainer.appendChild(path);
         }
 
         walkAllNodes(data, (node) => {
@@ -4401,33 +4693,73 @@
         });
 
         // 同一合流的结构父子边与显式 convergeTo 边采用同一视觉角色。
-        const convergenceTargets = new Set([...svg.querySelectorAll('.mm-connector-converge')]
-            .map(path => path.dataset.childId));
-        svg.querySelectorAll('.mm-connector-path, .mm-connector-spine, .mm-connector-converge').forEach(path => {
-            if (convergenceTargets.has(path.dataset.childId)) {
-                path.classList.add('mm-connector-converge');
-                path.dataset.convergenceId = path.dataset.childId;
+        if (convergenceTargets.size > 0) {
+            for (let i = 0; i < solidPaths.length; i++) {
+                const path = solidPaths[i];
+                if (convergenceTargets.has(path.dataset.childId)) {
+                    path.classList.add('mm-connector-converge');
+                    path.dataset.convergenceId = path.dataset.childId;
+                }
             }
-        });
-        highlightConnections(selectedNodeId);
+        }
+        svg.appendChild(pathFrag);
+        if (selectedNodeId || selectedNodeIds.size > 0) {
+            highlightConnections(selectedNodeId);
+        }
 
-        // 4. 若处于交互式点击连线合并模式，实时为所有选中的源节点绘制跟随鼠标或吸附目标的动态预览曲线
+        _svgLayoutCache = {
+            svg,
+            cards,
+            cardBounds,
+            solidEndpointsByNode,
+            drawCustomMergeLinks
+        };
+
+        updateInteractivePreviewPaths(canvasRect, zoom);
+    }
+
+    // 交互式连线/挂载预览增量更新：仅重绘 1 条跟随鼠标的预览路径，避免 mousemove 触发全图重算
+    function updateInteractivePreviewPaths(providedCanvasRect = null, providedZoom = null) {
+        const els = getEls();
+        const svg = els.svgCanvas || document.getElementById('mindmap-svg-canvas');
+        if (!svg || !els.canvas) return;
         const activeSourceIds = (mergingSourceNodeIds && mergingSourceNodeIds.length > 0)
             ? mergingSourceNodeIds
             : (mergingSourceNodeId ? [mergingSourceNodeId] : []);
+        const hasReparent = Boolean(reparentingSourceNodeId);
 
+        if (activeSourceIds.length === 0 && !hasReparent) {
+            svg.querySelectorAll('.mm-connector-merge-preview, .mm-connector-reparent-preview').forEach(p => p.remove());
+            return;
+        }
+        if (!_svgLayoutCache || _svgLayoutCache.svg !== svg || !svg.isConnected) {
+            updateSvgConnections();
+            return;
+        }
+
+        const { cards, cardBounds, solidEndpointsByNode, drawCustomMergeLinks } = _svgLayoutCache;
+        const canvasRect = providedCanvasRect || els.canvas.getBoundingClientRect();
+        const zoom = providedZoom || currentZoom || 1.0;
+        if (zoom <= 0) return;
+
+        svg.querySelectorAll('.mm-connector-merge-preview, .mm-connector-reparent-preview').forEach(p => p.remove());
+        const previewFrag = document.createDocumentFragment();
+        const getMergeCardPort = (rect, side, isTarget, shift = 0) =>
+            window.MindMapRouter.getMergeCardPort(rect, side, isTarget, shift);
+
+        // 4. 若处于交互式点击连线合并模式，实时为所有选中的源节点绘制跟随鼠标或吸附目标的动态预览曲线
         if (activeSourceIds.length > 0) {
-            if (mergingTargetNodeId && getCardEl(mergingTargetNodeId)) {
+            const targetCard = mergingTargetNodeId ? cards.get(mergingTargetNodeId) : null;
+            if (mergingTargetNodeId && targetCard) {
                 activeSourceIds.forEach(srcId => {
-                    const srcCard = getCardEl(srcId);
+                    const srcCard = cards.get(srcId);
                     if (srcCard) {
-                        drawCustomMergeLinks(srcCard, getCardEl(mergingTargetNodeId), srcId, mergingTargetNodeId, true);
+                        drawCustomMergeLinks(srcCard, targetCard, srcId, mergingTargetNodeId, true, previewFrag);
                     }
                 });
             } else if (mergeMouseX && mergeMouseY) {
                 activeSourceIds.forEach(srcId => {
-                    const srcCard = getCardEl(srcId);
-                    const sB = cardBounds(srcId) || (srcCard && bounds(srcCard));
+                    const sB = cardBounds(srcId);
                     if (sB) {
                         const endX = (mergeMouseX - canvasRect.left) / zoom;
                         const endY = (mergeMouseY - canvasRect.top) / zoom;
@@ -4437,7 +4769,8 @@
                             ? (dx >= 0 ? 'right' : 'left')
                             : (dy >= 0 ? 'bottom' : 'top');
                         let p1 = getMergeCardPort(sB, side, false, 0);
-                        const portBusy = solidEndpoints.some(ep => ep.nodeId === srcId && Math.hypot(p1.x - ep.x, p1.y - ep.y) < 9);
+                        const srcEps = solidEndpointsByNode.get(srcId);
+                        const portBusy = Boolean(srcEps && srcEps.some(ep => Math.hypot(p1.x - ep.x, p1.y - ep.y) < 9));
                         if (portBusy) {
                             const shiftDir = (side === 'left' || side === 'right') ? (dy >= 0 ? 10 : -10) : (dx >= 0 ? 14 : -14);
                             p1 = getMergeCardPort(sB, side, false, shiftDir);
@@ -4453,18 +4786,18 @@
                         previewPath.setAttribute('d', `M ${p1.x.toFixed(1)} ${p1.y.toFixed(1)} C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${endX.toFixed(1)} ${endY.toFixed(1)}`);
                         previewPath.setAttribute('class', 'mm-connector-merge-preview');
                         previewPath.setAttribute('marker-end', 'url(#mm-merge-arrow-active)');
-                        svg.appendChild(previewPath);
+                        previewFrag.appendChild(previewPath);
                     }
                 });
             }
         }
 
         // 5. 若处于交互式更改挂载父节点模式，实时绘制从候选新父节点指向当前节点的预览流线
-        if (reparentingSourceNodeId && getCardEl(reparentingSourceNodeId)) {
+        if (hasReparent && cards.has(reparentingSourceNodeId)) {
             const childB = cardBounds(reparentingSourceNodeId);
             if (childB) {
                 let startX = null, startY = null;
-                if (reparentingTargetNodeId && getCardEl(reparentingTargetNodeId)) {
+                if (reparentingTargetNodeId && cards.has(reparentingTargetNodeId)) {
                     const pB = cardBounds(reparentingTargetNodeId);
                     if (pB) {
                         startX = pB.right + 2;
@@ -4483,9 +4816,13 @@
                     previewPath.setAttribute('d', `M ${startX.toFixed(1)} ${startY.toFixed(1)} C ${(startX + spanX).toFixed(1)} ${startY.toFixed(1)}, ${(endX - spanX).toFixed(1)} ${endY.toFixed(1)}, ${endX.toFixed(1)} ${endY.toFixed(1)}`);
                     previewPath.setAttribute('class', 'mm-connector-reparent-preview');
                     previewPath.setAttribute('marker-end', 'url(#mm-reparent-arrow-active)');
-                    svg.appendChild(previewPath);
+                    previewFrag.appendChild(previewPath);
                 }
             }
+        }
+
+        if (previewFrag.childNodes.length > 0) {
+            svg.appendChild(previewFrag);
         }
     }
 
@@ -4716,20 +5053,21 @@
         }
     }
 
-    function renderTree() {
+    function renderTree(options = {}) {
         const els = getEls();
         if (!els.treeRoot) return;
 
         const data = getMindMapData();
         renderPagesBar(data);
         const chains = getAllMainChains(data);
-        const total = countNodes(data);
-        if (selectedNodeId && !findNodeInTree(data, selectedNodeId)) selectedNodeId = null;
-        selectedNodeIds = new Set([...selectedNodeIds].filter(id => findNodeInTree(data, id)));
+        const renderIndex = buildRenderIndex(data);
+        const total = renderIndex.total;
+        if (selectedNodeId && !renderIndex.nodeMap.has(selectedNodeId)) selectedNodeId = null;
+        selectedNodeIds = new Set([...selectedNodeIds].filter(id => renderIndex.nodeMap.has(id)));
         if (selectedNodeId && !selectedNodeIds.has(selectedNodeId)) selectedNodeIds = new Set([selectedNodeId]);
         if (!selectedNodeId) selectedNodeId = [...selectedNodeIds].pop() || null;
-        if (mergingSourceNodeId && !findNodeInTree(data, mergingSourceNodeId)) stopInteractiveMergeMode();
-        if (reparentingSourceNodeId && !findNodeInTree(data, reparentingSourceNodeId)) stopInteractiveReparentMode();
+        if (mergingSourceNodeId && !renderIndex.nodeMap.has(mergingSourceNodeId)) stopInteractiveMergeMode();
+        if (reparentingSourceNodeId && !renderIndex.nodeMap.has(reparentingSourceNodeId)) stopInteractiveReparentMode();
         if (els.nodeCount) {
             const pageCount = getMindMapPages(data).length;
             els.nodeCount.textContent = chains.length > 1 ? `${chains.length}·${total}` : String(total);
@@ -4741,12 +5079,14 @@
         const hadFocus = !!(document.activeElement && document.activeElement.classList &&
             document.activeElement.classList.contains('mm-card') && els.treeRoot.contains(document.activeElement));
 
-        els.treeRoot.innerHTML = '';
+        _svgLayoutCache = null;
+        const treeFrag = document.createDocumentFragment();
         chains.forEach((chainRoot, idx) => {
             if (chainRoot) {
-                els.treeRoot.appendChild(createBranchDOM(chainRoot, null, 0, null, { chainIdx: idx }));
+                treeFrag.appendChild(createBranchDOM(chainRoot, null, 0, null, { chainIdx: idx, data, renderIndex }));
             }
         });
+        els.treeRoot.replaceChildren(treeFrag);
         prepareConvergenceLayouts(data);
         updateSelectionTools();
 
@@ -4767,26 +5107,45 @@
             if (card) card.focus({ preventScroll: true });
         }
 
-        // 同步应用当前画布变换并单次绘制 SVG 流线（取消重复异步重绘队列）
-        applyTransform();
-        updateSvgConnections();
+        _mindmapDomDirty = false;
+        _lastRenderedMindmapRef = data;
+        _lastRenderedActivePageId = data.activePageId;
+
+        // 同步应用当前画布变换并单次绘制 SVG 流线
+        applyTransform(data);
+        if (!options.skipSvg) {
+            updateSvgConnections({ data });
+        }
     }
 
     // ==========================================
     // 6. 独立缩放、自由平移与居中视野 (Transform 2D 引擎)
     // ==========================================
 
-    function applyTransform() {
+    function applyTransform(dataArg = null) {
         const els = getEls();
         if (!els.canvas) return;
         els.canvas.style.transform = `translate3d(${panX}px, ${panY}px, 0) scale(${currentZoom})`;
         if (els.viewport) {
-            els.viewport.style.backgroundPosition = `${panX}px ${panY}px`;
+            const bgX = ((panX % 22) + 22) % 22;
+            const bgY = ((panY % 22) + 22) % 22;
+            els.viewport.style.backgroundPosition = `${bgX}px ${bgY}px`;
         }
         if (els.zoomVal) {
-            els.zoomVal.textContent = `${Math.round(currentZoom * 100)}%`;
+            const zoomText = `${Math.round(currentZoom * 100)}%`;
+            if (els.zoomVal.textContent !== zoomText) {
+                els.zoomVal.textContent = zoomText;
+            }
         }
-        const activePage = getActiveMindMapPage();
+        const d = dataArg || state.annotations?.['mindmap'];
+        let activePage = null;
+        if (d && Array.isArray(d.pages)) {
+            if (_lastNormalizedActivePage && _lastNormalizedActivePage.id === d.activePageId) {
+                activePage = _lastNormalizedActivePage;
+            } else {
+                activePage = d.pages.find(p => p && p.id === d.activePageId) || d.pages[0] || null;
+            }
+        }
         if (activePage) {
             activePage.zoom = currentZoom;
             activePage.panX = panX;
@@ -4819,7 +5178,7 @@
         applyZoom(currentZoom + delta);
     }
 
-    function centerView(smooth = true, autoFit = false) {
+    function centerView(smooth = true, autoFit = false, options = {}) {
         const els = getEls();
         if (!els.viewport || !els.canvas || !els.treeRoot) return;
 
@@ -4847,12 +5206,17 @@
             applyTransform();
             setTimeout(() => {
                 if (els.canvas) els.canvas.style.transition = '';
-                updateSvgConnections();
+                const svg = els.svgCanvas || document.getElementById('mindmap-svg-canvas');
+                if (!options.skipSvg && (!svg || svg.childElementCount <= 1)) {
+                    updateSvgConnections();
+                }
             }, 300);
         } else {
             els.canvas.style.transition = '';
             applyTransform();
-            updateSvgConnections();
+            if (!options.skipSvg) {
+                updateSvgConnections();
+            }
         }
     }
 
@@ -5092,8 +5456,20 @@
             els.panel.classList.remove('hidden');
             els.btn.classList.add('text-blue-600', 'bg-blue-50');
             els.btn.classList.remove('text-gray-600');
-            renderTree();
-            setTimeout(() => centerView(false, true), 60);
+            const data = getMindMapData();
+            const needsRender = _mindmapDomDirty ||
+                _lastRenderedMindmapRef !== data ||
+                _lastRenderedActivePageId !== data.activePageId ||
+                !els.treeRoot ||
+                els.treeRoot.childElementCount === 0;
+            if (needsRender) {
+                renderTree({ skipSvg: true });
+                centerView(false, true, { skipSvg: true });
+                updateSvgConnections({ data });
+            } else {
+                centerView(false, true, { skipSvg: true });
+                updateActivePageHighlight();
+            }
         } else {
             els.panel.classList.add('hidden');
             els.btn.classList.remove('text-blue-600', 'bg-blue-50');
@@ -5122,11 +5498,14 @@
         let isDragging = false;
         let startX = 0;
         let startWidth = 0;
+        let pendingWidth = null;
+        let resizerRaf = 0;
 
         els.resizer.addEventListener('mousedown', (e) => {
             isDragging = true;
             startX = e.clientX;
             startWidth = els.panel.offsetWidth;
+            pendingWidth = null;
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
             e.preventDefault();
@@ -5134,13 +5513,29 @@
 
         window.addEventListener('mousemove', (e) => {
             if (!isDragging) return;
-            const newW = Math.min(860, Math.max(280, startWidth + (e.clientX - startX)));
-            els.panel.style.width = `${newW}px`;
+            pendingWidth = Math.min(860, Math.max(280, startWidth + (e.clientX - startX)));
+            if (!resizerRaf) {
+                resizerRaf = requestAnimationFrame(() => {
+                    resizerRaf = 0;
+                    if (pendingWidth !== null) {
+                        els.panel.style.width = `${pendingWidth}px`;
+                        pendingWidth = null;
+                    }
+                });
+            }
         });
 
         window.addEventListener('mouseup', () => {
             if (isDragging) {
                 isDragging = false;
+                if (resizerRaf) {
+                    cancelAnimationFrame(resizerRaf);
+                    resizerRaf = 0;
+                }
+                if (pendingWidth !== null) {
+                    els.panel.style.width = `${pendingWidth}px`;
+                    pendingWidth = null;
+                }
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
                 localStorage.setItem('reader_mindmap_width', els.panel.offsetWidth);
@@ -5304,10 +5699,10 @@
                     zoomAt(currentZoom * factor, mouseX, mouseY);
                 } else {
                     // 若光标悬停在横向可滚动的公式/节点正文上方，且用户正在横向滚动，优先由该节点横向滚动
-                    const scrollable = e.target.closest('.mm-card-body, .katex-display, .katex');
-                    if (scrollable && scrollable.scrollWidth > scrollable.clientWidth) {
-                        const delta = (Math.abs(e.deltaX) > Math.abs(e.deltaY)) ? e.deltaX : (e.shiftKey ? e.deltaY : 0);
-                        if (delta !== 0) {
+                    const delta = (Math.abs(e.deltaX) > Math.abs(e.deltaY)) ? e.deltaX : (e.shiftKey ? e.deltaY : 0);
+                    if (delta !== 0) {
+                        const scrollable = e.target.closest('.mm-card-body, .katex-display, .katex');
+                        if (scrollable && scrollable.scrollWidth > scrollable.clientWidth) {
                             const canScrollLeft = scrollable.scrollLeft > 0;
                             const canScrollRight = scrollable.scrollLeft < (scrollable.scrollWidth - scrollable.clientWidth - 1);
                             if ((delta < 0 && canScrollLeft) || (delta > 0 && canScrollRight)) {
@@ -5386,7 +5781,7 @@
                     }
                     if (mergePreviewFrame === null) mergePreviewFrame = requestAnimationFrame(() => {
                         mergePreviewFrame = null;
-                        updateSvgConnections();
+                        updateInteractivePreviewPaths();
                     });
                 }
 
@@ -5395,25 +5790,28 @@
                     reparentMouseX = e.clientX;
                     reparentMouseY = e.clientY;
                     const target = e.target.closest?.('#mindmap-tree-root .mm-card');
-                    const data = getMindMapData();
-                    const srcNode = findNodeInTree(data, reparentingSourceNodeId);
                     const rawTargetId = target && target.dataset.id !== reparentingSourceNodeId ? target.dataset.id : null;
-                    const validTargetId = (rawTargetId && !(srcNode && isNodeInSubtree(srcNode, rawTargetId))) ? rawTargetId : null;
-                    if (validTargetId !== reparentingTargetNodeId) {
-                        reparentingTargetNodeId = validTargetId;
-                        document.querySelectorAll('.mm-reparent-target').forEach(card => card.classList.remove('mm-reparent-target'));
-                        if (validTargetId && target) target.classList.add('mm-reparent-target');
-                        const hint = document.getElementById('mm-reparent-target-hint');
-                        if (hint) {
-                            const tNode = validTargetId && findNodeInTree(data, validTargetId);
-                            hint.textContent = tNode
-                                ? `点击挂载为「${(tNode.text || '目标节点').slice(0, 22)}」的子节点`
-                                : (rawTargetId ? '不可挂载到自身的子孙节点下' : '直接点击画布上的新父节点完成挂载 · Alt+↑/↓ 调整同级顺序 · Esc 取消');
+                    if (rawTargetId !== lastRawReparentTargetId) {
+                        lastRawReparentTargetId = rawTargetId;
+                        const data = getMindMapData();
+                        const srcNode = rawTargetId ? findNodeInTree(data, reparentingSourceNodeId) : null;
+                        const validTargetId = (rawTargetId && !(srcNode && isNodeInSubtree(srcNode, rawTargetId))) ? rawTargetId : null;
+                        if (validTargetId !== reparentingTargetNodeId || rawTargetId) {
+                            reparentingTargetNodeId = validTargetId;
+                            document.querySelectorAll('.mm-reparent-target').forEach(card => card.classList.remove('mm-reparent-target'));
+                            if (validTargetId && target) target.classList.add('mm-reparent-target');
+                            const hint = document.getElementById('mm-reparent-target-hint');
+                            if (hint) {
+                                const tNode = validTargetId && findNodeInTree(data, validTargetId);
+                                hint.textContent = tNode
+                                    ? `点击挂载为「${(tNode.text || '目标节点').slice(0, 22)}」的子节点`
+                                    : (rawTargetId ? '不可挂载到自身的子孙节点下' : '直接点击画布上的新父节点完成挂载 · Alt+↑/↓ 调整同级顺序 · Esc 取消');
+                            }
                         }
                     }
                     if (reparentPreviewFrame === null) reparentPreviewFrame = requestAnimationFrame(() => {
                         reparentPreviewFrame = null;
-                        updateSvgConnections();
+                        updateInteractivePreviewPaths();
                     });
                 }
 
@@ -5783,6 +6181,10 @@
         selectedNodeId = null;
         selectedNodeIds.clear();
         draggingNodeId = null;
+        draggingNodeObj = null;
+        _lastNormalizedMindmapData = null;
+        _mindmapDomDirty = true;
+        _svgLayoutCache = null;
         stopInteractiveMergeMode();
         stopInteractiveReparentMode();
         closeAllPopovers();
