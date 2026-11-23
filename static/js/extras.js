@@ -731,11 +731,6 @@ function renderSnippetsSidebar() {
 
     const snippets = state.annotations['snippets'] || [];
 
-    const header = document.createElement('div');
-    header.className = 'text-xs text-gray-500 px-2 py-2 mb-2 bg-orange-50 border border-orange-100 rounded flex items-center gap-2';
-    header.innerHTML = '<i class="ph-fill ph-info text-orange-400 text-lg"></i> <span>点击素材即可<b>空降</b>至屏幕中央</span>';
-    list.appendChild(header);
-
     if (snippets.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'text-center text-gray-400 text-sm mt-8 p-4';

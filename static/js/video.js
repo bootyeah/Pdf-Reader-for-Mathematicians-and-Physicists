@@ -6,7 +6,7 @@
 //       - 原生 <video controls> 提供播放/进度/音量/全屏。
 //       - 头部提供：打开视频 / 上一个与下一个 / 字幕 / 倍速(0.5x–3.0x) / 关闭。
 //       - 框选放大：锁定播放器比例，悬停原画预览可拖动选区，顶部按钮取消。
-//       - 快捷键：F9 唤出/收起；单按 Shift 折叠/展开；Z 减速 / X 加速（±0.1x）。
+//       - 快捷键：F9 唤出/收起；单按 Shift 折叠/展开；悬停视频窗口时 Z 减速 / X 加速（±0.1x）。
 // 依赖：无（自包含 IIFE，DOM 惰性创建，遵循 dictionary.js 的模块范式）。
 // 说明：本地服务选择视频后登记同目录播放列表，支持 HTTP Range 流式读取；
 //       B 站扫码登录与清晰度通过本机服务处理，视频复用原生播放器与框选放大。
@@ -85,11 +85,9 @@
     // 悬浮播放器首次居中显示时的 top 下限，避免初始打开时压住顶栏
     const HEADER_HEIGHT = 72;
     function getHeaderHeight() {
-        if (document.getElementById('main-toolbar')) {
-            return document.body.classList.contains('toolbar-collapsed') ? 12 : HEADER_HEIGHT;
-        }
-        const h = document.querySelector('header');
-        return h ? h.offsetHeight : HEADER_HEIGHT;
+        if (document.body.classList.contains('toolbar-collapsed')) return 12;
+        const h = document.getElementById('main-toolbar') || document.querySelector('header');
+        return (h && h.offsetHeight) ? h.offsetHeight : HEADER_HEIGHT;
     }
 
     // 倍速边界（以 0.1 为步进的十分位整数表示，避免浮点误差累积）
@@ -613,7 +611,7 @@
             shiftCollapsePending = false;
         });
 
-        // 快捷键支持
+        // 快捷键支持（捕获阶段处理悬停视频窗口时的 Z/X 倍速，避免与 PDF 批注快捷键 Z/X 冲突）
         document.addEventListener('keydown', function (e) {
             const isTyping = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable);
 
@@ -626,24 +624,23 @@
             if (isTyping || e.ctrlKey || e.metaKey || e.altKey) return;
             if (!panelVisible || !hasLoadedVideo()) return;
 
-            // Z / X 倍速微调（全局有效）
-            if (e.key === 'z' || e.key === 'Z') {
-                e.preventDefault();
-                if (document.activeElement && typeof document.activeElement.blur === 'function') {
-                    document.activeElement.blur();
-                }
-                setRateTenths(currentTenths() - 1);
-            } else if (e.key === 'x' || e.key === 'X') {
-                e.preventDefault();
-                if (document.activeElement && typeof document.activeElement.blur === 'function') {
-                    document.activeElement.blur();
-                }
-                setRateTenths(currentTenths() + 1);
-            }
-
-            // 悬停在播放器上时的快捷控制（避免与阅读器滚动冲突）
+            // 悬停在播放器上时的快捷控制（避免与阅读器批注快捷键 Z/X 及滚动冲突）
             if (isMouseOverPanel && panelVisible && !isCollapsed) {
-                if (e.code === 'Space') {
+                if (e.key === 'z' || e.key === 'Z') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+                        document.activeElement.blur();
+                    }
+                    setRateTenths(currentTenths() - 1);
+                } else if (e.key === 'x' || e.key === 'X') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+                        document.activeElement.blur();
+                    }
+                    setRateTenths(currentTenths() + 1);
+                } else if (e.code === 'Space') {
                     e.preventDefault();
                     if (video.paused) {
                         video.play();
@@ -670,7 +667,7 @@
                     showHud('音量 ' + Math.round(video.volume * 100) + '%');
                 }
             }
-        });
+        }, true);
     }
 
     function isTypingTarget(target) {

@@ -369,9 +369,10 @@ function pinnedPdfPages() {
     return pinned;
 }
 function queuePdfWindowRefresh() {
+    if (state.toolbarTransitioning) return;
     if (!pdfWindowFrame) pdfWindowFrame = requestAnimationFrame(() => {
         pdfWindowFrame = 0;
-        refreshPdfRenderWindow(true);
+        if (!state.toolbarTransitioning) refreshPdfRenderWindow(true);
     });
 }
 els.container.addEventListener('scroll', () => {
@@ -382,11 +383,14 @@ els.container.addEventListener('scroll', () => {
     lastPdfViewportHeight = ch;
     queuePdfWindowRefresh();
 }, { passive: true });
+let smallHeightRefreshTimer = 0;
 new ResizeObserver(() => {
     if (!state.pdfDoc) return;
+    if (state.toolbarTransitioning) return;
     const nextWidth = els.pagesContainer.clientWidth;
     const nextHeight = els.container.clientHeight;
     const widthChanged = nextWidth !== pdfWindowWidth;
+    const heightDelta = Math.abs(nextHeight - lastPdfViewportHeight);
     const heightChanged = nextHeight !== lastPdfViewportHeight;
     if (widthChanged) {
         if (lastPdfWindowScale === state.scale && !state.isZooming && pageWrappers.size > 0) {
@@ -397,7 +401,17 @@ new ResizeObserver(() => {
     }
     if (heightChanged || pageWrappers.size === 0) {
         lastPdfViewportHeight = nextHeight;
-        queuePdfWindowRefresh();
+        if (!widthChanged && pageWrappers.size > 0 && heightDelta > 0 && heightDelta < 240) {
+            clearTimeout(smallHeightRefreshTimer);
+            smallHeightRefreshTimer = setTimeout(() => {
+                smallHeightRefreshTimer = 0;
+                queuePdfWindowRefresh();
+            }, 140);
+        } else {
+            clearTimeout(smallHeightRefreshTimer);
+            smallHeightRefreshTimer = 0;
+            queuePdfWindowRefresh();
+        }
     }
 }).observe(els.container);
 

@@ -32,11 +32,9 @@
     const MIN_H = 240;
     const HEADER_HEIGHT = 72; // 与主界面顶栏保持安全间距
     function getHeaderHeight() {
-        if (document.getElementById('main-toolbar')) {
-            return document.body.classList.contains('toolbar-collapsed') ? 12 : HEADER_HEIGHT;
-        }
-        const h = document.querySelector('header');
-        return h ? h.offsetHeight : HEADER_HEIGHT;
+        if (document.body.classList.contains('toolbar-collapsed')) return 12;
+        const h = document.getElementById('main-toolbar') || document.querySelector('header');
+        return (h && h.offsetHeight) ? h.offsetHeight : HEADER_HEIGHT;
     }
 
     // 内部 DOM 引用

@@ -1217,8 +1217,8 @@
     }
 
     // 自由合流（Converge）：将并行分支、多选子节点或推演阶段汇合至下游节点
-    function convergeBranches(nodeId) {
-        if (selectedNodeIds.size > 1) {
+    function convergeBranches(nodeId, options = {}) {
+        if (!options?.forceFork && selectedNodeIds.size > 1) {
             convergeNodesToNext(Array.from(selectedNodeIds));
             return;
         }
@@ -2290,6 +2290,7 @@
                 </div>
                 <button type="button" id="mm-pop-close" class="mm-pop-close-btn" aria-label="关闭连接面板"><i class="ph ph-x"></i></button>
             </div>
+            ${canConvergeFork ? '<button type="button" id="mm-pop-converge-fork" class="mm-connect-secondary mm-connect-fork-quick"><i class="ph ph-arrows-merge"></i> 合流当前并行分支</button>' : ''}
             <div class="mm-pop-tabs" role="tablist" aria-label="连接方式">
                 <button type="button" role="tab" data-mode="link" class="mm-pop-tab ${mode === 'link' ? 'is-active' : ''}" aria-selected="${mode === 'link'}">连线</button>
                 <button type="button" role="tab" data-mode="converge" class="mm-pop-tab ${mode === 'converge' ? 'is-active' : ''}" aria-selected="${mode === 'converge'}">合流</button>
@@ -2307,7 +2308,6 @@
             </div>
             <div id="mm-merge-cand-list" class="mm-connect-list custom-scrollbar"></div>
             <button type="button" id="mm-pop-converge-next" class="mm-connect-primary"></button>
-            ${canConvergeFork ? '<button type="button" id="mm-pop-converge-fork" class="mm-connect-secondary"><i class="ph ph-git-merge"></i> 合流当前并行分支</button>' : ''}
             <div id="mm-connect-existing" style="display:none;"></div>`;
 
         const list = pop.querySelector('#mm-merge-cand-list');
@@ -2409,7 +2409,7 @@
             startInteractiveMergeMode([...sources]);
         };
         const fork = pop.querySelector('#mm-pop-converge-fork');
-        if (fork) fork.onclick = () => { closeAllPopovers(); convergeBranches(nodeId); };
+        if (fork) fork.onclick = () => { closeAllPopovers(); convergeBranches(nodeId, { forceFork: true }); };
 
         const links = [];
         getIncomingMergeSources(data, nodeId).forEach(src => links.push({
@@ -2790,6 +2790,9 @@
             `;
         }
 
+        const hasForkTracks = Array.isArray(node.branches) && node.branches.some(t => Array.isArray(t) && t.length > 0);
+        const canConvergeFork = isVerticalMain && (hasForkTracks || res?.containerType === 'fork-track');
+
         if (isVerticalMain) {
             html += `
                 <div class="mm-menu-item" data-action="fork-branch">
@@ -2797,6 +2800,13 @@
                     <span class="mm-menu-shortcut">Shift+Enter</span>
                 </div>
             `;
+            if (canConvergeFork) {
+                html += `
+                    <div class="mm-menu-item font-medium text-indigo-700" data-action="converge-fork">
+                        <div class="menu-left"><i class="ph ph-arrows-merge text-indigo-600"></i><span>合流并行分支为主节点</span></div>
+                    </div>
+                `;
+            }
         }
 
         html += `
@@ -2889,6 +2899,7 @@
             if (act === 'converge-multi') convergeNodesToNext(Array.from(selectedNodeIds));
             else if (act === 'merge-multi-interactive') startInteractiveMergeMode(Array.from(selectedNodeIds));
             else if (act === 'fork-branch') forkNodeBranch(nodeId);
+            else if (act === 'converge-fork') convergeBranches(nodeId, { forceFork: true });
             else if (act === 'add-main-chain') addMainChain();
             else if (act === 'bind-current') {
                 if (node.page === curReadingPage) {
@@ -3436,6 +3447,12 @@
         const forkLabel = options.forkLabel || null;
         const isLateralFork = !!options.isLateralFork;
         const hasForkBranches = Array.isArray(node.branches) && node.branches.some(t => Array.isArray(t) && t.length > 0);
+        const hasChildren = node.children && node.children.length > 0;
+        const ownForkHasDownstream = isRoot
+            ? (!node.collapsed && hasChildren)
+            : Boolean(options.hasDownstream);
+        const ownForkNeedsConverge = (isRoot || isSpine) && hasForkBranches && (node.forkConverge === false || !ownForkHasDownstream);
+        const showDirectConvergeAct = ownForkNeedsConverge || ((isRoot || isSpine) && Boolean(options.parentForkNeedsConverge));
         const data = options.data || getMindMapData();
         const renderIndex = options.renderIndex || null;
         const incomingCount = renderIndex
@@ -3778,6 +3795,20 @@
                 forkNodeBranch(node.id);
             };
             actions.appendChild(forkActBtn);
+
+            if (showDirectConvergeAct) {
+                const convergeForkBtn = document.createElement('button');
+                convergeForkBtn.type = 'button';
+                convergeForkBtn.className = 'mm-act-btn mm-act-converge-fork';
+                convergeForkBtn.title = '合流当前并行分支为主节点';
+                convergeForkBtn.setAttribute('aria-label', '合流当前并行分支为主节点');
+                convergeForkBtn.innerHTML = '<i class="ph ph-arrows-merge"></i>';
+                convergeForkBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    convergeBranches(node.id, { forceFork: true });
+                };
+                actions.appendChild(convergeForkBtn);
+            }
         }
 
         // 合并连线 / 汇合到其他节点
@@ -3861,7 +3892,6 @@
         cardWrapper.appendChild(quickAddRight);
 
         // 折叠/展开胶囊按钮
-        const hasChildren = node.children && node.children.length > 0;
         const hasLateralForkSub = !isRoot && !isSpine && hasForkBranches;
         if ((hasChildren || hasLateralForkSub) && !isRoot) {
             cardWrapper.classList.add('has-children', 'has-toggle');
@@ -3893,7 +3923,12 @@
             if (isRoot) {
                 childrenRow.className = 'mm-children-row mm-spine-column';
                 node.children.forEach((child, idx) => {
-                    childrenRow.appendChild(createBranchDOM(child, node, 1, idx, { chainIdx, data, renderIndex }));
+                    childrenRow.appendChild(createBranchDOM(child, node, 1, idx, {
+                        chainIdx,
+                        data,
+                        renderIndex,
+                        hasDownstream: idx < node.children.length - 1
+                    }));
                 });
             } else {
                 childrenRow.className = 'mm-children-row mm-lateral-column';
@@ -3912,6 +3947,7 @@
             forkRow.className = 'mm-fork-branches-row';
             forkRow.dataset.forkOwnerId = node.id;
 
+            const forkDownstreamActive = ownForkHasDownstream && node.forkConverge !== false;
             node.branches.forEach((track, tIdx) => {
                 if (!Array.isArray(track) || track.length === 0) return;
                 const trackCol = document.createElement('div');
@@ -3925,7 +3961,9 @@
                         chainIdx,
                         forkLabel: label,
                         data,
-                        renderIndex
+                        renderIndex,
+                        hasDownstream: (bIdx < track.length - 1) || forkDownstreamActive,
+                        parentForkNeedsConverge: ownForkNeedsConverge
                     }));
                 });
 

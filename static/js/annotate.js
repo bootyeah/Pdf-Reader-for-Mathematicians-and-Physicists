@@ -758,11 +758,11 @@
                     if(tool === 'highlight') {
                         if (state.currentTool === 'highlight') {
                             btn.classList.add('active', 'bg-yellow-50', 'text-yellow-600', 'border-yellow-200');
-                            btn.title = "文本高亮 (再点切换为自由高亮块)";
+                            btn.title = "文本高亮 (再点切换为自由高亮块 · Z)";
                             btn.innerHTML = `<i class="ph ph-highlighter text-[22px]"></i>`;
                         } else if (state.currentTool === 'highlight-block') {
                             btn.classList.add('active', 'bg-gray-100', 'text-gray-800', 'border-gray-300');
-                            btn.title = "自由高亮块 (再点关闭)";
+                            btn.title = "自由高亮块 (再点关闭 · Z)";
                             // 使用加粗线段代表宽体高亮块
                             btn.innerHTML = `<svg viewBox="0 0 24 24" class="w-[22px] h-[22px]" stroke="currentColor" stroke-width="7" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
                         }
@@ -778,11 +778,11 @@
                     if(tool === 'underline') {
                         if (state.currentTool === 'underline') {
                             btn.classList.add('active', 'bg-red-50', 'text-red-600', 'border-red-200');
-                            btn.title = "文本下划线 (再点切换为任意直线)";
+                            btn.title = "文本下划线 (再点切换为任意直线 · X)";
                             btn.innerHTML = `<i class="ph ph-text-underline text-[22px]"></i>`;
                         } else if (state.currentTool === 'line') {
                             btn.classList.add('active', 'bg-gray-100', 'text-gray-800', 'border-gray-300');
-                            btn.title = "任意直线 (再点关闭)";
+                            btn.title = "任意直线 (再点关闭 · X)";
                             btn.innerHTML = `<svg viewBox="0 0 24 24" class="w-[22px] h-[22px]" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="4" y1="20" x2="20" y2="4"/></svg>`;
                         }
                     }
@@ -791,15 +791,15 @@
                     if(tool === 'parenthesis') {
                         if (state.currentTool === 'parenthesis') {
                             btn.classList.add('active', 'bg-purple-50', 'text-purple-600', 'border-purple-200');
-                            btn.title = "括号标注 (再点切换为矩形框)";
+                            btn.title = "括号标注 (再点切换为矩形框 · C)";
                             btn.innerHTML = `<i class="ph ph-brackets-round text-[22px]"></i>`;
                         } else if (state.currentTool === 'rect') {
                             btn.classList.add('active', 'bg-gray-100', 'text-gray-800', 'border-gray-300');
-                            btn.title = "矩形框 (再点切换为自由括号)";
+                            btn.title = "矩形框 (再点切换为自由括号 · C)";
                             btn.innerHTML = `<svg viewBox="0 0 24 24" class="w-[22px] h-[22px]" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/></svg>`;
                         } else if (state.currentTool === 'free-parenthesis') {
                             btn.classList.add('active', 'bg-gray-100', 'text-gray-800', 'border-gray-300');
-                            btn.title = "自由跨行括号 (再点关闭)";
+                            btn.title = "自由跨行括号 (再点关闭 · C)";
                             // 使用带有错位的左右括号图标暗示跨行功能
                             btn.innerHTML = `<svg viewBox="0 0 24 24" class="w-[22px] h-[22px]" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round"><path d="M 9 4 Q 4 12 9 20 M 15 8 Q 20 16 15 24"/></svg>`;
                         }
@@ -848,7 +848,7 @@
                         btn.innerHTML = '<i class="ph ph-text-t text-[22px]"></i>';
                     }
                     if(tool === 'highlight') {
-                        btn.title = "高亮 (点击切换 文本/自由块)";
+                        btn.title = "高亮 (点击切换 文本/自由块 · Z)";
                         btn.innerHTML = `<i class="ph ph-highlighter text-[22px]"></i>`;
                     }
                     if(tool === 'arrow') {
@@ -866,11 +866,11 @@
                         btn.innerHTML = getMarkerSvg(tool, sizeClass);
                     }
                     if(tool === 'underline') {
-                        btn.title = "下划线 (点击切换 下划线/直线)";
+                        btn.title = "下划线 (点击切换 下划线/直线 · X)";
                         btn.innerHTML = `<i class="ph ph-text-underline text-[22px]"></i>`;
                     }
                     if(tool === 'parenthesis') {
-                        btn.title = "括号标注 (点击切换 括号/矩形框)";
+                        btn.title = "括号标注 (点击切换 括号/矩形框/自由括号 · C)";
                         btn.innerHTML = `<i class="ph ph-brackets-round text-[22px]"></i>`;
                     }
                     
@@ -1239,8 +1239,93 @@
 
         function changeZoom(delta) { updateZoom(state.scale + delta); }
 
+        let toolbarTransitionTimer = 0;
+        let lastPageHudToolbarHeight = -1;
+        const TOOLBAR_SCALE_STORAGE_KEY = 'pdf_reader_toolbar_scale_v2';
+        const TOOLBAR_SCALE_STEPS = [0.84, 0.92, 1, 1.08, 1.16, 1.24, 1.32];
+        const TOOLBAR_DEFAULT_SCALE_IDX = 4; // 默认尺寸为 1.16（原版默认下连按两下 + 的尺寸）
+        const TOOLBAR_DEFAULT_SCALE = TOOLBAR_SCALE_STEPS[TOOLBAR_DEFAULT_SCALE_IDX];
+        let toolbarScaleIdx = TOOLBAR_DEFAULT_SCALE_IDX;
+
+        function getToolbarScale() {
+            return TOOLBAR_SCALE_STEPS[toolbarScaleIdx] || TOOLBAR_DEFAULT_SCALE;
+        }
+
+        function computeExpandedToolbarHeight() {
+            const header = document.getElementById('main-toolbar');
+            const s = getToolbarScale();
+            if (header && header.classList.contains('toolbar-wrap-3')) {
+                return header.offsetHeight || Math.round(48 + 114 * s);
+            }
+            if (header && header.classList.contains('toolbar-wrap-2')) {
+                return Math.round(37 + 78 * s);
+            }
+            return Math.round(26 + 42 * s);
+        }
+
+        function syncPageHudOffset() {
+            const hud = els.pageHud;
+            if (!hud) return;
+            const h = document.body.classList.contains('toolbar-collapsed') ? 12 : computeExpandedToolbarHeight();
+            if (h !== lastPageHudToolbarHeight) {
+                lastPageHudToolbarHeight = h;
+                hud.style.setProperty('--toolbar-height', `${h}px`);
+            }
+        }
+
+        function syncToolbarResponsiveMode() {
+            const header = document.getElementById('main-toolbar');
+            if (!header) return;
+            const vw = window.innerWidth || document.documentElement.clientWidth || 1440;
+            const s = getToolbarScale();
+            const singleRowThreshold = Math.ceil(54 + 980 * s);
+            const twoRowThreshold = Math.ceil(52 + 576 * s);
+            const wrap2 = vw < singleRowThreshold;
+            const wrap3 = vw < twoRowThreshold;
+            header.classList.toggle('toolbar-wrap-2', wrap2);
+            header.classList.toggle('toolbar-wrap-3', wrap3);
+            if (!wrap3) {
+                const targetH = wrap2 ? Math.round(37 + 78 * s) : Math.round(26 + 42 * s);
+                header.style.setProperty('--toolbar-expanded-h', `${targetH}px`);
+            } else {
+                header.style.removeProperty('--toolbar-expanded-h');
+            }
+        }
+
+        function applyToolbarScale(nextIdx, persist = true) {
+            const clamped = Math.max(0, Math.min(TOOLBAR_SCALE_STEPS.length - 1, nextIdx));
+            toolbarScaleIdx = clamped;
+            const scale = getToolbarScale();
+            const isDefault = clamped === TOOLBAR_DEFAULT_SCALE_IDX;
+            const pct = Math.round((scale / TOOLBAR_DEFAULT_SCALE) * 100);
+            const header = document.getElementById('main-toolbar');
+            if (header) {
+                header.style.setProperty('--tb-scale', String(scale));
+            }
+            const downBtn = document.getElementById('toolbar-scale-down');
+            const upBtn = document.getElementById('toolbar-scale-up');
+            const suffix = isDefault ? `${pct}% · 默认` : `${pct}% · 右键恢复默认`;
+            if (downBtn) {
+                downBtn.classList.toggle('is-default', isDefault);
+                downBtn.classList.toggle('is-limit', clamped <= 0);
+                downBtn.title = `缩小工具栏按钮 (当前 ${suffix})`;
+            }
+            if (upBtn) {
+                upBtn.classList.toggle('is-default', isDefault);
+                upBtn.classList.toggle('is-limit', clamped >= TOOLBAR_SCALE_STEPS.length - 1);
+                upBtn.title = `放大工具栏按钮 (当前 ${suffix})`;
+            }
+            if (persist) {
+                try { localStorage.setItem(TOOLBAR_SCALE_STORAGE_KEY, String(scale)); } catch (_) {}
+            }
+            syncToolbarResponsiveMode();
+            syncPageHudOffset();
+            scheduleToolbarLayoutSync();
+        }
+
         function toggleToolbarCollapsed(force) {
             state.toolbarCollapsed = typeof force === 'boolean' ? force : !state.toolbarCollapsed;
+            state.toolbarTransitioning = true;
             document.body.classList.toggle('toolbar-collapsed', state.toolbarCollapsed);
             if (els.toggleToolbarBtn) {
                 const icon = els.toggleToolbarBtn.querySelector('i');
@@ -1252,7 +1337,20 @@
                 els.toggleToolbarBtn.setAttribute('aria-label', label);
                 els.toggleToolbarBtn.setAttribute('aria-expanded', String(!state.toolbarCollapsed));
             }
-            window.dispatchEvent(new Event('resize'));
+            syncPageHudOffset();
+            if (els.emptyState && !els.emptyState.classList.contains('hidden')) {
+                updateEmptyStateGuideArrow();
+            }
+            // 在 180ms 平滑折叠过渡期间静默全部 PDF ResizeObserver 与全局 resize 重排，过渡结束后一次性同步
+            clearTimeout(toolbarTransitionTimer);
+            toolbarTransitionTimer = setTimeout(() => {
+                toolbarTransitionTimer = 0;
+                state.toolbarTransitioning = false;
+                if (els.emptyState && !els.emptyState.classList.contains('hidden')) {
+                    updateEmptyStateGuideArrow();
+                }
+                window.dispatchEvent(new Event('resize'));
+            }, 200);
         }
 
         if (els.toggleToolbarBtn) {
@@ -1261,6 +1359,184 @@
                 toggleToolbarCollapsed();
             });
         }
+
+        const toolbarScaleDownBtn = document.getElementById('toolbar-scale-down');
+        const toolbarScaleUpBtn = document.getElementById('toolbar-scale-up');
+        if (toolbarScaleDownBtn) {
+            toolbarScaleDownBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                applyToolbarScale(toolbarScaleIdx - 1, true);
+            });
+            toolbarScaleDownBtn.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                applyToolbarScale(TOOLBAR_DEFAULT_SCALE_IDX, true);
+            });
+        }
+        if (toolbarScaleUpBtn) {
+            toolbarScaleUpBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                applyToolbarScale(toolbarScaleIdx + 1, true);
+            });
+            toolbarScaleUpBtn.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                applyToolbarScale(TOOLBAR_DEFAULT_SCALE_IDX, true);
+            });
+        }
+
+        // 同步动态顶栏高度（仅作用于 #page-hud）与启示页简约引导箭头位置
+        function updateEmptyStateGuideArrow() {
+            const emptyState = els.emptyState;
+            const svg = document.getElementById('empty-state-guide-svg');
+            const cardEl = document.getElementById('empty-state-card');
+            const openBtn = els.openBtn;
+            if (!emptyState || !svg || !cardEl || !openBtn) return;
+
+            if (emptyState.classList.contains('hidden') || document.body.classList.contains('toolbar-collapsed')) {
+                svg.style.opacity = '0';
+                return;
+            }
+
+            const box = emptyState.getBoundingClientRect();
+            const card = cardEl.getBoundingClientRect();
+            const btn = openBtn.getBoundingClientRect();
+            if (box.width < 140 || box.height < 140 || btn.width < 4 || btn.height < 4) {
+                svg.style.opacity = '0';
+                return;
+            }
+
+            const x0 = (card.left + card.width / 2) - box.left;
+            const y0 = (card.bottom - box.top) + 12;
+            const xTarget = Math.max(20, Math.min(box.width - 20, (btn.left + btn.width / 2) - box.left));
+            const yEnd = Math.max(12, Math.min(card.top - box.top - 12, 16));
+
+            const availBottom = box.height - y0 - 18;
+            const dx = xTarget - x0;
+            const absDx = Math.abs(dx);
+            if (availBottom < 12 || absDx < 24) {
+                svg.style.opacity = '0';
+                return;
+            }
+
+            const drop = availBottom < 24
+                ? Math.max(12, availBottom)
+                : Math.min(44, Math.max(26, availBottom * 0.22));
+            const yTurn = y0 + drop;
+            if (yTurn - yEnd < 28) {
+                svg.style.opacity = '0';
+                return;
+            }
+
+            const dir = dx >= 0 ? 1 : -1;
+            const r = Math.min(26, absDx * 0.3, drop * 0.72, (yTurn - yEnd) * 0.25);
+            const sweep = dir > 0 ? 0 : 1;
+
+            const pathEl = document.getElementById('empty-state-guide-path');
+            const arrowEl = document.getElementById('empty-state-guide-arrow');
+            const dotEl = document.getElementById('empty-state-guide-dot');
+            const gradEl = document.getElementById('empty-guide-grad');
+
+            svg.setAttribute('viewBox', `0 0 ${box.width.toFixed(1)} ${box.height.toFixed(1)}`);
+            if (gradEl) {
+                gradEl.setAttribute('gradientUnits', 'userSpaceOnUse');
+                gradEl.setAttribute('x1', x0.toFixed(1));
+                gradEl.setAttribute('y1', y0.toFixed(1));
+                gradEl.setAttribute('x2', xTarget.toFixed(1));
+                gradEl.setAttribute('y2', yEnd.toFixed(1));
+            }
+            if (dotEl) {
+                dotEl.setAttribute('cx', x0.toFixed(1));
+                dotEl.setAttribute('cy', y0.toFixed(1));
+            }
+            if (pathEl) {
+                const d = [
+                    `M ${x0.toFixed(1)} ${y0.toFixed(1)}`,
+                    `L ${x0.toFixed(1)} ${(yTurn - r).toFixed(1)}`,
+                    `A ${r.toFixed(1)} ${r.toFixed(1)} 0 0 ${sweep} ${(x0 + dir * r).toFixed(1)} ${yTurn.toFixed(1)}`,
+                    `L ${(xTarget - dir * r).toFixed(1)} ${yTurn.toFixed(1)}`,
+                    `A ${r.toFixed(1)} ${r.toFixed(1)} 0 0 ${sweep} ${xTarget.toFixed(1)} ${(yTurn - r).toFixed(1)}`,
+                    `L ${xTarget.toFixed(1)} ${(yEnd + 1).toFixed(1)}`
+                ].join(' ');
+                pathEl.setAttribute('d', d);
+            }
+            if (arrowEl) {
+                const headW = 5.5;
+                const headH = 7;
+                arrowEl.setAttribute(
+                    'd',
+                    `M ${(xTarget - headW).toFixed(1)} ${(yEnd + headH).toFixed(1)} L ${xTarget.toFixed(1)} ${yEnd.toFixed(1)} L ${(xTarget + headW).toFixed(1)} ${(yEnd + headH).toFixed(1)}`
+                );
+            }
+            svg.style.opacity = '1';
+        }
+
+        let toolbarLayoutRaf = 0;
+        function scheduleToolbarLayoutSync() {
+            if (toolbarLayoutRaf) return;
+            toolbarLayoutRaf = requestAnimationFrame(() => {
+                toolbarLayoutRaf = 0;
+                syncToolbarResponsiveMode();
+                syncPageHudOffset();
+                if (els.emptyState && !els.emptyState.classList.contains('hidden')) {
+                    updateEmptyStateGuideArrow();
+                }
+            });
+        }
+        window.updateEmptyStateGuideArrow = updateEmptyStateGuideArrow;
+        window.applyToolbarScale = applyToolbarScale;
+
+        // 恢复已保存的工具栏缩放比例（默认 100%）
+        (function initToolbarScale() {
+            let savedScale = NaN;
+            try { savedScale = parseFloat(localStorage.getItem(TOOLBAR_SCALE_STORAGE_KEY)); } catch (_) {}
+            let idx = TOOLBAR_DEFAULT_SCALE_IDX;
+            if (Number.isFinite(savedScale)) {
+                let bestDist = Infinity;
+                TOOLBAR_SCALE_STEPS.forEach((step, i) => {
+                    const dist = Math.abs(step - savedScale);
+                    if (dist < bestDist) { bestDist = dist; idx = i; }
+                });
+            }
+            applyToolbarScale(idx, false);
+        })();
+
+        window.addEventListener('resize', scheduleToolbarLayoutSync);
+        window.addEventListener('load', scheduleToolbarLayoutSync);
+        if (typeof ResizeObserver === 'function') {
+            // 仅在启示页可见时监听容器尺寸；打开 PDF 后不再挂任何顶栏/容器 ResizeObserver，确保 180ms 折叠过渡期间零回调开销
+            let emptyStateRo = null;
+            const syncEmptyStateObserver = () => {
+                const visible = els.emptyState && !els.emptyState.classList.contains('hidden');
+                if (visible && !emptyStateRo) {
+                    emptyStateRo = new ResizeObserver(scheduleToolbarLayoutSync);
+                    if (els.container) emptyStateRo.observe(els.container);
+                    const emptyCardEl = document.getElementById('empty-state-card');
+                    if (emptyCardEl) emptyStateRo.observe(emptyCardEl);
+                } else if (!visible && emptyStateRo) {
+                    emptyStateRo.disconnect();
+                    emptyStateRo = null;
+                }
+            };
+            syncEmptyStateObserver();
+            if (els.emptyState && typeof MutationObserver === 'function') {
+                new MutationObserver(() => {
+                    syncEmptyStateObserver();
+                    scheduleToolbarLayoutSync();
+                }).observe(els.emptyState, {
+                    attributes: true,
+                    attributeFilter: ['class']
+                });
+            }
+        }
+        if (els.sidebar) {
+            els.sidebar.addEventListener('transitionend', () => {
+                if (els.emptyState && !els.emptyState.classList.contains('hidden')) {
+                    scheduleToolbarLayoutSync();
+                }
+            });
+        }
+        scheduleToolbarLayoutSync();
 
         document.addEventListener('keydown', (e) => {
             if (e.defaultPrevented || e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.keyCode === 229) return;

@@ -30,11 +30,9 @@
     const PDF_THUMB_CACHE_MAX = 150;
     const HEADER_HEIGHT = 72;          // 顶栏高度（与 LOCALPdfReader.html 的 h-[72px] 一致）
     function getHeaderHeight() {
-        if (document.getElementById('main-toolbar')) {
-            return document.body.classList.contains('toolbar-collapsed') ? 12 : HEADER_HEIGHT;
-        }
-        const h = document.querySelector('header');
-        return h ? h.offsetHeight : HEADER_HEIGHT;
+        if (document.body.classList.contains('toolbar-collapsed')) return 12;
+        const h = document.getElementById('main-toolbar') || document.querySelector('header');
+        return (h && h.offsetHeight) ? h.offsetHeight : HEADER_HEIGHT;
     }
 
     // TikZ：公共渲染层由 render.js 暴露（动态获取，确保脚本加载时序稳健）

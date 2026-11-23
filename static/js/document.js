@@ -189,23 +189,23 @@
             if ((e.ctrlKey || e.metaKey) && e.key === 'f') { e.preventDefault(); toggleSearch(); }
             if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); performSave(); }
 
-            // 只有在非打字状态，且没有按住 Ctrl/Alt/Meta 等修饰键时才触发
-            if (!isTyping && !e.isComposing && e.keyCode !== 229 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            // 只有在非打字状态、未被其他组件拦截，且没有按住 Ctrl/Alt/Meta 等修饰键时才触发
+            if (!e.defaultPrevented && !isTyping && !e.isComposing && e.keyCode !== 229 && !e.ctrlKey && !e.metaKey && !e.altKey) {
                 const key = e.key.toLowerCase(); // 兼容大小写（开启 CapsLock 也能用）
                 
-                if (key === 'h') {
+                if (key === 'z' && !e.repeat) {
                     e.preventDefault();
                     const highlightBtn = document.querySelector('button[data-tool="highlight"]');
-                    if (highlightBtn) highlightBtn.click();
+                    if (highlightBtn) highlightBtn.click(); // 多次按下在高亮/自由高亮块/关闭间切换
                 }
                 
-                if (key === 'u') {
+                if (key === 'x' && !e.repeat) {
                     e.preventDefault();
                     const underlineBtn = document.querySelector('button[data-tool="underline"]');
-                    if (underlineBtn) underlineBtn.click(); // 多次按下会自动在下划线/直线间切换，完美继承原生逻辑
+                    if (underlineBtn) underlineBtn.click(); // 多次按下会自动在下划线/直线/关闭间切换
                 }
 
-                if (key === 'b' && !e.repeat) {
+                if (key === 'c' && !e.repeat) {
                     e.preventDefault();
                     const parenthesisBtn = document.querySelector('button[data-tool="parenthesis"]');
                     if (parenthesisBtn) parenthesisBtn.click(); // 多次按下在括号/矩形框/自由括号/关闭间切换

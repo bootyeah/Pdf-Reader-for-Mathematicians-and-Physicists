@@ -154,15 +154,34 @@ window.addEventListener('load', () => {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', code: 'KeyY', bubbles: true, cancelable: true }));
         assert(!document.body.classList.contains('show-sidecars'), 'Pressing Y again should fold sidecar');
 
-        // 7. Parenthesis tool (B cycles parenthesis -> rect -> free-parenthesis -> cursor)
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', bubbles: true, cancelable: true }));
-        assert(state.currentTool === 'parenthesis', '1st B should select parenthesis');
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', bubbles: true, cancelable: true }));
-        assert(state.currentTool === 'rect', '2nd B should switch to rect');
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', bubbles: true, cancelable: true }));
-        assert(state.currentTool === 'free-parenthesis', '3rd B should switch to free-parenthesis');
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', bubbles: true, cancelable: true }));
-        assert(state.currentTool === 'cursor', '4th B should return to cursor');
+        // 7. Annotation shortcuts: Z (highlight), X (underline), C (parenthesis); old H/U/B must not trigger
+        for (const oldKey of [['h', 'KeyH'], ['u', 'KeyU'], ['b', 'KeyB']]) {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: oldKey[0], code: oldKey[1], bubbles: true, cancelable: true }));
+            assert(state.currentTool === 'cursor', 'Old shortcut ' + oldKey[0].toUpperCase() + ' must not switch tool');
+        }
+
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', code: 'KeyZ', bubbles: true, cancelable: true }));
+        assert(state.currentTool === 'highlight', '1st Z should select highlight');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', code: 'KeyZ', bubbles: true, cancelable: true }));
+        assert(state.currentTool === 'highlight-block', '2nd Z should switch to highlight-block');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', code: 'KeyZ', bubbles: true, cancelable: true }));
+        assert(state.currentTool === 'cursor', '3rd Z should return to cursor');
+
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', code: 'KeyX', bubbles: true, cancelable: true }));
+        assert(state.currentTool === 'underline', '1st X should select underline');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', code: 'KeyX', bubbles: true, cancelable: true }));
+        assert(state.currentTool === 'line', '2nd X should switch to line');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', code: 'KeyX', bubbles: true, cancelable: true }));
+        assert(state.currentTool === 'cursor', '3rd X should return to cursor');
+
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', bubbles: true, cancelable: true }));
+        assert(state.currentTool === 'parenthesis', '1st C should select parenthesis');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', bubbles: true, cancelable: true }));
+        assert(state.currentTool === 'rect', '2nd C should switch to rect');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', bubbles: true, cancelable: true }));
+        assert(state.currentTool === 'free-parenthesis', '3rd C should switch to free-parenthesis');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', bubbles: true, cancelable: true }));
+        assert(state.currentTool === 'cursor', '4th C should return to cursor');
 
         document.title = 'SHORTCUT_HINTS_ALL_OK';
     } catch (e) {

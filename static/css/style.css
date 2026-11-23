@@ -2029,7 +2029,7 @@
             border-color: #E6E2D6 !important;
         }
 /* 有界页面窗口：绝对定位允许保留选择/拖拽中的页面，而不创建全书占位节点。 */
-#pages-container.pdf-virtual-pages { display: block; position: relative; padding-bottom: 0; overflow-anchor: none; }
+#pages-container.pdf-virtual-pages { display: block; position: relative; min-height: 0; padding-bottom: 0; overflow-anchor: none; contain: style; }
 .pdf-virtual-pages > .page-wrapper { position: absolute; margin: 0; }
 .pdf-virtual-pages .link-layer { transform-origin: 0 0; }
 
@@ -6729,7 +6729,7 @@ body.eye-protection-mode .sidecar-shortcut-btn:hover {
    折叠为 12px 细条，最左侧保留侧边栏圆点按钮，其余保留内置 AI、批注工具与颜色选择原位线段条，悬停显色、按下即用
    ========================================================================= */
 #main-toolbar {
-    transition: height 0.18s ease, padding 0.18s ease;
+    transition: height 0.18s cubic-bezier(0.22, 1, 0.36, 1), padding 0.18s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 body.toolbar-collapsed #main-toolbar {
@@ -6757,7 +6757,7 @@ body.toolbar-collapsed #toolbar-file-group {
 }
 
 body.toolbar-collapsed #toolbar-left-group {
-    min-width: 38px !important;
+    min-width: calc(38px * var(--tb-scale, 1)) !important;
 }
 
 body.toolbar-collapsed #toolbar-left-group,
@@ -6808,12 +6808,12 @@ body.toolbar-collapsed #custom-color-wrapper:hover {
 }
 
 body.toolbar-collapsed #toggle-sidebar {
-    width: 38px !important;
+    width: calc(38px * var(--tb-scale, 1)) !important;
     flex-shrink: 0 !important;
 }
 
 body.toolbar-collapsed #deepseek-chat-btn {
-    width: 34px !important;
+    width: calc(34px * var(--tb-scale, 1)) !important;
 }
 
 body.toolbar-collapsed #custom-color-input {
@@ -6994,6 +6994,596 @@ body.toolbar-collapsed #search-bar {
     top: calc(100% + 8px) !important;
     transform: translateX(-50%) !important;
 }
+
+/* =========================================================================
+   思维导图并行分支一键合流优化（卡片操作栏快捷图标 + 面板置顶入口）
+   ========================================================================= */
+.mm-act-btn.mm-act-converge-fork {
+    color: #4f46e5;
+}
+
+.mm-act-btn.mm-act-converge-fork:hover {
+    background: #eef2ff;
+    color: #4338ca;
+}
+
+.mm-connect-secondary.mm-connect-fork-quick {
+    margin: 2px 0 8px;
+    background: #f5f7ff;
+    border-color: #c7d2fe;
+    color: #4338ca;
+    font-weight: 600;
+}
+
+.mm-connect-secondary.mm-connect-fork-quick:hover {
+    background: #eef2ff;
+    border-color: #818cf8;
+    color: #3730a3;
+}
+
+body.eye-protection-mode .mm-connect-secondary.mm-connect-fork-quick {
+    background: #f4efe6;
+    border-color: #d6cebe;
+    color: #374151;
+}
+
+body.eye-protection-mode .mm-connect-secondary.mm-connect-fork-quick:hover {
+    background: #ebe4d6;
+    border-color: #b8ae9b;
+}
+
+/* =========================================================================
+   启示页简约淡色引导箭头（指向右上角打开 PDF 按钮）
+   ========================================================================= */
+#empty-state-card {
+    padding: 28px 44px 26px;
+}
+
+#empty-state-card > i {
+    margin-bottom: 12px;
+}
+
+body.eye-protection-mode #empty-state-card {
+    background-color: #FAF7F2 !important;
+    border-color: #E6E2D6 !important;
+}
+
+.empty-state-guide-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+    color: #94a3b8;
+    opacity: 0;
+    transition: opacity 0.22s ease;
+    z-index: 1;
+}
+
+.empty-state-guide-path {
+    stroke: url(#empty-guide-grad);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.empty-state-guide-arrow {
+    stroke: currentColor;
+    stroke-opacity: 0.74;
+    stroke-width: 1.65;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.empty-state-guide-dot {
+    fill: currentColor;
+    fill-opacity: 0.36;
+}
+
+body.eye-protection-mode .empty-state-guide-svg {
+    color: #a89f91;
+}
+
+/* =========================================================================
+   顶部工具栏左贴齐、紧凑底边距、边角折角形缩放 (-/+) 与窄窗口自适应
+   ========================================================================= */
+#page-hud {
+    top: calc(var(--toolbar-height, 75px) + 12px);
+    transition: top 0.18s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease;
+}
+
+#search-bar,
+#outline-panel,
+#time-panel {
+    max-width: calc(100% - 16px);
+}
+
+#outline-panel,
+#time-panel {
+    transition-property: opacity, transform, visibility;
+}
+
+#main-toolbar {
+    --tb-scale: 1.16;
+    height: var(--toolbar-expanded-h, calc(26px + 42px * var(--tb-scale, 1.16)));
+    min-height: 0;
+    padding: 17px 32px 6px 16px;
+}
+
+#main-toolbar #toolbar-left-group {
+    flex: 0 0 auto;
+    margin-right: calc(10px * var(--tb-scale, 1));
+    gap: calc(8px * var(--tb-scale, 1));
+}
+
+#main-toolbar #toolbar-right-group {
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: calc(10px * var(--tb-scale, 1));
+}
+
+/* 统一以 gap 替代 Tailwind space-x，并将批注工具组自然推向右侧，使 AI 与视图控制组紧贴左侧 */
+#main-toolbar #toolbar-left-group > *,
+#main-toolbar #toolbar-right-group > :not(#toolbar-anno-group),
+#main-toolbar #toolbar-view-group > *,
+#main-toolbar #toolbar-anno-group > *,
+#main-toolbar #tool-group > *,
+#main-toolbar #color-group > *,
+#main-toolbar #toolbar-file-group > * {
+    margin-left: 0;
+}
+
+#main-toolbar #toolbar-anno-group {
+    margin-left: auto;
+    padding: calc(4px * var(--tb-scale, 1)) calc(6px * var(--tb-scale, 1));
+    gap: calc(6px * var(--tb-scale, 1));
+}
+
+#main-toolbar #toggle-sidebar {
+    width: calc(38px * var(--tb-scale, 1));
+    height: calc(38px * var(--tb-scale, 1));
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+#main-toolbar #toggle-sidebar > i {
+    font-size: calc(21px * var(--tb-scale, 1));
+}
+
+#main-toolbar #visibility-icon {
+    font-size: calc(30px * var(--tb-scale, 1));
+}
+
+#main-toolbar #deepseek-chat-btn {
+    width: calc(34px * var(--tb-scale, 1));
+    height: calc(34px * var(--tb-scale, 1));
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+#main-toolbar #deepseek-chat-btn > svg {
+    width: calc(19px * var(--tb-scale, 1));
+    height: calc(19px * var(--tb-scale, 1));
+}
+
+#main-toolbar #toolbar-view-group {
+    display: flex;
+    padding: calc(4px * var(--tb-scale, 1));
+    gap: calc(2px * var(--tb-scale, 1));
+    flex-shrink: 0;
+}
+
+#main-toolbar #toolbar-view-group > button,
+#main-toolbar #fullscreen-btn {
+    padding: calc(4px * var(--tb-scale, 1));
+}
+
+#main-toolbar #toolbar-view-group > button > i,
+#main-toolbar #fullscreen-btn > i {
+    font-size: calc(19px * var(--tb-scale, 1));
+}
+
+#main-toolbar #toolbar-view-group > div:has(> #mindmap-btn) {
+    width: calc(30px * var(--tb-scale, 1)) !important;
+    height: calc(30px * var(--tb-scale, 1)) !important;
+}
+
+#main-toolbar #mindmap-btn,
+#main-toolbar #sidecar-btn {
+    width: 50%;
+    height: 100%;
+}
+
+#main-toolbar #mindmap-btn > svg,
+#main-toolbar #sidecar-btn > svg {
+    width: calc(9.5px * var(--tb-scale, 1));
+    height: calc(19px * var(--tb-scale, 1));
+}
+
+#main-toolbar #zoom-level {
+    width: calc(38px * var(--tb-scale, 1));
+    font-size: calc(12px * var(--tb-scale, 1));
+}
+
+#main-toolbar #zoom-slider-wrapper {
+    width: calc(20px * var(--tb-scale, 1));
+    height: calc(28px * var(--tb-scale, 1));
+    margin-left: calc(2px * var(--tb-scale, 1));
+    margin-right: calc(2px * var(--tb-scale, 1));
+}
+
+#main-toolbar #zoom-slider-track {
+    height: calc(22px * var(--tb-scale, 1));
+}
+
+#main-toolbar #tool-group {
+    gap: calc(2px * var(--tb-scale, 1));
+}
+
+#main-toolbar #tool-group .tool-btn {
+    width: calc(34px * var(--tb-scale, 1));
+    height: calc(34px * var(--tb-scale, 1));
+    transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+#main-toolbar #tool-group .tool-btn > i {
+    font-size: calc(20px * var(--tb-scale, 1));
+}
+
+#main-toolbar #tool-group .tool-btn > svg {
+    width: calc(20px * var(--tb-scale, 1));
+    height: calc(20px * var(--tb-scale, 1));
+}
+
+#main-toolbar #color-group {
+    gap: calc(5px * var(--tb-scale, 1));
+    padding-left: calc(2px * var(--tb-scale, 1));
+    padding-right: calc(2px * var(--tb-scale, 1));
+}
+
+#main-toolbar #color-group .color-btn {
+    width: calc(19px * var(--tb-scale, 1));
+    height: calc(19px * var(--tb-scale, 1));
+}
+
+#main-toolbar #custom-color-wrapper {
+    width: calc(24px * var(--tb-scale, 1));
+    height: calc(24px * var(--tb-scale, 1));
+    margin-left: calc(2px * var(--tb-scale, 1));
+    transition: box-shadow 0.14s ease;
+}
+
+#main-toolbar #toolbar-file-divider {
+    height: calc(24px * var(--tb-scale, 1));
+    margin-left: calc(2px * var(--tb-scale, 1));
+    margin-right: calc(2px * var(--tb-scale, 1));
+}
+
+#main-toolbar #toolbar-file-group {
+    gap: calc(6px * var(--tb-scale, 1));
+}
+
+#main-toolbar #open-btn,
+#main-toolbar #save-status-btn {
+    width: calc(36px * var(--tb-scale, 1));
+    height: calc(36px * var(--tb-scale, 1));
+}
+
+#main-toolbar #open-btn > i,
+#main-toolbar #save-status-btn > i {
+    font-size: calc(20px * var(--tb-scale, 1));
+}
+
+#main-toolbar #quick-folders-bar {
+    width: calc(36px * var(--tb-scale, 1));
+}
+
+#main-toolbar #toggle-toolbar-btn {
+    top: calc(17px + 22px * var(--tb-scale, 1));
+    transform: translateY(-50%);
+}
+
+body.toolbar-collapsed #main-toolbar #toggle-toolbar-btn {
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+}
+
+/* 顶部工具栏底边左右最外侧边角折角形 -/+ 整体缩放按钮（默认尺寸呈深灰提示色，非默认尺寸呈浅灰） */
+#main-toolbar .toolbar-scale-bar {
+    position: absolute;
+    bottom: 0;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    background: transparent !important;
+    cursor: pointer;
+    z-index: 35;
+    outline: none;
+}
+
+#main-toolbar .toolbar-scale-down {
+    left: 0;
+}
+
+#main-toolbar .toolbar-scale-up {
+    right: 0;
+}
+
+#main-toolbar .toolbar-scale-bar::before,
+#main-toolbar .toolbar-scale-bar::after {
+    content: '';
+    position: absolute;
+    bottom: 2px;
+    border-radius: 9999px;
+    background-color: #cbd5e1;
+    transition: background-color 0.14s ease, width 0.14s ease, height 0.14s ease, opacity 0.14s ease;
+    pointer-events: none;
+}
+
+/* 竖臂 (::before) 与横臂 (::after) 在底角交汇成圆润折角形 */
+#main-toolbar .toolbar-scale-bar::before {
+    width: 3.5px;
+    height: 11px;
+}
+
+#main-toolbar .toolbar-scale-bar::after {
+    width: 11px;
+    height: 3.5px;
+}
+
+#main-toolbar .toolbar-scale-down::before,
+#main-toolbar .toolbar-scale-down::after {
+    left: 2px;
+}
+
+#main-toolbar .toolbar-scale-up::before,
+#main-toolbar .toolbar-scale-up::after {
+    right: 2px;
+}
+
+/* 默认尺寸（当前基准 116%）：折角灰色变深以提示处于默认尺寸 */
+#main-toolbar .toolbar-scale-bar.is-default::before,
+#main-toolbar .toolbar-scale-bar.is-default::after {
+    background-color: #64748b;
+}
+
+#main-toolbar .toolbar-scale-bar:hover::before {
+    width: 4px;
+    height: 12px;
+    background-color: #94a3b8;
+}
+
+#main-toolbar .toolbar-scale-bar:hover::after {
+    width: 12px;
+    height: 4px;
+    background-color: #94a3b8;
+}
+
+#main-toolbar .toolbar-scale-bar.is-default:hover::before,
+#main-toolbar .toolbar-scale-bar.is-default:hover::after {
+    background-color: #334155;
+}
+
+#main-toolbar .toolbar-scale-bar.is-limit {
+    cursor: default;
+}
+
+#main-toolbar .toolbar-scale-bar.is-limit::before,
+#main-toolbar .toolbar-scale-bar.is-limit::after {
+    opacity: 0.32;
+}
+
+body.eye-protection-mode #main-toolbar .toolbar-scale-bar:hover {
+    background-color: transparent !important;
+}
+
+body.eye-protection-mode #main-toolbar .toolbar-scale-bar::before,
+body.eye-protection-mode #main-toolbar .toolbar-scale-bar::after {
+    background-color: #d6cfc2;
+}
+
+body.eye-protection-mode #main-toolbar .toolbar-scale-bar.is-default::before,
+body.eye-protection-mode #main-toolbar .toolbar-scale-bar.is-default::after {
+    background-color: #78716c;
+}
+
+body.eye-protection-mode #main-toolbar .toolbar-scale-bar:hover::before,
+body.eye-protection-mode #main-toolbar .toolbar-scale-bar:hover::after {
+    background-color: #a8a29e;
+}
+
+body.eye-protection-mode #main-toolbar .toolbar-scale-bar.is-default:hover::before,
+body.eye-protection-mode #main-toolbar .toolbar-scale-bar.is-default:hover::after {
+    background-color: #44403c;
+}
+
+body.toolbar-collapsed #main-toolbar .toolbar-scale-bar {
+    display: none !important;
+}
+
+/* 窄窗口或放大图标后的优雅双行布局（toolbar-wrap-2） */
+body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-2 {
+    height: var(--toolbar-expanded-h, calc(37px + 78px * var(--tb-scale, 1.16)));
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    align-items: center;
+    padding: 18px 32px 8px 12px;
+    row-gap: 6px;
+    column-gap: 8px;
+}
+
+body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-2 #toolbar-right-group {
+    display: contents;
+}
+
+body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-2 #toolbar-left-group {
+    order: 1;
+    margin-right: 0;
+    gap: calc(5px * var(--tb-scale, 1));
+}
+
+body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-2 #deepseek-chat-btn {
+    order: 2;
+    flex: 0 0 auto;
+}
+
+body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-2 #toolbar-view-group {
+    display: flex !important;
+    order: 3;
+    flex: 0 1 auto;
+    margin-left: 0;
+    margin-right: auto;
+    position: relative;
+    z-index: 25;
+}
+
+body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-2 #toolbar-file-divider {
+    display: none;
+}
+
+body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-2 #toolbar-file-group {
+    order: 4;
+    flex: 0 0 auto;
+    position: relative;
+    z-index: 30;
+}
+
+body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-2 #save-dropdown-wrapper > .absolute {
+    left: auto;
+    right: 0;
+    transform: none;
+}
+
+body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-2 #open-dropdown-wrapper > .absolute {
+    left: auto;
+    right: -8px;
+    transform: none;
+}
+
+body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-2 #toolbar-anno-group {
+    order: 5;
+    flex: 1 0 100%;
+    margin-left: 0;
+    justify-content: center;
+    flex-wrap: wrap;
+    position: relative;
+    z-index: 15;
+    padding: calc(3px * var(--tb-scale, 1)) 8px;
+    row-gap: 4px;
+}
+
+body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-2 #toggle-toolbar-btn {
+    top: calc(18px + 19px * var(--tb-scale, 1));
+    transform: translateY(-50%);
+}
+
+/* 窄屏折叠细条模式：收紧为单行 12px 细条，避免隐藏占位组把线段条挤出视野 */
+body.toolbar-collapsed #main-toolbar.toolbar-wrap-2 {
+    flex-wrap: nowrap !important;
+    justify-content: space-between !important;
+    padding-left: 12px !important;
+    padding-right: 26px !important;
+}
+
+body.toolbar-collapsed #main-toolbar.toolbar-wrap-2 #toolbar-left-group {
+    flex: 0 0 auto !important;
+    margin-right: 6px !important;
+}
+
+body.toolbar-collapsed #main-toolbar.toolbar-wrap-2 #toolbar-right-group {
+    display: flex !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    justify-content: center !important;
+    gap: 6px !important;
+}
+
+body.toolbar-collapsed #main-toolbar.toolbar-wrap-2 #toolbar-visibility-group,
+body.toolbar-collapsed #main-toolbar.toolbar-wrap-2 #toolbar-view-group,
+body.toolbar-collapsed #main-toolbar.toolbar-wrap-2 #toolbar-file-divider,
+body.toolbar-collapsed #main-toolbar.toolbar-wrap-2 #toolbar-file-group {
+    display: none !important;
+}
+
+body.toolbar-collapsed #main-toolbar.toolbar-wrap-2 #toolbar-anno-group {
+    flex: 0 1 auto !important;
+    flex-wrap: nowrap !important;
+    margin-left: 0 !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+}
+
+body.toolbar-collapsed #main-toolbar.toolbar-wrap-2 #deepseek-chat-btn {
+    width: clamp(20px, 5vw, 34px) !important;
+    flex-shrink: 1 !important;
+}
+
+body.toolbar-collapsed #main-toolbar.toolbar-wrap-2 #tool-group .tool-btn {
+    width: clamp(18px, 5vw, 34px) !important;
+    flex-shrink: 1 !important;
+}
+
+body.toolbar-collapsed #main-toolbar.toolbar-wrap-2 #color-group .color-btn {
+    width: clamp(14px, 3.6vw, 19px) !important;
+    flex-shrink: 1 !important;
+}
+
+body.toolbar-collapsed #main-toolbar.toolbar-wrap-2 #custom-color-wrapper {
+    width: clamp(16px, 4vw, 24px) !important;
+    flex-shrink: 1 !important;
+}
+
+/* 超窄窗口三行布局（toolbar-wrap-3） */
+body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-3 {
+    height: auto;
+}
+
+body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-3 #toolbar-file-group {
+    order: 3;
+    margin-left: auto;
+}
+
+body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-3 #toolbar-view-group {
+    order: 4;
+    flex: 1 0 100%;
+    justify-content: center;
+    flex-wrap: wrap;
+    row-gap: 4px;
+    margin-left: 0;
+    margin-right: 0;
+}
+
+body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-3 #toolbar-anno-group {
+    order: 5;
+}
+
+body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-3 #fullscreen-window-dropdown {
+    left: auto;
+    right: 0;
+    transform: none;
+}
+
+@media (max-width: 520px) {
+    body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-3 #tool-group .tool-btn {
+        width: calc(30px * var(--tb-scale, 1));
+        height: calc(30px * var(--tb-scale, 1));
+    }
+
+    body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-3 #color-group .color-btn {
+        width: calc(17px * var(--tb-scale, 1));
+        height: calc(17px * var(--tb-scale, 1));
+    }
+}
+
+
 
 
 

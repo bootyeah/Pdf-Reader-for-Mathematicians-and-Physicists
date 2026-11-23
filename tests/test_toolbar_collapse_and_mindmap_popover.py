@@ -116,7 +116,15 @@ window.addEventListener('load', () => {
             const header = document.getElementById('main-toolbar');
             const toggleBtn = document.getElementById('toggle-toolbar-btn');
             assert(header !== null && toggleBtn !== null, 'Header and #toggle-toolbar-btn must exist');
-            assert(header.offsetHeight === 72, 'Expanded header height must be 72px, got ' + header.offsetHeight);
+            const initialExpandedHeight = header.offsetHeight;
+            assert(initialExpandedHeight >= 60 && initialExpandedHeight <= 80,
+                'Expanded header height should be compact (60-80px), got ' + initialExpandedHeight);
+
+            const scaleDownBtn = document.getElementById('toolbar-scale-down');
+            const scaleUpBtn = document.getElementById('toolbar-scale-up');
+            assert(scaleDownBtn !== null && scaleUpBtn !== null, 'Toolbar scale -/+ bars must exist');
+            assert(scaleDownBtn.classList.contains('is-default') && scaleUpBtn.classList.contains('is-default'),
+                'Scale bars must highlight default size on load');
 
             const sidebarBtn = document.getElementById('toggle-sidebar');
             const sidebarEl = document.getElementById('sidebar');
@@ -272,7 +280,8 @@ window.addEventListener('load', () => {
             toggleBtn.click();
             void header.offsetHeight;
             assert(!document.body.classList.contains('toolbar-collapsed'), 'Body should remove toolbar-collapsed when expanded');
-            assert(header.offsetHeight === 72, 'Restored header height must be 72px, got ' + header.offsetHeight);
+            assert(header.offsetHeight === initialExpandedHeight,
+                'Restored header height must match initial ' + initialExpandedHeight + 'px, got ' + header.offsetHeight);
 
             // (d) Keyboard shortcut: '-_' (Minus key right of 0) toggles toolbar collapse/expand
             document.dispatchEvent(new KeyboardEvent('keydown', { key: '-', code: 'Minus', bubbles: true, cancelable: true }));
@@ -294,7 +303,7 @@ window.addEventListener('load', () => {
             // Pressing Shift + Minus ('_') expands toolbar back
             document.dispatchEvent(new KeyboardEvent('keydown', { key: '_', code: 'Minus', shiftKey: true, bubbles: true, cancelable: true }));
             void header.offsetHeight;
-            assert(!document.body.classList.contains('toolbar-collapsed') && header.offsetHeight === 72,
+            assert(!document.body.classList.contains('toolbar-collapsed') && header.offsetHeight === initialExpandedHeight,
                 'Pressing Shift + Minus (_) key must expand toolbar back');
 
             // =================================================================
