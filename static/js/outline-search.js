@@ -5,6 +5,45 @@
         let outlineMapSortFrame = 0;
         let outlineMapNeedsSort = false;
         let activeOutlineElement = null;
+        let outlineDestQueue = [];
+        let outlineDestPumping = false;
+        let currentTimeIntervalId = null;
+        const OUTLINE_DEST_BATCH_SIZE = 12;
+
+        function pumpOutlineDestQueue() {
+            if (outlineDestPumping || outlineDestQueue.length === 0) return;
+            outlineDestPumping = true;
+            setTimeout(async () => {
+                try {
+                    const batch = outlineDestQueue.splice(0, OUTLINE_DEST_BATCH_SIZE);
+                    await Promise.all(batch.map(async ({ pdfDoc, loadToken, dest, titleDiv, order }) => {
+                        if (state.loadToken !== loadToken || state.pdfDoc !== pdfDoc) return;
+                        try {
+                            const pageIndex = await resolvePdfDestinationPage(pdfDoc, dest);
+                            if (pageIndex === null || state.loadToken !== loadToken || state.pdfDoc !== pdfDoc) return;
+                            const physicalPage = pageIndex + 1;
+                            titleDiv.dataset.targetPage = physicalPage;
+                            state.outlineMap.push({
+                                pageNum: physicalPage,
+                                element: titleDiv,
+                                order
+                            });
+                            outlineMapNeedsSort = true;
+                            if (!outlineMapSortFrame) {
+                                outlineMapSortFrame = requestAnimationFrame(() => {
+                                    outlineMapSortFrame = 0;
+                                    if (state.loadToken !== loadToken || state.pdfDoc !== pdfDoc) return;
+                                    updateCurrentOutline();
+                                });
+                            }
+                        } catch (_) { /* 解析失败忽略 */ }
+                    }));
+                } finally {
+                    outlineDestPumping = false;
+                    if (outlineDestQueue.length > 0) pumpOutlineDestQueue();
+                }
+            }, 0);
+        }
 
         function flushOutlineMapSort() {
             if (outlineMapSortFrame) {
@@ -27,6 +66,7 @@
                 container.innerHTML = '';
                 state.outlineMap = []; // 清空旧地图
                 state.outlineNextOrder = 0;
+                outlineDestQueue = [];
                 cancelAnimationFrame(outlineMapSortFrame);
                 outlineMapSortFrame = 0;
                 outlineMapNeedsSort = false;
@@ -53,31 +93,9 @@
 
                 if (item.dest) {
                     const order = state.outlineNextOrder++;
-                    // 让出当前任务后解析目标，避免阻塞目录 DOM 的构建。
-                    setTimeout(async () => {
-                        try {
-                            if (isStale()) return;
-                            const pageIndex = await resolvePdfDestinationPage(pdfDoc, item.dest);
-                            if (pageIndex !== null) {
-                                if (isStale()) return;
-                                const physicalPage = pageIndex + 1;
-                                // 赋予 DOM 属性，方便后续操作
-                                titleDiv.dataset.targetPage = physicalPage;
-                                // 推入全局地图
-                                state.outlineMap.push({
-                                    pageNum: physicalPage,
-                                    element: titleDiv, order
-                                });
-                                outlineMapNeedsSort = true;
-                                // 每帧统一排序；同页条目按目录本身的顺序，独立于异步完成顺序。
-                                if (!outlineMapSortFrame) outlineMapSortFrame = requestAnimationFrame(() => {
-                                    outlineMapSortFrame = 0;
-                                    if (isStale()) return;
-                                    updateCurrentOutline();
-                                });
-                            }
-                        } catch (e) { /* 解析失败忽略 */ }
-                    }, 0);
+                    // 分批让出主线程解析目标页，避免上千条目录同时创建数百个宏任务阻塞首屏与 PDF Worker。
+                    outlineDestQueue.push({ pdfDoc, loadToken, dest: item.dest, titleDiv, order });
+                    pumpOutlineDestQueue();
                 }
 
                 titleDiv.addEventListener('click', (e) => {
@@ -203,10 +221,17 @@
             if (state.isTimePanelOpen) {
                 if (state.isOutlineOpen) toggleOutline(false);
                 updateCurrentTimeDisplay();
+                if (currentTimeIntervalId === null) {
+                    currentTimeIntervalId = setInterval(updateCurrentTimeDisplay, 1000);
+                }
                 panel.classList.remove('opacity-0', 'invisible', 'scale-y-95', '-translate-y-2', '-translate-y-3', 'pointer-events-none');
                 panel.classList.add('opacity-100', 'visible', 'scale-y-100', 'translate-y-0', 'pointer-events-auto');
                 icon?.classList.add('rotate-180');
             } else {
+                if (currentTimeIntervalId !== null) {
+                    clearInterval(currentTimeIntervalId);
+                    currentTimeIntervalId = null;
+                }
                 panel.classList.remove('opacity-100', 'visible', 'scale-y-100', 'translate-y-0', 'pointer-events-auto');
                 panel.classList.add('opacity-0', 'invisible', 'scale-y-95', '-translate-y-3', 'pointer-events-none');
                 icon?.classList.remove('rotate-180');
@@ -217,7 +242,9 @@
             if (!els.timeTriggerBtn || !els.timePanel) return;
 
             updateCurrentTimeDisplay();
-            setInterval(updateCurrentTimeDisplay, 1000);
+            if (state.isTimePanelOpen && currentTimeIntervalId === null) {
+                currentTimeIntervalId = setInterval(updateCurrentTimeDisplay, 1000);
+            }
 
             let countdownTimerId = null;
             let countdownEndTime = 0;
@@ -627,16 +654,29 @@
                     let domText = '';
                     const mapping = [];
                     
-                    spans.forEach(span => {
-                        const text = span.textContent || '';
-                        const start = domText.length;
-                        domText += text;
-                        mapping.push({ 
-                            node: span.firstChild || span, 
-                            start: start, 
-                            end: domText.length 
-                        });
-                    });
+                    for (const child of textLayer.childNodes) {
+                        if (child.nodeType !== 1) continue;
+                        if (child.tagName === 'SPAN') {
+                            const text = child.textContent || '';
+                            const start = domText.length;
+                            domText += text;
+                            mapping.push({
+                                node: child.firstChild || child,
+                                start: start,
+                                end: domText.length,
+                                isBr: false
+                            });
+                        } else if (child.tagName === 'BR') {
+                            const start = domText.length;
+                            domText += ' ';
+                            mapping.push({
+                                node: child,
+                                start: start,
+                                end: domText.length,
+                                isBr: true
+                            });
+                        }
+                    }
 
                     const regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
                     let domMatch;
@@ -648,14 +688,19 @@
                             const matchStart = domMatch.index;
                             const matchEnd = matchStart + domMatch[0].length;
 
-                            const startMap = mapping.find(m => matchStart >= m.start && matchStart < m.end);
-                            const endMap = mapping.find(m => matchEnd > m.start && matchEnd <= m.end);
+                            let startIdx = mapping.findIndex(m => matchStart >= m.start && matchStart < m.end);
+                            while (startIdx !== -1 && startIdx < mapping.length && mapping[startIdx].isBr) startIdx++;
+                            let endIdx = mapping.findIndex(m => matchEnd > m.start && matchEnd <= m.end);
+                            while (endIdx > 0 && mapping[endIdx]?.isBr) endIdx--;
 
-                            if (startMap && endMap) {
+                            const startMap = startIdx >= 0 ? mapping[startIdx] : null;
+                            const endMap = endIdx >= 0 ? mapping[endIdx] : null;
+
+                            if (startMap && endMap && !startMap.isBr && !endMap.isBr) {
                                 try {
                                     const range = document.createRange();
-                                    range.setStart(startMap.node, matchStart - startMap.start);
-                                    range.setEnd(endMap.node, matchEnd - endMap.start);
+                                    range.setStart(startMap.node, Math.max(0, matchStart - startMap.start));
+                                    range.setEnd(endMap.node, Math.min((endMap.end - endMap.start), matchEnd - endMap.start));
 
                                     const rects = Array.from(range.getClientRects());
                                     const wrapperRect = wrapper.getBoundingClientRect();

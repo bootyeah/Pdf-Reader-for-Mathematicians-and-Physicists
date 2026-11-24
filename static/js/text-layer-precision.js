@@ -24,7 +24,9 @@
     let fallbackCtx = null;
     const ascentCache = new Map();
     const fallbackWidthCache = new Map();
+    const measuredWidthCache = new Map();
     const fontMetaCache = new WeakMap();
+    const spanGeoCache = new WeakMap();
 
     function getMeasureCtx() {
         if (!measureCtx) {
@@ -254,6 +256,19 @@
 
         let prevCtxFont = '';
         function measureWidth(ctxFont, text) {
+            if (text.length <= 24) {
+                const key = ctxFont + '\0' + text;
+                const hit = measuredWidthCache.get(key);
+                if (hit !== undefined) return hit;
+                if (prevCtxFont !== ctxFont) {
+                    ctx.font = ctxFont;
+                    prevCtxFont = ctxFont;
+                }
+                const w = ctx.measureText(text).width;
+                if (measuredWidthCache.size > 8192) measuredWidthCache.clear();
+                measuredWidthCache.set(key, w);
+                return w;
+            }
             if (prevCtxFont !== ctxFont) {
                 ctx.font = ctxFont;
                 prevCtxFont = ctxFont;
@@ -375,15 +390,31 @@
                     const spaceDelta = useSpaceAbsorption ? (diff / spaceCount) : 0;
                     const uniformRatio = useSpaceAbsorption ? 1 : (itemAdvance / totalNatural);
 
-                    segments = new Array(tokens.length);
+                    const rawSegments = new Array(tokens.length);
                     let cursorX = baseLeft;
                     for (let k = 0; k < tokens.length; k++) {
                         let segW = useSpaceAbsorption
                             ? rawWidths[k] + (isSpaceToken[k] ? spaceDelta : 0)
                             : rawWidths[k] * uniformRatio;
                         if (!(segW > 0.05)) segW = rawWidths[k] * (itemAdvance / totalNatural);
-                        segments[k] = { str: tokens[k], left: cursorX, width: segW };
+                        rawSegments[k] = { str: tokens[k], left: cursorX, width: segW, isSpace: isSpaceToken[k] };
                         cursorX += segW;
+                    }
+                    // 当词间空格未被大幅拉伸时，将单词与其紧邻的单空格合并为同一 span，减少约 45% 的文本层 DOM 节点
+                    if (!useSpaceAbsorption || Math.abs(spaceDelta) <= fontHeight * 0.12) {
+                        segments = [];
+                        for (let k = 0; k < rawSegments.length; k++) {
+                            const cur = rawSegments[k];
+                            const nxt = rawSegments[k + 1];
+                            if (!cur.isSpace && nxt && nxt.isSpace && nxt.str === ' ') {
+                                segments.push({ str: cur.str + ' ', left: cur.left, width: cur.width + nxt.width });
+                                k++;
+                            } else {
+                                segments.push(cur);
+                            }
+                        }
+                    } else {
+                        segments = rawSegments;
                     }
                 } else {
                     segments = [{ str: item.str, left: baseLeft, width: itemAdvance }];
@@ -434,6 +465,7 @@
         const endOfContent = document.createElement('div');
         endOfContent.className = 'endOfContent';
         frag.appendChild(endOfContent);
+        spanGeoCache.delete(container);
         container.replaceChildren(frag);
     }
 
@@ -453,8 +485,42 @@
         return true;
     }
 
-    function findNearestEndPlacement(textLayer, clientX, clientY) {
+    function getSpanGeometry(textLayer) {
+        const layerRect = textLayer.getBoundingClientRect();
+        if (layerRect.width <= 0 || layerRect.height <= 0) return null;
+        let cached = spanGeoCache.get(textLayer);
+        if (cached && cached.childCount === textLayer.childElementCount &&
+            Math.abs(cached.w - layerRect.width) < 0.5 && Math.abs(cached.h - layerRect.height) < 0.5) {
+            return { layerRect, items: cached.items, firstSpan: cached.firstSpan };
+        }
         const spans = textLayer.children;
+        const items = [];
+        let firstSpan = null;
+        for (let i = 0; i < spans.length; i++) {
+            const el = spans[i];
+            if (el.tagName !== 'SPAN') continue;
+            if (!firstSpan) firstSpan = el;
+            const r = el.getBoundingClientRect();
+            if (r.width <= 0 || r.height <= 0) continue;
+            items.push({
+                el,
+                left: r.left - layerRect.left,
+                right: r.right - layerRect.left,
+                top: r.top - layerRect.top,
+                bottom: r.bottom - layerRect.top
+            });
+        }
+        cached = { w: layerRect.width, h: layerRect.height, childCount: textLayer.childElementCount, items, firstSpan };
+        spanGeoCache.set(textLayer, cached);
+        return { layerRect, items, firstSpan };
+    }
+
+    function findNearestEndPlacement(textLayer, clientX, clientY) {
+        const geo = getSpanGeometry(textLayer);
+        if (!geo) return null;
+        const { layerRect, items, firstSpan } = geo;
+        const lx = clientX - layerRect.left;
+        const ly = clientY - layerRect.top;
         let sameLineBefore = null;
         let sameLineBeforeRight = -Infinity;
         let sameLineAfter = null;
@@ -462,28 +528,24 @@
         let sameLineFirst = null;
         let sameLineFirstLeft = Infinity;
         let aboveLast = null;
-        let firstSpan = null;
 
-        for (let i = 0; i < spans.length; i++) {
-            const el = spans[i];
-            if (el.tagName !== 'SPAN') continue;
-            if (!firstSpan) firstSpan = el;
-            const r = el.getBoundingClientRect();
-            if (r.width <= 0 || r.height <= 0) continue;
+        for (let i = 0; i < items.length; i++) {
+            const it = items[i];
+            const el = it.el;
 
-            if (clientY >= r.top - 4 && clientY <= r.bottom + 4) {
-                if (r.left < sameLineFirstLeft) {
-                    sameLineFirstLeft = r.left;
+            if (ly >= it.top - 4 && ly <= it.bottom + 4) {
+                if (it.left < sameLineFirstLeft) {
+                    sameLineFirstLeft = it.left;
                     sameLineFirst = el;
                 }
-                if (r.left <= clientX && r.right >= sameLineBeforeRight) {
+                if (it.left <= lx && it.right >= sameLineBeforeRight) {
                     sameLineBefore = el;
-                    sameLineBeforeRight = r.right;
-                } else if (r.left > clientX && r.left < sameLineAfterLeft) {
-                    sameLineAfterLeft = r.left;
+                    sameLineBeforeRight = it.right;
+                } else if (it.left > lx && it.left < sameLineAfterLeft) {
+                    sameLineAfterLeft = it.left;
                     sameLineAfter = el;
                 }
-            } else if (r.bottom < clientY) {
+            } else if (it.bottom < ly) {
                 aboveLast = el;
             }
         }
@@ -505,18 +567,19 @@
                     clientX >= pr.left - 4 && clientX <= pr.right + 4 &&
                     clientY >= pr.top - 4 && clientY <= pr.bottom + 4;
                 if (nearParent) {
-                    // 若落点在独立空格 span 的右半边/末端，锚点对准紧邻下一个词首，避免 Blink 丢失选区锚点
-                    if (preferNextOnSpace && parentSpan.tagName === 'SPAN' && /^\s+$/.test(parentSpan.textContent || '')) {
-                        if (clientX >= (pr.left + pr.right) / 2 || r.startOffset >= r.startContainer.nodeValue.length) {
-                            let next = parentSpan.nextElementSibling;
-                            while (next && (next.tagName !== 'SPAN' || !next.firstChild || next.firstChild.nodeType !== 3)) {
-                                next = next.nextElementSibling;
-                            }
-                            if (next && next.firstChild) {
-                                const nr = next.getBoundingClientRect();
-                                if (Math.abs((nr.top + nr.bottom) / 2 - (pr.top + pr.bottom) / 2) <= Math.max(nr.height, pr.height)) {
-                                    return { node: next.firstChild, offset: 0 };
-                                }
+                    // 若落点在独立空格 span 的右半边/末端或合并尾空格末端，锚点对准紧邻下一个词首，避免 Blink 丢失选区锚点
+                    const txt = parentSpan.textContent || '';
+                    const onStandaloneSpace = /^\s+$/.test(txt) && (clientX >= (pr.left + pr.right) / 2 || r.startOffset >= r.startContainer.nodeValue.length);
+                    const onTrailingSpaceEnd = txt.endsWith(' ') && r.startOffset >= r.startContainer.nodeValue.length;
+                    if (preferNextOnSpace && parentSpan.tagName === 'SPAN' && (onStandaloneSpace || onTrailingSpaceEnd)) {
+                        let next = parentSpan.nextElementSibling;
+                        while (next && (next.tagName !== 'SPAN' || !next.firstChild || next.firstChild.nodeType !== 3)) {
+                            next = next.nextElementSibling;
+                        }
+                        if (next && next.firstChild) {
+                            const nr = next.getBoundingClientRect();
+                            if (Math.abs((nr.top + nr.bottom) / 2 - (pr.top + pr.bottom) / 2) <= Math.max(nr.height, pr.height)) {
+                                return { node: next.firstChild, offset: 0 };
                             }
                         }
                     }

@@ -649,8 +649,9 @@
                 newText.includes(`\\begin{${env}}`)
             );
             
-            // 如果只有 KaTeX 和纯文本，仅延迟 30ms（丝滑跟手）；如果有 TikZ，延迟 300ms（防止本地进程频繁重启）
-            const delay = hasTexGraphics ? 300 : 30;
+            // 如果只有 KaTeX 和纯文本：旁侧预览开启时稍微合并高频击键（55ms），优先让预览框先上屏避免同帧双倍重排；如果有 TikZ，延迟 300ms
+            const hasSidePreview = !!document.querySelector('.latex-live-preview');
+            const delay = hasTexGraphics ? 300 : (hasSidePreview ? 55 : 30);
 
             clearTimeout(state.livePreviewTimer);
             const targetId = state.activeAnnotationId;
@@ -1095,7 +1096,7 @@
             let icon = 'ph-highlighter';
             let titleText = anno.text;
             if (anno.type === 'text') { icon = 'ph-text-t'; titleText = anno.text || '[空文本]'; }
-            if (anno.type === 'underline') icon = 'ph-text-u';
+            if (anno.type === 'underline') icon = 'ph-text-underline';
             if (anno.type === 'arrow') icon = 'ph-arrow-up-right';
             if (anno.type === 'implies') icon = 'ph-arrow-up-right';
             if (anno.type === 'equivalence') icon = 'ph-arrows-left-right';

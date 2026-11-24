@@ -100,7 +100,12 @@
                 if (delta[k] === "[]" && k !== 'snippets' && k !== 'mindmap' && k !== 'settings') {
                     state.annotations[k] = [];
                 } else {
-                    state.annotations[k] = JSON.parse(delta[k]);
+                    const parsed = JSON.parse(delta[k]);
+                    if (parsed === null && (k === 'mindmap' || k === 'settings')) {
+                        delete state.annotations[k];
+                    } else {
+                        state.annotations[k] = parsed;
+                    }
                 }
             });
         }
@@ -108,6 +113,8 @@
         function undo() {
             if (state.historyIndex > 0) {
                 const step = state.history[state.historyIndex];
+                const mindmapTouched = step.type === 'FULL'
+                    || Boolean((step.backward && 'mindmap' in step.backward) || (step.forward && 'mindmap' in step.forward));
                 if (step.type === 'FULL') {
                     state.annotations = JSON.parse(step.data);
                 } else {
@@ -117,7 +124,10 @@
                 refreshUI(step.type === 'FULL' ? null : Object.keys(step.backward || step.forward));
                 updateSaveStatus(true);     // 【修改】将状态判定提前
                 saveAnnotationsToStorage(); // 这样这里的防呆逻辑才能准确判断状态
-                window.MindMap?.render?.();
+                if (mindmapTouched) {
+                    if (window.MindMap?.syncFromHistory) window.MindMap.syncFromHistory();
+                    else window.MindMap?.render?.();
+                }
             }
         }
 
@@ -125,6 +135,8 @@
             if (state.historyIndex < state.history.length - 1) {
                 state.historyIndex++;
                 const step = state.history[state.historyIndex];
+                const mindmapTouched = step.type === 'FULL'
+                    || Boolean((step.backward && 'mindmap' in step.backward) || (step.forward && 'mindmap' in step.forward));
                 if (step.type === 'FULL') {
                     state.annotations = JSON.parse(step.data);
                 } else {
@@ -133,7 +145,10 @@
                 refreshUI(step.type === 'FULL' ? null : Object.keys(step.backward || step.forward));
                 updateSaveStatus(true);     // 【修改】将状态判定提前
                 saveAnnotationsToStorage();
-                window.MindMap?.render?.();
+                if (mindmapTouched) {
+                    if (window.MindMap?.syncFromHistory) window.MindMap.syncFromHistory();
+                    else window.MindMap?.render?.();
+                }
             }
         }
         
@@ -1098,6 +1113,7 @@
             setSidebarMode('annotations');
             state.fingerprint = '';
             if (typeof CloudSync !== 'undefined') CloudSync.resetForDocument();   // 换文档：上一份的「云端有更新」提示必须立刻消失
+            window.MindMap?.resetForDocument?.();
             state.pageDimensions = [];
             state.outlineMap = [];
             state.annotationsReady = null;
@@ -1221,6 +1237,7 @@
                 if (isStale()) return;
                 state.firstPagePaint?.resolve(false);
                 resetPdfRendering();
+                window.MindMap?.resetForDocument?.();
                 state.loadingTask?.destroy().catch(() => {});
                 state.loadingTask = null;
                 state.pdfDoc = null;

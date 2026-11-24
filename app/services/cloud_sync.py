@@ -549,12 +549,62 @@ def _cloud_now_iso():
     return now.strftime('%Y-%m-%dT%H:%M:%S.') + '%03dZ' % (now.microsecond // 1000)
 
 
+def _count_mindmap_nodes(mm):
+    if not isinstance(mm, dict):
+        return 0
+    seen = set()
+
+    def walk(node):
+        if not isinstance(node, dict):
+            return 0
+        nid = node.get('id')
+        if nid:
+            if nid in seen:
+                return 0
+            seen.add(nid)
+        cnt = 1
+        for ch in (node.get('children') or []):
+            cnt += walk(ch)
+        for br in (node.get('branches') or []):
+            if isinstance(br, list):
+                for ch in br:
+                    cnt += walk(ch)
+        for ch in (node.get('convergeChildren') or []):
+            cnt += walk(ch)
+        if isinstance(node.get('forkConverge'), dict):
+            cnt += walk(node['forkConverge'])
+        return cnt
+
+    total = 0
+    pages = mm.get('pages')
+    if isinstance(pages, list) and pages:
+        for p in pages:
+            if not isinstance(p, dict):
+                continue
+            nodes = p.get('nodes')
+            if isinstance(nodes, list) and nodes:
+                for n in nodes:
+                    total += walk(n)
+            elif isinstance(p.get('root'), dict):
+                total += walk(p['root'])
+    else:
+        nodes = mm.get('nodes')
+        if isinstance(nodes, list) and nodes:
+            for n in nodes:
+                total += walk(n)
+        elif isinstance(mm.get('root'), dict):
+            total += walk(mm['root'])
+    return total
+
+
 def _cloud_count_annotations(annotations):
     total = 0
     if isinstance(annotations, dict):
         for key, value in annotations.items():
             if str(key).isdigit() and isinstance(value, list):
                 total += len(value)
+        if 'mindmap' in annotations and isinstance(annotations['mindmap'], dict):
+            total += _count_mindmap_nodes(annotations['mindmap'])
     return total
 
 

@@ -325,9 +325,28 @@ def api_key_for(doc, fid):
         fid = cfg['key_source']
 
 
+_DOC_CACHE_LOCK = threading.Lock()
+_DOC_CACHE = None  # (resolved_path_str, st_mtime_ns, st_size, validated_doc)
+
+
 def load_document():
+    global _DOC_CACHE
     path = config_path()
-    return validate(_read(path)) if path.exists() else None
+    try:
+        st = path.stat()
+    except OSError:
+        with _DOC_CACHE_LOCK:
+            _DOC_CACHE = None
+        return None
+    path_key = os.path.normcase(str(path.resolve()))
+    with _DOC_CACHE_LOCK:
+        cached = _DOC_CACHE
+        if cached is not None and cached[0] == path_key and cached[1] == st.st_mtime_ns and cached[2] == st.st_size:
+            return copy.deepcopy(cached[3])
+    validated = validate(_read(path))
+    with _DOC_CACHE_LOCK:
+        _DOC_CACHE = (path_key, st.st_mtime_ns, st.st_size, copy.deepcopy(validated))
+    return validated
 
 
 def recovery_document():
@@ -350,6 +369,7 @@ def resolve(fid, defaults, document=None):
 
 
 def _atomic_write(path, doc):
+    global _DOC_CACHE
     path.parent.mkdir(parents=True, exist_ok=True)
     raw = json.dumps(doc, ensure_ascii=False, indent=2, allow_nan=False) + '\n'
     fd, temp = tempfile.mkstemp(prefix='.settings-', suffix='.tmp', dir=path.parent)
@@ -359,6 +379,8 @@ def _atomic_write(path, doc):
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temp, path)
+        with _DOC_CACHE_LOCK:
+            _DOC_CACHE = None
     finally:
         if os.path.exists(temp):
             os.unlink(temp)

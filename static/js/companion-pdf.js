@@ -902,6 +902,8 @@
 
                 const w = Math.max(minW, Math.min(right - left, maxW));
                 const h = isCollapsed ? 40 : Math.max(minH, Math.min(bottom - top, maxH));
+                if (edge.includes('w')) left = right - w;
+                if (!isCollapsed && edge.includes('n')) top = bottom - h;
                 panel.style.width = w + 'px';
                 if (!isCollapsed) {
                     panel.style.height = h + 'px';
@@ -1223,13 +1225,20 @@
             rootMargin: '400px 0px 400px 0px'
         });
 
+        const baseDefaultDim = pageDimensions[0] || { width: 595, height: 842 };
+        pagesContainer.style.setProperty('--cp-page-w', Math.round(baseDefaultDim.width * effectiveScale) + 'px');
+        pagesContainer.style.setProperty('--cp-page-h', Math.round(baseDefaultDim.height * effectiveScale) + 'px');
+
         for (let i = 1; i <= numPages; i++) {
             const dim = pageDimensions[i - 1];
             const wrapper = document.createElement('div');
             wrapper.className = 'cp-page-card';
             wrapper.dataset.pageNum = String(i);
-            wrapper.style.width = Math.round(dim.width * effectiveScale) + 'px';
-            wrapper.style.height = Math.round(dim.height * effectiveScale) + 'px';
+            const isCustomSize = Math.abs(dim.width - baseDefaultDim.width) > 0.5 || Math.abs(dim.height - baseDefaultDim.height) > 0.5;
+            if (isCustomSize) {
+                wrapper.style.width = Math.round(dim.width * effectiveScale) + 'px';
+                wrapper.style.height = Math.round(dim.height * effectiveScale) + 'px';
+            }
 
             const canvas = document.createElement('canvas');
             canvas.className = 'cp-page-canvas';
@@ -1250,6 +1259,7 @@
                 wrapper,
                 canvas,
                 textLayer,
+                customSize: isCustomSize,
                 rendered: false,
                 rendering: false,
                 renderTask: null,
@@ -1278,8 +1288,20 @@
             const prevDim = pageDimensions[pageNum - 1];
             if (!prevDim || Math.abs(prevDim.width - baseVp.width) > 0.5 || Math.abs(prevDim.height - baseVp.height) > 0.5) {
                 pageDimensions[pageNum - 1] = { width: baseVp.width, height: baseVp.height };
-                info.wrapper.style.width = Math.round(viewport.width) + 'px';
-                info.wrapper.style.height = Math.round(viewport.height) + 'px';
+                const baseDefaultDim = pageDimensions[0] || { width: 595, height: 842 };
+                if (pageNum === 1) {
+                    pagesContainer.style.setProperty('--cp-page-w', Math.round(baseDefaultDim.width * scale) + 'px');
+                    pagesContainer.style.setProperty('--cp-page-h', Math.round(baseDefaultDim.height * scale) + 'px');
+                }
+                const isCustomSize = Math.abs(baseVp.width - baseDefaultDim.width) > 0.5 || Math.abs(baseVp.height - baseDefaultDim.height) > 0.5;
+                info.customSize = isCustomSize;
+                if (isCustomSize) {
+                    info.wrapper.style.width = Math.round(viewport.width) + 'px';
+                    info.wrapper.style.height = Math.round(viewport.height) + 'px';
+                } else {
+                    info.wrapper.style.removeProperty('width');
+                    info.wrapper.style.removeProperty('height');
+                }
                 if (pagesContainer && viewportEl) {
                     const currentMax = parseFloat(pagesContainer.style.width) || 0;
                     const neededWidth = Math.max(viewportEl.clientWidth - 24, Math.round(viewport.width));
@@ -1456,19 +1478,28 @@
 
         const changed = force || Math.abs(previousScale - effectiveScale) > 0.0001;
         // 整个页面容器至少有最宽页的宽度，放大后左边内容也可滚动到。
-        const maxWidth = Math.max(...pageDimensions.map(dim => Math.round(dim.width * effectiveScale)));
-        pagesContainer.style.width = Math.max(viewportEl.clientWidth - 24, maxWidth) + 'px';
+        const baseDefaultDim = pageDimensions[0] || { width: 595, height: 842 };
+        const defaultW = Math.round(baseDefaultDim.width * effectiveScale);
+        const defaultH = Math.round(baseDefaultDim.height * effectiveScale);
+        pagesContainer.style.setProperty('--cp-page-w', defaultW + 'px');
+        pagesContainer.style.setProperty('--cp-page-h', defaultH + 'px');
+
+        let maxWidth = defaultW;
         for (let i = 1; i <= numPages; i++) {
             const dim = pageDimensions[i - 1];
             const info = pageWrappers.get(i);
             if (!info) continue;
 
-            const w = Math.round(dim.width * effectiveScale);
-            const h = Math.round(dim.height * effectiveScale);
-            info.wrapper.style.width = w + 'px';
-            info.wrapper.style.height = h + 'px';
+            const isCustomSize = info.customSize || Math.abs(dim.width - baseDefaultDim.width) > 0.5 || Math.abs(dim.height - baseDefaultDim.height) > 0.5;
+            if (isCustomSize) {
+                const w = Math.round(dim.width * effectiveScale);
+                const h = Math.round(dim.height * effectiveScale);
+                if (w > maxWidth) maxWidth = w;
+                info.wrapper.style.width = w + 'px';
+                info.wrapper.style.height = h + 'px';
+            }
 
-            if (changed) {
+            if (changed && (info.rendered || info.rendering || info.wrapper.dataset.renderedScale)) {
                 info.version++;
                 info.rendered = false;
                 try { info.renderTask?.cancel(); } catch (_) {}
@@ -1477,6 +1508,7 @@
                 if (layerScale) info.textLayer.style.transform = `scale(${effectiveScale / layerScale})`;
             }
         }
+        pagesContainer.style.width = Math.max(viewportEl.clientWidth - 24, maxWidth) + 'px';
         restorePosition(position);
         scheduleVisiblePages();
     }

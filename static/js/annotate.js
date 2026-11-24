@@ -1,6 +1,7 @@
         let isWheelZooming = false;
 
-        window.addEventListener('wheel', (e) => {
+        // 仅在主阅读容器上挂载非被动滚轮拦截，彻底释放侧栏、导图、对话等全站面板的合成器原生丝滑滚动
+        (els.container || window).addEventListener('wheel', (e) => {
             if (e.ctrlKey) { 
                 e.preventDefault(); 
                 if (!isWheelZooming) {
@@ -11,23 +12,15 @@
                     });
                 }
             } else if (e.deltaX !== 0 && Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+                const hScrollChild = e.target?.closest?.('.katex-display, pre, code');
+                if (hScrollChild && hScrollChild.scrollWidth > hScrollChild.clientWidth) return;
                 // 🌟 【终极极速版】横向滚动
                 e.preventDefault();
                 
                 const absDelta = Math.abs(e.deltaX);
-
-                // ⚙️ 参数 1：死区拦截 (Deadzone)
-                // 专门用来砍掉鼠标松开后的长尾巴。小于这个数值的系统信号一律被直接扔进垃圾桶。
-                // 如果你的鼠标推一下反应迟钝，把 5 改小（比如 2）；如果还是觉得松开后有轻微滑行，把 5 改大（比如 8）。
                 if (absDelta < 5) return;
 
-                // ⚙️ 参数 2：爆发倍率 (Multiplier)
-                // 因为我们砍掉了长尾巴，单次拨动可能会觉得距离偏短。
-                // 这里的 2.5 就是倍率！推得越重，乘得越多，画面飞得越快！
-                // 觉得一次滑太短，改大（比如 3.5）；觉得一次滑太猛，改小（比如 1.5）。
                 const moveAmount = e.deltaX * 1.5;
-
-                // 🚀 直接暴力赋值给滚动条，没有任何动画队列延迟，松手瞬间绝对刹死！
                 els.container.scrollLeft += moveAmount;
             }
         }, { passive: false });

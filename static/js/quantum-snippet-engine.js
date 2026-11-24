@@ -1,6 +1,8 @@
 (function () {
     'use strict';
 
+    const COMPILED_SNIPPETS_CACHE = new WeakMap();
+
     // 量子速录引擎（Reader 笔记编辑窗与 Snippet-Manager 沙盒共用）
     class QuantumSnippetEngine {
         constructor(textarea, snippetsOrGetter, options = {}) {
@@ -56,6 +58,15 @@
         }
 
         _compileSnippets(rawList) {
+            const canCache = !this._snippetsFn && Array.isArray(rawList);
+            if (canCache) {
+                const cachedByMode = COMPILED_SNIPPETS_CACHE.get(rawList);
+                const cacheKey = this._onlyEnabled ? 'enabled' : 'all';
+                const hit = cachedByMode && cachedByMode[cacheKey];
+                if (hit && hit.len === rawList.length && hit.first === rawList[0] && hit.last === rawList[rawList.length - 1]) {
+                    return hit.compiled;
+                }
+            }
             const filtered = (rawList || []).filter(s => (
                 s && (this._onlyEnabled ? !!s.enabled : s.enabled !== false)
             ));
@@ -100,6 +111,19 @@
                 if (lenB !== lenA) return lenB - lenA;
                 return (a._order || 0) - (b._order || 0);
             });
+            if (canCache) {
+                let cachedByMode = COMPILED_SNIPPETS_CACHE.get(rawList);
+                if (!cachedByMode) {
+                    cachedByMode = {};
+                    COMPILED_SNIPPETS_CACHE.set(rawList, cachedByMode);
+                }
+                cachedByMode[this._onlyEnabled ? 'enabled' : 'all'] = {
+                    len: rawList.length,
+                    first: rawList[0],
+                    last: rawList[rawList.length - 1],
+                    compiled
+                };
+            }
             return compiled;
         }
 

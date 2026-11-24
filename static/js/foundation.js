@@ -293,50 +293,6 @@
         }
 
         const textResizeDataMap = new WeakMap();
-        const globalTextResizeObserver = new ResizeObserver(entries => {
-            // 如果正处于全局缩放期间，直接忽略回调
-            if (state.isZooming) return;
-
-            for (let entry of entries) {
-                const target = entry.target;
-                
-                if (!target.isConnected) {
-                    globalTextResizeObserver.unobserve(target); // 主动解绑已销毁的节点
-                    continue;
-                }
-
-                // 从 WeakMap 中取出该 DOM 绑定的数据
-                const data = textResizeDataMap.get(target);
-                if (!data) continue;
-
-                // 用户正在手动缩放这个文本框：尺寸由手势独占，观察器不许插手。
-                const gesture = state.resizingText;
-                if (gesture?.div === target || (gesture && gesture.anno === data.anno)) continue;
-
-                const { anno, w, h } = data;
-
-                // 内容自适应不能被观察器的测量结果重新锁成固定尺寸。
-                // 手动拖拽仍由 finishTextResize 写入宽高和撤销栈。
-                if (!anno.width && !anno.height) continue;
-
-                const newW = entry.borderBoxSize ? entry.borderBoxSize[0].inlineSize / w : entry.contentRect.width / w;
-                const newH = entry.borderBoxSize ? entry.borderBoxSize[0].blockSize / h : entry.contentRect.height / h;
-                
-                if (newW === 0 || newH === 0) continue;
-
-                // 首次挂载时的触发不保存
-                if (data.isFirstResize) {
-                    data.isFirstResize = false; 
-                    continue; 
-                }
-
-                // 尺寸确实发生变化时才更新，容差稍微放宽至 0.02
-                if (!anno.width || Math.abs(anno.width - newW) > 0.02 || Math.abs(anno.height - newH) > 0.02) {
-                    anno.width = newW;
-                    anno.height = newH;
-                    updateSaveStatus(true);
-                    if (typeof saveAnnotationsToStorage === 'function') saveAnnotationsToStorage();
-                }
-            }
-        });
+        // 原生拖拉角已废弃，文本框尺寸仅由 render.js 的显式手势写入与入栈；保留空壳兼容外部引用，不再异步标脏纯净文档。
+        const globalTextResizeObserver = { observe() {}, unobserve() {}, disconnect() {} };
 

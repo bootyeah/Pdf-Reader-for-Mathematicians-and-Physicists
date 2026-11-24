@@ -38,6 +38,10 @@
     let _mindmapDomDirty = true;
     let _lastRenderedMindmapRef = null;
     let _lastRenderedActivePageId = null;
+    let _lastRenderIndex = null;
+    let _lastHighlightedPdfPage = -1;
+    let _lastHighlightedRenderRef = null;
+    let _lastHighlightedActivePageVal = undefined;
     let _svgLayoutCache = null;
     const _nodeContentHtmlCache = new Map();
     const MAX_NODE_CONTENT_CACHE = 500;
@@ -1670,13 +1674,109 @@
         return true;
     }
 
+    function updateCardTagBadgeInPlace(nodeId, nextTag) {
+        const els = getEls();
+        if (!els.treeRoot || _mindmapDomDirty) return false;
+        const card = els.treeRoot.querySelector(`.mm-card[data-id="${nodeId}"]`);
+        const head = card?.querySelector(':scope > .mm-card-head');
+        const leftInfo = head?.querySelector(':scope > .mm-card-left');
+        if (!card || !head || !leftInfo) return false;
+
+        let tagBadge = leftInfo.querySelector(':scope > .mm-math-tag');
+        if (nextTag && MATH_TAGS[nextTag]) {
+            const tagDef = MATH_TAGS[nextTag];
+            if (!tagBadge) {
+                tagBadge = document.createElement('button');
+                tagBadge.type = 'button';
+                tagBadge.onclick = (e) => {
+                    e.stopPropagation();
+                    showTagPickerPopover(nodeId, tagBadge);
+                };
+                const pageGroup = leftInfo.querySelector(':scope > .mm-page-badge-group');
+                if (pageGroup) leftInfo.insertBefore(tagBadge, pageGroup);
+                else leftInfo.appendChild(tagBadge);
+            }
+            tagBadge.className = `mm-math-tag mm-tag-${nextTag}`;
+            tagBadge.title = `理论定位: ${tagDef.label} (点击更改)`;
+            tagBadge.innerHTML = `<i class="ph ${tagDef.icon}"></i><span>${tagDef.label}</span>`;
+        } else if (tagBadge) {
+            tagBadge.remove();
+        }
+        head.classList.toggle('is-empty-head', leftInfo.children.length === 0);
+        return true;
+    }
+
+    function updateCardPageBadgeInPlace(nodeId, nextPage) {
+        const els = getEls();
+        if (!els.treeRoot || _mindmapDomDirty) return false;
+        const card = els.treeRoot.querySelector(`.mm-card[data-id="${nodeId}"]`);
+        const head = card?.querySelector(':scope > .mm-card-head');
+        const leftInfo = head?.querySelector(':scope > .mm-card-left');
+        if (!card || !head || !leftInfo) return false;
+
+        let group = leftInfo.querySelector(':scope > .mm-page-badge-group');
+        if (nextPage != null && nextPage > 0) {
+            const curReadingPage = (state.currentPhysicalPage && state.currentPhysicalPage > 0) ? state.currentPhysicalPage : 1;
+            const isCurrent = (nextPage === curReadingPage);
+            if (!group) {
+                group = document.createElement('div');
+                const pageBadge = document.createElement('button');
+                pageBadge.type = 'button';
+                pageBadge.className = 'mm-page-badge';
+                pageBadge.oncontextmenu = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    showPagePickerPopover(nodeId, pageBadge);
+                };
+                group.appendChild(pageBadge);
+
+                const clearPageBtn = document.createElement('button');
+                clearPageBtn.type = 'button';
+                clearPageBtn.className = 'mm-page-clear-btn';
+                clearPageBtn.title = '解除该页码关联';
+                clearPageBtn.innerHTML = '<i class="ph ph-x"></i>';
+                clearPageBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    setNodePage(nodeId, null);
+                    showMindmapToast('已解除页码关联');
+                };
+                group.appendChild(clearPageBtn);
+                leftInfo.appendChild(group);
+            }
+            group.className = 'mm-page-badge-group' + (isCurrent ? ' is-active-page' : '');
+            const pageBadge = group.querySelector(':scope > .mm-page-badge');
+            if (pageBadge) {
+                pageBadge.title = `点击直达 PDF 第 ${nextPage} 页（右键修改）`;
+                pageBadge.innerHTML = `<i class="ph ph-bookmark-simple"></i><span>P.${nextPage}${isCurrent ? ' · 当前' : ''}</span>`;
+                pageBadge.onclick = (e) => {
+                    e.stopPropagation();
+                    locatePdfPage(nextPage);
+                };
+            }
+        } else if (group) {
+            group.remove();
+        }
+        head.classList.toggle('is-empty-head', leftInfo.children.length === 0);
+        return true;
+    }
+
     function setNodeTag(nodeId, tagKey) {
+        const normalizedTag = (tagKey && MATH_TAGS[tagKey]) ? tagKey : null;
+        const canPatchInPlace = isMindmapOpen && !_mindmapDomDirty;
         commitMindMapChange((data) => {
             const node = findNodeInTree(data.root, nodeId);
             if (node) {
-                node.tag = (tagKey && MATH_TAGS[tagKey]) ? tagKey : null;
+                node.tag = normalizedTag;
             }
-        });
+        }, { render: false });
+        if (canPatchInPlace && updateCardTagBadgeInPlace(nodeId, normalizedTag)) {
+            _mindmapDomDirty = false;
+            _lastRenderedMindmapRef = state.annotations['mindmap'];
+            _svgLayoutCache = null;
+            scheduleSvgConnectionsUpdate();
+        } else if (isMindmapOpen) {
+            renderTree();
+        }
     }
 
     function toggleNodeCollapse(nodeId) {
@@ -1741,12 +1841,23 @@
     }
 
     function setNodePage(nodeId, newPage) {
+        const normalizedPage = (newPage && newPage > 0) ? parseInt(newPage, 10) : null;
+        const canPatchInPlace = isMindmapOpen && !_mindmapDomDirty;
         commitMindMapChange((data) => {
             const node = findNodeInTree(data.root, nodeId);
             if (node) {
-                node.page = (newPage && newPage > 0) ? parseInt(newPage, 10) : null;
+                node.page = normalizedPage;
             }
-        });
+        }, { render: false });
+        _lastHighlightedPdfPage = -1;
+        if (canPatchInPlace && updateCardPageBadgeInPlace(nodeId, normalizedPage)) {
+            _mindmapDomDirty = false;
+            _lastRenderedMindmapRef = state.annotations['mindmap'];
+            _svgLayoutCache = null;
+            scheduleSvgConnectionsUpdate();
+        } else if (isMindmapOpen) {
+            renderTree();
+        }
     }
 
     // 为指定思维导图页设置或清除绑定的 PDF 页码（与节点页码绑定行为完全一致）
@@ -4081,15 +4192,21 @@
 
     function positionConvergenceLayouts() {
         if (!convergenceLayouts.length) return;
-        for (const { row, entries, ordered } of convergenceLayouts) {
-            if (!row.isConnected) continue;
+        const activeLayouts = [];
+        // Phase 1: 批量读取所有合流分支的卡片尺寸，避免多组布局间读写交替引发强制同步回流
+        for (const layout of convergenceLayouts) {
+            if (!layout.row.isConnected) continue;
             const columns = [];
-            ordered.forEach(entry => {
+            layout.ordered.forEach(entry => {
                 const card = entry.branch.querySelector(':scope > .mm-card-wrapper');
                 entry.width = card.offsetWidth;
                 entry.height = card.offsetHeight;
                 (columns[entry.rank] ||= []).push(entry);
             });
+            activeLayouts.push({ row: layout.row, entries: layout.entries, ordered: layout.ordered, columns });
+        }
+        // Phase 2: 纯数值计算 + 批量样式写入
+        for (const { row, entries, ordered, columns } of activeLayouts) {
             // 自右向左预估每个节点的独占子分支高度跨度，避免同一列中多子节点父卡片与相邻卡片挤在一起
             for (let r = columns.length - 1; r >= 0; r--) {
                 const col = columns[r] || [];
@@ -4896,8 +5013,21 @@
         if (!isMindmapOpen) return;
         const curPage = (state.currentPhysicalPage && state.currentPhysicalPage > 0) ? state.currentPhysicalPage : 1;
         const data = getMindMapData();
-        const pages = getMindMapPages(data);
         const activePage = getActiveMindMapPage(data);
+        const activePageVal = activePage?.page ?? null;
+        if (
+            _lastHighlightedPdfPage === curPage &&
+            _lastHighlightedRenderRef === _lastRenderedMindmapRef &&
+            _lastHighlightedActivePageVal === activePageVal
+        ) {
+            return;
+        }
+        _lastHighlightedPdfPage = curPage;
+        _lastHighlightedRenderRef = _lastRenderedMindmapRef;
+        _lastHighlightedActivePageVal = activePageVal;
+
+        const pages = getMindMapPages(data);
+        const nodeMap = _lastRenderIndex?.nodeMap || null;
 
         document.querySelectorAll('.mm-page-badge-group').forEach(group => {
             const tabPageId = group.dataset.pageId;
@@ -4918,7 +5048,7 @@
             const branch = group.closest('.mm-tree-branch');
             if (!branch) return;
             const nId = branch.dataset.id;
-            const node = findNodeInTree(data, nId);
+            const node = (nodeMap && nodeMap.get(nId)) || findNodeInTree(data, nId);
             if (node && node.page) {
                 const isCur = (node.page === curPage);
                 group.classList.toggle('is-active-page', isCur);
@@ -4988,7 +5118,7 @@
                 const pageBadge = document.createElement('button');
                 pageBadge.type = 'button';
                 pageBadge.className = 'mm-page-badge';
-                pageBadge.innerHTML = `<i class="ph-fill ph-BookOpenText text-[10px]"></i><span>${isCurPdf ? `P.${pageObj.page} · 当前` : `P.${pageObj.page}`}</span>`;
+                pageBadge.innerHTML = `<i class="ph-fill ph-book-open-text text-[10px]"></i><span>${isCurPdf ? `P.${pageObj.page} · 当前` : `P.${pageObj.page}`}</span>`;
                 pageBadge.title = `点击定位到 PDF 第 ${pageObj.page} 页（右键修改关联页码）`;
                 pageBadge.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -5007,7 +5137,7 @@
                 const clearBtn = document.createElement('button');
                 clearBtn.type = 'button';
                 clearBtn.className = 'mm-page-clear-btn';
-                clearBtn.innerHTML = '<i class="ph-bold ph-x"></i>';
+                clearBtn.innerHTML = '<i class="ph ph-x"></i>';
                 clearBtn.title = '解除此导图页的 PDF 页码关联';
                 clearBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -5099,6 +5229,8 @@
         renderPagesBar(data);
         const chains = getAllMainChains(data);
         const renderIndex = buildRenderIndex(data);
+        _lastRenderIndex = renderIndex;
+        _lastHighlightedPdfPage = -1;
         const total = renderIndex.total;
         if (selectedNodeId && !renderIndex.nodeMap.has(selectedNodeId)) selectedNodeId = null;
         selectedNodeIds = new Set([...selectedNodeIds].filter(id => renderIndex.nodeMap.has(id)));
@@ -6214,6 +6346,51 @@
     // 9. 生命周期回调
     // ==========================================
 
+    function resetForDocument() {
+        editingNodeId = null;
+        selectedNodeId = null;
+        selectedNodeIds.clear();
+        draggingNodeId = null;
+        draggingNodeObj = null;
+        _lastNormalizedMindmapData = null;
+        _mindmapDomDirty = true;
+        _lastRenderIndex = null;
+        _lastHighlightedPdfPage = -1;
+        _svgLayoutCache = null;
+        stopInteractiveMergeMode();
+        stopInteractiveReparentMode();
+        closeAllPopovers();
+        if (isMindmapOpen) {
+            const els = getEls();
+            els.treeRoot?.replaceChildren();
+            els.svgCanvas?.querySelectorAll('path, g.mm-dynamic')?.forEach(n => n.remove());
+            els.pagesList?.replaceChildren();
+            if (els.nodeCount) els.nodeCount.textContent = '0';
+        }
+    }
+
+    function syncFromHistory() {
+        _lastNormalizedMindmapData = null;
+        _mindmapDomDirty = true;
+        _lastRenderIndex = null;
+        _lastHighlightedPdfPage = -1;
+        _svgLayoutCache = null;
+        stopInteractiveMergeMode();
+        stopInteractiveReparentMode();
+        closeAllPopovers();
+        if (state.annotations?.['mindmap']) {
+            const data = getMindMapData();
+            const activePage = getActiveMindMapPage(data);
+            const savedZoom = Number(activePage?.zoom ?? data?.zoom);
+            if (Number.isFinite(savedZoom)) currentZoom = Math.min(2.5, Math.max(0.35, savedZoom));
+            if (Number.isFinite(Number(activePage?.panX))) panX = Number(activePage.panX);
+            if (Number.isFinite(Number(activePage?.panY))) panY = Number(activePage.panY);
+        }
+        if (isMindmapOpen) {
+            renderTree();
+        }
+    }
+
     function onAnnotationsLoaded() {
         editingNodeId = null;
         selectedNodeId = null;
@@ -6222,6 +6399,8 @@
         draggingNodeObj = null;
         _lastNormalizedMindmapData = null;
         _mindmapDomDirty = true;
+        _lastRenderIndex = null;
+        _lastHighlightedPdfPage = -1;
         _svgLayoutCache = null;
         stopInteractiveMergeMode();
         stopInteractiveReparentMode();
@@ -6232,6 +6411,8 @@
         const activePage = state.annotations?.['mindmap'] ? getActiveMindMapPage() : null;
         const savedZoom = Number(activePage?.zoom ?? state.annotations?.['mindmap']?.zoom);
         currentZoom = Number.isFinite(savedZoom) ? Math.min(2.5, Math.max(0.35, savedZoom)) : 1.0;
+        if (Number.isFinite(Number(activePage?.panX))) panX = Number(activePage.panX);
+        if (Number.isFinite(Number(activePage?.panY))) panY = Number(activePage.panY);
         if (isMindmapOpen) {
             renderTree();
         }
@@ -6249,6 +6430,8 @@
         toggle: toggleMindmap,
         render: renderTree,
         onAnnotationsLoaded: onAnnotationsLoaded,
+        syncFromHistory: syncFromHistory,
+        resetForDocument: resetForDocument,
         locatePage: locatePdfPage,
         center: centerView,
         addMainChain: addMainChain,

@@ -803,16 +803,23 @@
         // 渲染时又只用比例 × 页面尺寸还原。因此页面缩放（重排或临时 transform）
         // 只会改变文本框在屏幕上的显示比例，绝不会改写它本身的宽高。
         // ==============================================================================
-        const TEXT_RESIZE_ZONE = 16;   // 右下角感应区，单位是屏幕像素，与缩放无关
-        const TEXT_RESIZE_MIN_W = 24;  // 最小宽度（画布像素，正常缩放下等同屏幕像素）
-        const TEXT_RESIZE_MIN_H = 18;  // 最小高度
+        const TEXT_RESIZE_ZONE = 16;      // 右下角感应区，单位是屏幕像素，与缩放无关
+        const TEXT_RESIZE_NW_ZONE = 8;    // 左上角感应区（8px 紧凑热区，避免遮挡框内点击编辑与居中拖拽）
+        const TEXT_RESIZE_MIN_W = 24;     // 最小宽度（画布像素，正常缩放下等同屏幕像素）
+        const TEXT_RESIZE_MIN_H = 18;     // 最小高度
         const TEXT_RESIZE_MIN_CONTENT = 8;   // 最小值之上再留给正文的余量
         let textResizeGesture = null;
         let suppressTextClickUntil = 0;   // 刚缩放完的那一次 click 不该被当成"点击编辑"
 
-        function isTextResizeCorner(div, e) {
+        function getTextResizeCorner(div, e) {
             const rect = div.getBoundingClientRect();
-            return e.clientX > rect.right - TEXT_RESIZE_ZONE && e.clientY > rect.bottom - TEXT_RESIZE_ZONE;
+            if (e.clientX > rect.right - TEXT_RESIZE_ZONE && e.clientY > rect.bottom - TEXT_RESIZE_ZONE) return 'se';
+            if (e.clientX < rect.left + TEXT_RESIZE_NW_ZONE && e.clientY < rect.top + TEXT_RESIZE_NW_ZONE) return 'nw';
+            return null;
+        }
+
+        function isTextResizeCorner(div, e) {
+            return getTextResizeCorner(div, e) !== null;
         }
 
         // 能拖到的最小尺寸：绝不能小于自身内边距之和。
@@ -846,15 +853,26 @@
             return scale * visualW / layoutW;
         }
 
-        function beginTextResize(e, div, anno, pageNum, w, h) {
+        function beginTextResize(e, div, anno, pageNum, w, h, corner = 'se') {
             const scale = textResizeScale(div);
             const rect = div.getBoundingClientRect();
             const startW = rect.width / scale;
             const startH = rect.height / scale;
+            const startXInW = anno.x * w;
+            const startYInH = anno.y * h;
+            const wrapper = div.closest('.page-wrapper');
+            const view = wrapper?._annotationView;
+            const currentLayerW = (view && view.width) || (wrapper && parseFloat(wrapper.style.width)) || w;
+            const currentLayerH = (view && view.height) || (wrapper && parseFloat(wrapper.style.height)) || h;
             textResizeGesture = {
                 anno: anno, div: div, pageNum: pageNum, w: w, h: h, scale: scale,
+                corner: corner === 'nw' ? 'nw' : 'se',
                 startX: e.clientX, startY: e.clientY,
                 startW: startW, startH: startH, width: startW, height: startH,
+                startXInW: startXInW, startYInH: startYInH,
+                nextXInW: startXInW, nextYInH: startYInH,
+                anchorRight: startXInW + startW, anchorBottom: startYInH + startH,
+                posZoomX: currentLayerW / w, posZoomY: currentLayerH / h,
                 minimum: textResizeMinimum(div),
                 moved: false
             };
@@ -875,8 +893,17 @@
             g.moved = true;
             e.preventDefault();
             // 下限既保证"看得见"（24/18 屏幕像素），也不会小于内边距，避免尺寸被浏览器撑回去
-            g.width = Math.max(g.minimum.width, g.startW + dx);
-            g.height = Math.max(g.minimum.height, g.startH + dy);
+            if (g.corner === 'nw') {
+                g.nextXInW = Math.max(0, Math.min(g.anchorRight - g.minimum.width, g.startXInW + dx));
+                g.nextYInH = Math.max(0, Math.min(g.anchorBottom - g.minimum.height, g.startYInH + dy));
+                g.width = Math.max(g.minimum.width, g.anchorRight - g.nextXInW);
+                g.height = Math.max(g.minimum.height, g.anchorBottom - g.nextYInH);
+                g.div.style.left = (g.nextXInW * g.posZoomX) + 'px';
+                g.div.style.top = (g.nextYInH * g.posZoomY) + 'px';
+            } else {
+                g.width = Math.max(g.minimum.width, g.startW + dx);
+                g.height = Math.max(g.minimum.height, g.startH + dy);
+            }
             g.div.style.minWidth = '';
             g.div.style.maxWidth = '';
             g.div.style.overflowWrap = '';
@@ -899,8 +926,12 @@
             suppressTextClickUntil = performance.now() + 200;
             // 手势期间批注可能已被撤销/重做替换成新对象，此时放弃写入，别污染新状态。
             if (!state.annotations[g.pageNum]?.includes(g.anno)) return;
-            const { anno, pageNum, w, h, width, height } = g;
+            const { anno, pageNum, w, h, width, height, corner, nextXInW, nextYInH } = g;
             performAction(() => {
+                if (corner === 'nw') {
+                    anno.x = nextXInW / w;
+                    anno.y = nextYInH / h;
+                }
                 anno.width = width / w;
                 anno.height = height / h;
             }, [pageNum]);
@@ -1102,11 +1133,12 @@
                             return;
                         }
                         if (e.button !== 0) return; 
-                        // 右下角：进入缩放手势（浏览器原生拖拉角已隐藏，这里完全自管）
-                        if (isTextResizeCorner(div, e)) {
+                        // 左上角 / 右下角：进入缩放手势（浏览器原生拖拉角已隐藏，这里完全自管）
+                        const resizeCorner = getTextResizeCorner(div, e);
+                        if (resizeCorner) {
                             e.stopPropagation();
                             e.preventDefault();
-                            beginTextResize(e, div, anno, pageNum, w, h);
+                            beginTextResize(e, div, anno, pageNum, w, h, resizeCorner);
                             return; 
                         }
                         const rect = div.getBoundingClientRect();

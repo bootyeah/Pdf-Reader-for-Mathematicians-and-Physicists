@@ -625,9 +625,18 @@ def handle_save_file(handler):
                 if signature != b'%PDF-':
                     raise ValueError('上传内容不是 PDF，原文件未修改')
                 f.flush()
-            # Allow mock on os.replace
+            # Allow mock on os.replace; retry transient Windows Defender / Explorer locks briefly
             os_replace = getattr(sys.modules.get('server'), 'os', os).replace
-            os_replace(temp_target, target_path)
+            for _attempt, _delay in enumerate((0.04, 0.1, 0.2, 0.0)):
+                try:
+                    os_replace(temp_target, target_path)
+                    break
+                except OSError as _exc:
+                    if _delay > 0 and getattr(_exc, 'winerror', None) in (5, 32):
+                        import time as _time
+                        _time.sleep(_delay)
+                        continue
+                    raise
         finally:
             if os.path.exists(temp_target):
                 os.unlink(temp_target)

@@ -97,6 +97,16 @@
                 const cleanAnno = (a) => (typeof stripTransientAnnotationFields === 'function'
                     ? stripTransientAnnotationFields(a)
                     : a);
+                const MM_PLACEHOLDERS = new Set([
+                    '新节点', '新建子节点', '新建同级', '进一步子节点', '推演结论', '未命名节点',
+                    '主逻辑分支 1', '主逻辑分支 2', '论证细节 / 辅助引理', '汇合定理 / 综合结论',
+                    '并行支线 1', '并行支线 2', '核心主题 / 总定理体系'
+                ]);
+                const isMmPlaceholder = (txt) => !txt || MM_PLACEHOLDERS.has(txt)
+                    || /^§\d+\s+主干推演阶段/.test(txt)
+                    || /^并行分支\s+[A-Z]$/.test(txt)
+                    || /^主链\s+[IVX\d]+：/.test(txt);
+
                 const mergeMindMapNodes = (targetList, srcList) => {
                     if (!Array.isArray(srcList)) return;
                     const byId = new Map();
@@ -122,11 +132,31 @@
                                 mergeMindMapNodes(cur.branches[bi], br);
                             });
                         }
-                        if ((!cur.text || cur.text === '新节点') && cloned.text) cur.text = cloned.text;
+                        if (Array.isArray(cloned.convergeChildren) && cloned.convergeChildren.length) {
+                            if (!Array.isArray(cur.convergeChildren)) cur.convergeChildren = [];
+                            mergeMindMapNodes(cur.convergeChildren, cloned.convergeChildren);
+                        }
+                        if (cloned.forkConverge && typeof cloned.forkConverge === 'object') {
+                            if (!cur.forkConverge || !cur.forkConverge.id) {
+                                cur.forkConverge = cloned.forkConverge;
+                            } else {
+                                mergeMindMapNodes([cur.forkConverge], [cloned.forkConverge]);
+                            }
+                        }
+                        if (isMmPlaceholder(cur.text) && cloned.text && (!cur.text || !isMmPlaceholder(cloned.text))) {
+                            cur.text = cloned.text;
+                        }
                         if (!cur.note && cloned.note) cur.note = cloned.note;
+                        if (!cur.tag && cloned.tag) cur.tag = cloned.tag;
+                        if (!(Number(cur.page) > 0) && Number(cloned.page) > 0) cur.page = Number(cloned.page);
+                        if (cur.collapsed === undefined && typeof cloned.collapsed === 'boolean') cur.collapsed = cloned.collapsed;
                         if (Array.isArray(cloned.mergeTo) && cloned.mergeTo.length) {
                             const merged = new Set([...(Array.isArray(cur.mergeTo) ? cur.mergeTo : []), ...cloned.mergeTo]);
                             cur.mergeTo = Array.from(merged);
+                        }
+                        if (Array.isArray(cloned.convergeTo) && cloned.convergeTo.length) {
+                            const converged = new Set([...(Array.isArray(cur.convergeTo) ? cur.convergeTo : []), ...cloned.convergeTo]);
+                            cur.convergeTo = Array.from(converged);
                         }
                     });
                 };
@@ -175,13 +205,21 @@
                                     pageById.set(ip.id, ip);
                                 } else {
                                     const tp = pageById.get(ip.id);
-                                    if (!Array.isArray(tp.nodes)) tp.nodes = [];
-                                    mergeMindMapNodes(tp.nodes, ip.nodes || []);
-                                    if (tp.root && ip.root) mergeMindMapNodes([tp.root], [ip.root]);
+                                    if (!Array.isArray(tp.nodes) || !tp.nodes.length) {
+                                        tp.nodes = tp.root ? [tp.root] : [];
+                                    }
+                                    const ipNodes = (Array.isArray(ip.nodes) && ip.nodes.length)
+                                        ? ip.nodes
+                                        : (ip.root ? [ip.root] : []);
+                                    mergeMindMapNodes(tp.nodes, ipNodes);
+                                    if (tp.nodes[0]) tp.root = tp.nodes[0];
+                                    if (!(Number(tp.page) > 0) && Number(ip.page) > 0) tp.page = Number(ip.page);
+                                    if ((!tp.title || /^导图\s*\d+$/.test(tp.title)) && ip.title) tp.title = ip.title;
                                 }
                             });
                         } else if (Array.isArray(curMap.nodes) && Array.isArray(incMap.nodes)) {
                             mergeMindMapNodes(curMap.nodes, incMap.nodes);
+                            if (curMap.nodes[0]) curMap.root = curMap.nodes[0];
                         } else {
                             state.annotations['mindmap'] = incMap;
                         }
@@ -196,7 +234,8 @@
                 }
             });
 
-            window.MindMap?.render?.();
+            if (window.MindMap?.onAnnotationsLoaded) window.MindMap.onAnnotationsLoaded();
+            else window.MindMap?.render?.();
             console.log(`批注已导入（${mode === 'merge' ? '合并' : '覆盖'}）来源：${options.source || '本地文件'}`);
             return true;
         }

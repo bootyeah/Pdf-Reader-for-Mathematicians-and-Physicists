@@ -191,11 +191,77 @@ async function performSave() {
     }
 }
 
+async function encodeSavedPdfBytes(context, isCurrent = () => true) {
+    if (typeof Worker === 'function') {
+        try {
+            return await new Promise((resolve, reject) => {
+                const workerUrl = typeof readerAssetUrl === 'function'
+                    ? readerAssetUrl('./js/annotation-worker.js')
+                    : './js/annotation-worker.js';
+                const worker = new Worker(workerUrl);
+                let settled = false;
+                const finish = (bytes, error) => {
+                    if (settled) return;
+                    settled = true;
+                    worker.terminate();
+                    if (error) reject(error); else resolve(bytes);
+                };
+                worker.onmessage = event => {
+                    if (event.data?.error) { finish(null, new Error(event.data.error)); return; }
+                    finish(event.data?.pdfBytes || null, null);
+                };
+                worker.onerror = event => { event.preventDefault(); finish(null, new Error(event.message || '保存 worker 执行失败')); };
+                worker.onmessageerror = () => finish(null, new Error('保存 worker 消息解码失败'));
+                try {
+                    worker.postMessage({
+                        action: 'save',
+                        file: context.rawFile,
+                        fingerprint: context.fingerprint,
+                        annotations: context.annotations,
+                        pageGrids: context.pageGrids
+                    });
+                } catch (err) {
+                    finish(null, err);
+                }
+            });
+        } catch (workerErr) {
+            if (!isCurrent()) return null;
+            console.warn('保存 worker 不可用，回退至主线程编码:', workerErr);
+        }
+    }
+
+    if (typeof PDFLib === 'undefined') throw new Error('保存组件未加载');
+    const { PDFDocument, PDFName, PDFHexString } = PDFLib;
+    const data = await context.rawFile.arrayBuffer();
+    if (!isCurrent()) return null;
+    const pdfDoc = await PDFDocument.load(data, { ignoreEncryption: true });
+    if (!isCurrent()) return null;
+    if (!pdfDoc.context.trailerInfo.ID && /^[a-f0-9]{32}$/i.test(context.fingerprint)) {
+        pdfDoc.context.trailerInfo.ID = pdfDoc.context.obj([
+            PDFHexString.of(context.fingerprint), PDFHexString.of(context.fingerprint)
+        ]);
+    }
+    const encodeHex = (str) => {
+        const utf8Bytes = new TextEncoder().encode(str);
+        const hexArray = new Array(utf8Bytes.length);
+        for (let i = 0; i < utf8Bytes.length; i++) {
+            hexArray[i] = utf8Bytes[i].toString(16).padStart(2, '0');
+        }
+        return hexArray.join('');
+    };
+    const infoDict = pdfDoc.getInfoDict();
+    infoDict.set(PDFName.of('ReaderProAnnos'), PDFHexString.of(encodeHex(context.annotations)));
+    if (context.pageGrids && context.pageGrids !== '{}') {
+        infoDict.set(PDFName.of('ReaderProGrids'), PDFHexString.of(encodeHex(context.pageGrids)));
+    } else {
+        infoDict.delete(PDFName.of('ReaderProGrids'));
+    }
+    return await pdfDoc.save();
+}
+
 async function performSaveInner(context) {
     const isCurrent = () => state.loadToken === context.loadToken;
     if (!context.rawFile) return;
-    if (typeof PDFLib === 'undefined') { alert("保存组件未加载"); return; }
-    const { PDFDocument, PDFName, PDFHexString } = PDFLib; 
 
     // 此时用户的“点击”或“Ctrl+S”动作是绝对新鲜的，绝不会触发超时拦截。
     if (context.fileHandle) {
@@ -217,47 +283,9 @@ async function performSaveInner(context) {
     els.saveIcon.className = "ph ph-spinner animate-spin text-xl"; 
 
     try {
-        // 1. 核心破解：加上 { ignoreEncryption: true }，无视 Springer 等防篡改锁！
-        const data = await context.rawFile.arrayBuffer();
-        if (!isCurrent()) return;
-        const pdfDoc = await PDFDocument.load(data, { ignoreEncryption: true });
-        if (!isCurrent()) return;
-        // 为没有 /ID 的 PDF 补充标识，兼容外部阅读器；本阅读器始终
-        // 按页面内容识别文档，避免不同 PDF 复用 /ID 时串批注。
-        if (!pdfDoc.context.trailerInfo.ID && /^[a-f0-9]{32}$/i.test(context.fingerprint)) {
-            pdfDoc.context.trailerInfo.ID = pdfDoc.context.obj([
-                PDFHexString.of(context.fingerprint), PDFHexString.of(context.fingerprint)
-            ]);
-        }
-        const jsonString = context.annotations;
-
-        // 2. 将 JSON 强制转为 Hex 十六进制，根除任何特殊符号引起的 PDF 解析崩溃
-        const utf8Bytes = new TextEncoder().encode(jsonString);
-        // 🚀 性能优化：使用固定长度数组替代字符串 += 拼接，提速10倍以上
-        const hexArray = new Array(utf8Bytes.length);
-        for (let i = 0; i < utf8Bytes.length; i++) {
-            hexArray[i] = utf8Bytes[i].toString(16).padStart(2, '0');
-        }
-        const hexStr = hexArray.join('');
-
-        // 3. 极简挂载：写入最外围、最稳定的 Info 字典，绝不破坏 PDF 内部结构
-        const infoDict = pdfDoc.getInfoDict();
-        infoDict.set(PDFName.of('ReaderProAnnos'), PDFHexString.of(hexStr));
-
-        // 4. 独立挂载纯图片页自动分格数据（仅保存在本地 PDF 文件，不参与云端批注同步）
-        if (context.pageGrids && context.pageGrids !== '{}') {
-            const gridBytes = new TextEncoder().encode(context.pageGrids);
-            const gridHex = new Array(gridBytes.length);
-            for (let i = 0; i < gridBytes.length; i++) {
-                gridHex[i] = gridBytes[i].toString(16).padStart(2, '0');
-            }
-            infoDict.set(PDFName.of('ReaderProGrids'), PDFHexString.of(gridHex.join('')));
-        } else {
-            infoDict.delete(PDFName.of('ReaderProGrids'));
-        }
-
-        const pdfBytes = await pdfDoc.save();
-        if (!isCurrent()) return;
+        // 优先交由独立 Web Worker 完成大体积 PDF 加载与字节序列化，彻底避免按 Space 或 Ctrl+S 冻结主线程
+        const pdfBytes = await encodeSavedPdfBytes(context, isCurrent);
+        if (!pdfBytes || !isCurrent()) return;
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
 
         // 原位保存目标 = 当前窗口这份文档自己的磁盘路径（唯一真源，绝不跨文档复用）
@@ -345,7 +373,12 @@ async function performSaveInner(context) {
 
 let isDragging = false, noteModalDragged = false, startX, startY, initialLeft, initialTop;
 const dragHeader = document.getElementById('note-header');
-dragHeader.addEventListener('mousedown', (e) => { isDragging = true; noteModalDragged = false; startX = e.clientX; startY = e.clientY; const r = els.noteModal.getBoundingClientRect(); initialLeft = r.left; initialTop = r.top; dragHeader.style.cursor = 'grabbing'; });
+dragHeader.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || e.target.closest('button, input, .note-modal-resize-nw, #anno-color-popover')) return;
+    isDragging = true; noteModalDragged = false; startX = e.clientX; startY = e.clientY;
+    const r = els.noteModal.getBoundingClientRect(); initialLeft = r.left; initialTop = r.top;
+    dragHeader.style.cursor = 'grabbing';
+});
 document.addEventListener('mousemove', (e) => {
     if (!isDragging) return;
     noteModalDragged = true;
@@ -363,6 +396,52 @@ const stopNoteHeaderDrag = () => {
 };
 document.addEventListener('mouseup', stopNoteHeaderDrag);
 window.addEventListener('blur', stopNoteHeaderDrag);
+
+(function bindNoteModalTopLeftResize() {
+    const nwHandle = els.noteModal?.querySelector('.note-modal-resize-nw');
+    if (!nwHandle || !els.noteModal) return;
+    let resizingNw = false, rStartX = 0, rStartY = 0, rStartLeft = 0, rStartTop = 0, rAnchorRight = 0, rAnchorBottom = 0;
+    const MIN_W = 260, MIN_H = 200;
+
+    function onNwMove(e) {
+        if (!resizingNw) return;
+        if (e.buttons !== 1) { onNwEnd(); return; }
+        const nextLeft = Math.max(8, Math.min(rAnchorRight - MIN_W, rStartLeft + e.clientX - rStartX));
+        const nextTop = Math.max(8, Math.min(rAnchorBottom - MIN_H, rStartTop + e.clientY - rStartY));
+        els.noteModal.style.left = `${nextLeft}px`;
+        els.noteModal.style.top = `${nextTop}px`;
+        els.noteModal.style.width = `${rAnchorRight - nextLeft}px`;
+        els.noteModal.style.height = `${rAnchorBottom - nextTop}px`;
+    }
+
+    function onNwEnd() {
+        if (!resizingNw) return;
+        resizingNw = false;
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        document.removeEventListener('mousemove', onNwMove, true);
+        document.removeEventListener('mouseup', onNwEnd, true);
+        window.FloatingWindowLayers?.resetViewportBase(els.noteModal);
+    }
+
+    nwHandle.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        resizingNw = true;
+        rStartX = e.clientX;
+        rStartY = e.clientY;
+        rStartLeft = els.noteModal.offsetLeft;
+        rStartTop = els.noteModal.offsetTop;
+        rAnchorRight = rStartLeft + els.noteModal.offsetWidth;
+        rAnchorBottom = rStartTop + els.noteModal.offsetHeight;
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'nwse-resize';
+        document.addEventListener('mousemove', onNwMove, true);
+        document.addEventListener('mouseup', onNwEnd, true);
+    });
+    window.addEventListener('blur', onNwEnd);
+})();
 const syncNoteModalViewport = () => {
     if (!els.noteModal || els.noteModal.classList.contains('hidden')) return;
     if (!window.FloatingWindowLayers?.hasViewportBase(els.noteModal)) return;
@@ -699,12 +778,15 @@ if (saveSnippetBtn) {
 
         if (anno && anno.type === 'text') {
             if (!state.annotations['snippets']) state.annotations['snippets'] = [];
+            const liveText = (state.isEditingNote && els.noteInput && !els.noteInput.classList.contains('hidden'))
+                ? els.noteInput.value
+                : anno.text;
 
             // 核心动作：存入素材库，支持撤销，并自动触发文件写入！
             performAction(() => {
                 state.annotations['snippets'].push({
                     id: nextAnnotationId('snip_'),
-                    text: anno.text,
+                    text: liveText,
                     color: anno.color,
                     timestamp: new Date().toLocaleString()
                 });

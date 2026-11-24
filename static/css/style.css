@@ -326,16 +326,17 @@
             background-color: rgba(255, 165, 0, 0.35);
             border-radius: 4px;
             box-shadow: 0 0 0 1.5px rgba(249, 115, 22, 0.8), 0 0 20px rgba(249, 115, 22, 0.5);
-            animation: searchPulse 2s infinite;
+            opacity: 0.88;
+            animation: searchPulse 0.9s ease-in-out 2;
             pointer-events: none;
             mix-blend-mode: multiply;
             z-index: 25;
             transform-origin: center;
         }
         @keyframes searchPulse {
-            0% { opacity: 0.6; transform: scale(1); }
+            0% { opacity: 0.65; transform: scale(1); }
             50% { opacity: 1; transform: scale(1.03); }
-            100% { opacity: 0.6; transform: scale(1); }
+            100% { opacity: 0.88; transform: scale(1); }
         }
 
         .vector-svg {
@@ -530,6 +531,20 @@
             /* 进场动画 */
             animation: dictFadeIn 0.16s ease-out;
         }
+        .dict-resize-nw,
+        .dict-resize-se,
+        .note-modal-resize-nw {
+            position: absolute;
+            width: 14px;
+            height: 14px;
+            cursor: nwse-resize;
+            z-index: 60;
+            pointer-events: auto;
+        }
+        .dict-resize-nw,
+        .note-modal-resize-nw { top: 0; left: 0; }
+        .dict-resize-se { bottom: 0; right: 0; }
+        .dict-panel-body { flex: 1 1 auto; min-height: 0; }
         @keyframes dictFadeIn {
             from { opacity: 0; transform: translateY(6px) scale(0.98); }
             to { opacity: 1; transform: none; }
@@ -649,9 +664,7 @@
             height: 380px;
             display: flex;
             flex-direction: column;
-            background: rgba(24, 24, 27, 0.96);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
+            background: rgba(24, 24, 27, 0.985);
             border: 1px solid rgba(255, 255, 255, 0.09);
             border-radius: 12px;
             box-shadow: 0 24px 50px -12px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05);
@@ -694,7 +707,8 @@
         .video-panel.is-collapsed .video-overlay,
         .video-panel.is-collapsed .video-hud-badge,
         .video-panel.is-collapsed .video-crop-surface,
-        .video-panel.is-collapsed .video-resize-handle {
+        .video-panel.is-collapsed .video-resize-handle,
+        .video-panel.is-collapsed .video-resize-handle-nw {
             display: none !important;
         }
 
@@ -865,6 +879,7 @@
             border-radius: 0;
         }
         .video-panel:fullscreen .video-resize-handle,
+        .video-panel:fullscreen .video-resize-handle-nw,
         .video-panel:fullscreen #video-collapse-btn,
         .video-panel:fullscreen #video-collapse-dir-btn { display: none; }
         /* 放大时通过双击画面全屏，保留取消按钮和可拖动的原画预览。 */
@@ -952,7 +967,7 @@
             color: #a1a1aa;
         }
 
-        /* 右下角等比缩放手柄 */
+        /* 右下角与左上角等比缩放手柄 */
         .video-resize-handle {
             position: absolute;
             right: 0;
@@ -971,6 +986,16 @@
         }
         .video-resize-handle:hover {
             opacity: 1;
+        }
+        .video-resize-handle-nw {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 16px;
+            height: 16px;
+            pointer-events: auto;
+            cursor: nwse-resize;
+            z-index: 15;
         }
 
         /* =========================================================================
@@ -1041,9 +1066,7 @@
             display: none;               /* 由 JS 切 flex */
             flex-direction: column;
             overflow: hidden;
-            background: rgba(255, 255, 255, 0.97);
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
+            background: rgba(255, 255, 255, 0.99);
             border: 1px solid #e5e7eb;
             border-radius: 12px;
             box-shadow: 0 18px 44px -14px rgba(15, 23, 42, 0.32), 0 0 0 1px rgba(15, 23, 42, 0.03);
@@ -1858,6 +1881,16 @@
             transition: opacity 0.15s;
         }
         .ds-chat-resize-handle:hover { opacity: 1; }
+        .ds-chat-resize-handle-nw {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 16px;
+            height: 16px;
+            cursor: nwse-resize;
+            z-index: 15;
+            pointer-events: auto;
+        }
 
         /* 一次性提示（图片格式/大小不合规等） */
         .ds-chat-flash {
@@ -2143,9 +2176,7 @@ body.eye-protection-mode #formula-code { background: #FAF7F2; border-color: #E6E
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
-    background: rgba(255, 255, 255, 0.98);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
+    background: rgba(255, 255, 255, 0.99);
     border: 1px solid rgba(226, 232, 240, 0.9);
     border-radius: 14px;
     box-shadow: 0 20px 48px -12px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(15, 23, 42, 0.04);
@@ -3311,9 +3342,7 @@ body.eye-protection-mode #handwriting-whiteboard.wb-pure-mode #whiteboard-pure:h
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
-    background: rgba(255, 255, 255, 0.98);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    background: rgba(255, 255, 255, 0.99);
     border: 1px solid rgba(226, 232, 240, 0.95);
     border-radius: 14px;
     box-shadow: 0 20px 48px -12px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(15, 23, 42, 0.04);
@@ -3711,6 +3740,8 @@ body.eye-protection-mode #handwriting-whiteboard .window-collapse-dir-part.is-ac
 }
 .cp-page-card {
     position: relative;
+    width: var(--cp-page-w, 595px);
+    height: var(--cp-page-h, 842px);
     background: #ffffff;
     border-radius: 4px;
     box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.12), 0 0 0 1px rgba(15, 23, 42, 0.05);
@@ -3974,10 +4005,10 @@ body.eye-protection-mode #handwriting-whiteboard .window-collapse-dir-part.is-ac
 .cp-resize-edge[data-edge="s"]  { bottom: 0; left: 0; right: 0; height: 5px; cursor: ns-resize; }
 .cp-resize-edge[data-edge="e"]  { top: 0; bottom: 0; right: 0; width: 5px; cursor: ew-resize; }
 .cp-resize-edge[data-edge="w"]  { top: 0; bottom: 0; left: 0; width: 5px; cursor: ew-resize; }
-.cp-resize-edge[data-edge="ne"] { top: 0; right: 0; width: 10px; height: 10px; cursor: nesw-resize; }
-.cp-resize-edge[data-edge="nw"] { top: 0; left: 0; width: 10px; height: 10px; cursor: nwse-resize; }
-.cp-resize-edge[data-edge="se"] { bottom: 0; right: 0; width: 10px; height: 10px; cursor: nwse-resize; }
-.cp-resize-edge[data-edge="sw"] { bottom: 0; left: 0; width: 10px; height: 10px; cursor: nesw-resize; }
+.cp-resize-edge[data-edge="ne"] { top: 0; right: 0; width: 14px; height: 14px; cursor: nesw-resize; }
+.cp-resize-edge[data-edge="nw"] { top: 0; left: 0; width: 14px; height: 14px; cursor: nwse-resize; }
+.cp-resize-edge[data-edge="se"] { bottom: 0; right: 0; width: 14px; height: 14px; cursor: nwse-resize; }
+.cp-resize-edge[data-edge="sw"] { bottom: 0; left: 0; width: 14px; height: 14px; cursor: nesw-resize; }
 
 .cp-resize-grip {
     position: absolute;

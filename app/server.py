@@ -202,7 +202,7 @@ if sys.platform == 'win32':
 
 _ASSET_HASH_CACHE_LOCK = threading.Lock()
 _ASSET_HASH_CACHE = {}
-_ASSET_HASH_CACHE_MIN_BYTES = 65536
+_ASSET_HASH_CACHE_MIN_BYTES = 4096
 
 
 class PDFReaderHandler(http.server.SimpleHTTPRequestHandler):

@@ -213,6 +213,7 @@
                     '<i class="ph ph-video-camera"></i>' +
                 '</div>' +
             '</div>' +
+            '<div class="video-resize-handle-nw" title="按住等比例缩放窗口"></div>' +
             '<div class="video-resize-handle" title="按住等比例缩放窗口">' +
                 '<svg viewBox="0 0 6 6" class="w-2.5 h-2.5" style="fill:#71717a;"><circle cx="5" cy="5" r="0.8"/><circle cx="5" cy="2" r="0.8"/><circle cx="2" cy="5" r="0.8"/></svg>' +
             '</div>';
@@ -490,8 +491,8 @@
             document.addEventListener('mouseup', onDragEnd, true);
         });
 
-        // ---------- 右下角等比例缩放（锁定视频宽高比，杜绝黑边与黑底） ----------
-        let resizing = false;
+        // ---------- 右下角 / 左上角等比例缩放（锁定视频宽高比，杜绝黑边与黑底） ----------
+        let resizing = false, resizeDir = 'se';
         let startW = 0, startH = 0, startLeft = 0, startTop = 0, startRatio = 16 / 9, startMouseX = 0, startMouseY = 0;
 
         function getVideoAspectRatio() {
@@ -506,6 +507,30 @@
             const dx = e.clientX - startMouseX;
             const ratio = startRatio;
             const minW = 280;
+
+            if (resizeDir === 'nw') {
+                const anchorRight = startLeft + startW;
+                const anchorBottom = startTop + startH;
+                const maxW = Math.max(minW, anchorRight - 8);
+                const maxH = Math.max(180, anchorBottom - 8);
+
+                let newW = Math.max(minW, Math.min(maxW, startW - dx));
+                let contentH = Math.round(newW / ratio);
+                let newH = 38 + contentH;
+
+                if (newH > maxH) {
+                    newH = maxH;
+                    contentH = Math.max(80, newH - 38);
+                    newW = Math.max(minW, Math.round(contentH * ratio));
+                }
+
+                panel.style.width = newW + 'px';
+                panel.style.height = newH + 'px';
+                panel.style.left = Math.max(0, anchorRight - newW) + 'px';
+                panel.style.top = Math.max(0, anchorBottom - newH) + 'px';
+                return;
+            }
+
             const maxW = Math.max(320, window.innerWidth - startLeft - 16);
             const maxH = Math.max(180, window.innerHeight - startTop - 16);
 
@@ -534,24 +559,32 @@
             saveWindowState();
         }
 
+        function startVideoResize(e, dir) {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (isCollapsed || document.fullscreenElement === panel) return;
+            resizing = true;
+            resizeDir = dir;
+            startW = panel.offsetWidth;
+            startH = panel.offsetHeight;
+            startLeft = panel.offsetLeft;
+            startTop = panel.offsetTop;
+            startRatio = getVideoAspectRatio();
+            startMouseX = e.clientX;
+            startMouseY = e.clientY;
+            document.body.style.userSelect = 'none';
+            document.body.style.cursor = 'nwse-resize';
+            document.addEventListener('mousemove', onResizeMove, true);
+            document.addEventListener('mouseup', onResizeEnd, true);
+        }
+
         if (resizeHandle) {
-            resizeHandle.addEventListener('mousedown', function (e) {
-                e.preventDefault();
-                e.stopPropagation();
-                if (isCollapsed || document.fullscreenElement === panel) return;
-                resizing = true;
-                startW = panel.offsetWidth;
-                startH = panel.offsetHeight;
-                startLeft = panel.offsetLeft;
-                startTop = panel.offsetTop;
-                startRatio = getVideoAspectRatio();
-                startMouseX = e.clientX;
-                startMouseY = e.clientY;
-                document.body.style.userSelect = 'none';
-                document.body.style.cursor = 'nwse-resize';
-                document.addEventListener('mousemove', onResizeMove, true);
-                document.addEventListener('mouseup', onResizeEnd, true);
-            });
+            resizeHandle.addEventListener('mousedown', function (e) { startVideoResize(e, 'se'); });
+        }
+        const resizeHandleNw = panel.querySelector('.video-resize-handle-nw');
+        if (resizeHandleNw) {
+            resizeHandleNw.addEventListener('mousedown', function (e) { startVideoResize(e, 'nw'); });
         }
 
         window.addEventListener('blur', function () {

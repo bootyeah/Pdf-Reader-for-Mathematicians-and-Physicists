@@ -44,13 +44,17 @@
     }
     function clamp() {
         const r = panel.getBoundingClientRect();
-        const maxH = innerHeight - 88;
+        const toolbarBottom = document.getElementById('main-toolbar')?.getBoundingClientRect().bottom || 72;
+        const topSafe = Math.max(80, Math.ceil(toolbarBottom) + 4);
+        const maxH = Math.max(collapsed ? 42 : MIN_H, innerHeight - topSafe - 8);
         const w = Math.max(Math.min(MIN_W, innerWidth - 16), Math.min(r.width, innerWidth - 16));
         const h = collapsed ? 42 : Math.max(Math.min(MIN_H, maxH), Math.min(r.height, maxH));
         if (!collapsed && h < expandedHeight) expandedHeight = Math.max(MIN_H, h);
+        const maxTop = Math.max(0, innerHeight - h - 8);
+        const minTop = toolbarBottom > 80 ? Math.min(topSafe, maxTop) : 0;
         Object.assign(panel.style, { width: w + 'px', height: h + 'px',
             left: Math.max(8, Math.min(r.left, innerWidth - w - 8)) + 'px',
-            top: Math.max(0, Math.min(r.top, innerHeight - h - 8)) + 'px' });
+            top: Math.max(minTop, Math.min(r.top, maxTop)) + 'px' });
         updateResponsive(w);
     }
     function updateEmptyState() {
@@ -485,13 +489,16 @@
             }
 
             const makeId = typeof nextAnnotationId === 'function' ? nextAnnotationId : () => Date.now().toString();
+            const stampColor = (currentState.currentTool === 'text' && currentState.currentColor)
+                ? currentState.currentColor
+                : ((typeof TOOL_COLORS !== 'undefined' && TOOL_COLORS.text) || '#000000');
             if (typeof performAction === 'function') {
                 performAction(() => {
                     if (!currentState.annotations[targetPageNum]) currentState.annotations[targetPageNum] = [];
                     currentState.annotations[targetPageNum].push({
                         id: makeId(),
                         type: 'text',
-                        color: currentState.currentColor || '#fde047',
+                        color: stampColor,
                         x: relX,
                         y: relY,
                         text: code,
@@ -503,7 +510,7 @@
                 currentState.annotations[targetPageNum].push({
                     id: makeId(),
                     type: 'text',
-                    color: currentState.currentColor || '#fde047',
+                    color: stampColor,
                     x: relX,
                     y: relY,
                     text: code,
@@ -563,6 +570,8 @@
                 if (edge.includes('n')) top = Math.max(0, Math.min(bottom - minH, r.top + dy));
                 const newW = Math.max(minW, Math.min(right - left, maxW));
                 const newH = collapsed ? 42 : Math.max(minH, Math.min(bottom - top, maxH));
+                if (edge.includes('w')) left = right - newW;
+                if (!collapsed && edge.includes('n')) top = bottom - newH;
                 if (!collapsed && newH < expandedHeight) expandedHeight = Math.max(MIN_H, newH);
                 panel.style.width = newW + 'px';
                 panel.style.height = newH + 'px';
@@ -614,6 +623,10 @@
             draw();
         };
         window.addEventListener('resize', syncLayoutOnViewportChange);
+        const mainToolbar = document.getElementById('main-toolbar');
+        if (mainToolbar && typeof ResizeObserver === 'function') {
+            new ResizeObserver(() => { if (!panel.hidden) syncLayoutOnViewportChange(); }).observe(mainToolbar);
+        }
         window.FloatingWindowLayers?.bindViewportFullscreenSync(panel, syncLayoutOnViewportChange);
     }
     window.HandwritingWhiteboard = {

@@ -1,7 +1,40 @@
 importScripts('../lib/pdf-lib.min.js');
 importScripts('./document-identity.js' + self.location.search);
+
+function encodeUtf8ToHex(str) {
+    const bytes = new TextEncoder().encode(str);
+    const hex = new Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) {
+        hex[i] = bytes[i].toString(16).padStart(2, '0');
+    }
+    return hex.join('');
+}
+
 self.onmessage = async event => {
     try {
+        if (event.data && event.data.action === 'save') {
+            const buffer = await event.data.file.arrayBuffer();
+            const pdfDoc = await PDFLib.PDFDocument.load(buffer, { ignoreEncryption: true });
+            const { PDFName, PDFHexString } = PDFLib;
+            const fp = event.data.fingerprint || '';
+            if (!pdfDoc.context.trailerInfo.ID && /^[a-f0-9]{32}$/i.test(fp)) {
+                pdfDoc.context.trailerInfo.ID = pdfDoc.context.obj([
+                    PDFHexString.of(fp), PDFHexString.of(fp)
+                ]);
+            }
+            const infoDict = pdfDoc.getInfoDict();
+            infoDict.set(PDFName.of('ReaderProAnnos'), PDFHexString.of(encodeUtf8ToHex(event.data.annotations || '{}')));
+            const pageGrids = event.data.pageGrids || '{}';
+            if (pageGrids && pageGrids !== '{}') {
+                infoDict.set(PDFName.of('ReaderProGrids'), PDFHexString.of(encodeUtf8ToHex(pageGrids)));
+            } else {
+                infoDict.delete(PDFName.of('ReaderProGrids'));
+            }
+            const pdfBytes = await pdfDoc.save();
+            self.postMessage({ pdfBytes }, [pdfBytes.buffer]);
+            return;
+        }
+
         const buffer = await event.data.file.arrayBuffer();
         const doc = await PDFLib.PDFDocument.load(buffer, { ignoreEncryption: true });
         const fingerprint = await readerDocumentFingerprint(doc);

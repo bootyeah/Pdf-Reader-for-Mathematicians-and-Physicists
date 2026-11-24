@@ -219,8 +219,57 @@
         return { text: out, tokens: tokens };
     }
 
+    const CHAT_MATH_HTML_CACHE = new Map();
+    const CHAT_MATH_HTML_CACHE_MAX = 1024;
+
+    function renderCachedMathSource(raw) {
+        if (!window.katex || typeof window.katex.renderToString !== 'function') return null;
+        const hit = CHAT_MATH_HTML_CACHE.get(raw);
+        if (hit !== undefined) {
+            CHAT_MATH_HTML_CACHE.delete(raw);
+            CHAT_MATH_HTML_CACHE.set(raw, hit);
+            return hit;
+        }
+        let displayMode = false;
+        let inner = raw;
+        if (raw.startsWith('$$') && raw.endsWith('$$') && raw.length >= 4) {
+            displayMode = true;
+            inner = raw.slice(2, -2);
+        } else if (raw.startsWith('\\[') && raw.endsWith('\\]') && raw.length >= 4) {
+            displayMode = true;
+            inner = raw.slice(2, -2);
+        } else if (raw.startsWith('\\(') && raw.endsWith('\\)') && raw.length >= 4) {
+            displayMode = false;
+            inner = raw.slice(2, -2);
+        } else if (raw.startsWith('$') && raw.endsWith('$') && raw.length >= 2) {
+            displayMode = false;
+            inner = raw.slice(1, -1);
+        } else {
+            return null;
+        }
+        try {
+            const rendered = window.katex.renderToString(inner, {
+                displayMode: displayMode,
+                throwOnError: false,
+                strict: false
+            });
+            if (CHAT_MATH_HTML_CACHE.size >= CHAT_MATH_HTML_CACHE_MAX) {
+                CHAT_MATH_HTML_CACHE.delete(CHAT_MATH_HTML_CACHE.keys().next().value);
+            }
+            CHAT_MATH_HTML_CACHE.set(raw, rendered);
+            return rendered;
+        } catch (_) {
+            return null;
+        }
+    }
+
     function mathSourceHtml(raw) {
-        return '<span data-ds-math="' + escapeHtml(raw) + '">' + escapeHtml(raw) + '</span>';
+        const escaped = escapeHtml(raw);
+        const rendered = renderCachedMathSource(raw);
+        if (rendered !== null) {
+            return '<span class="ds-math-rendered" data-ds-math="' + escaped + '">' + rendered + '</span>';
+        }
+        return '<span data-ds-math="' + escaped + '">' + escaped + '</span>';
     }
 
     function restoreMath(html, tokens, codeOnly) {
@@ -613,13 +662,16 @@
         ],
         throwOnError: false,
         strict: false,
-        ignoredClasses: ['ds-code-block', 'ds-code-inline', 'ignored-by-katex']
+        ignoredClasses: ['ds-code-block', 'ds-code-inline', 'ds-math-rendered', 'ignored-by-katex']
     };
 
     function renderMathIn(el) {
         if (!el) return;
         try {
             if (window.renderMathInElement) {
+                // 已由 tokenizeMath 预渲染并标记 ds-math-rendered 的公式会被 ignoredClasses O(1) 跳过；仅在仍含潜在未分词分隔符时扫描
+                const text = el.textContent || '';
+                if (text.indexOf('$') === -1 && text.indexOf('\\(') === -1 && text.indexOf('\\[') === -1) return;
                 renderMathInElement(el, MATH_OPTIONS);
             }
         } catch (e) { /* KaTeX 渲染异常时保留原 HTML 内容 */ }
@@ -783,6 +835,7 @@
                     '<i class="ph ph-paper-plane-right"></i>' +
                 '</button>' +
             '</div>' +
+            '<div class="ds-chat-resize-handle-nw" id="ds-chat-resize-nw" title="拖动调整大小"></div>' +
             '<div class="ds-chat-resize-handle" id="ds-chat-resize" title="拖动调整大小">' +
                 '<svg viewBox="0 0 6 6" style="fill:#cbd5e1;"><circle cx="5" cy="5" r="0.8"/><circle cx="5" cy="2" r="0.8"/><circle cx="2" cy="5" r="0.8"/></svg>' +
             '</div>';
@@ -1168,7 +1221,7 @@
                 scheduleScroll(false);
             });
         };
-        const minGap = state.text.length > 2000 ? 48 : 0;
+        const minGap = (state.text.length + state.reasoning.length) > 2000 ? 48 : 0;
         const wait = minGap > 0 && state.lastPaintAt ? Math.max(0, minGap - (performance.now() - state.lastPaintAt)) : 0;
         if (wait > 0) {
             state.renderTimer = setTimeout(flush, wait);
@@ -1598,10 +1651,21 @@
             document.addEventListener('mouseup', onDragEnd, true);
         });
 
-        // ---------- 右下角缩放 ----------
-        let resizing = false, rw = 0, rh = 0, rmx = 0, rmy = 0, rLeft = 0, rTop = 0;
+        // ---------- 右下角 / 左上角缩放 ----------
+        let resizing = false, resizeDir = 'se', rw = 0, rh = 0, rmx = 0, rmy = 0, rLeft = 0, rTop = 0;
         function onResizeMove(e) {
             if (!resizing) return;
+            if (resizeDir === 'nw') {
+                const anchorRight = rLeft + rw;
+                const anchorBottom = rTop + rh;
+                const nextLeft = Math.max(8, Math.min(anchorRight - 300, rLeft + e.clientX - rmx));
+                const nextTop = Math.max(8, Math.min(anchorBottom - 220, rTop + e.clientY - rmy));
+                panel.style.left = nextLeft + 'px';
+                panel.style.top = nextTop + 'px';
+                panel.style.width = (anchorRight - nextLeft) + 'px';
+                panel.style.height = (anchorBottom - nextTop) + 'px';
+                return;
+            }
             const maxW = Math.max(300, window.innerWidth - rLeft - 8);
             const maxH = Math.max(220, window.innerHeight - rTop - 8);
             panel.style.width = Math.max(300, Math.min(maxW, rw + e.clientX - rmx)) + 'px';
@@ -1617,10 +1681,12 @@
             window.FloatingWindowLayers?.resetViewportBase(panel);
             saveState();
         }
-        resizeHandle.addEventListener('mousedown', function (e) {
+        function startChatResize(e, dir) {
+            if (e.button !== 0) return;
             e.preventDefault();
             e.stopPropagation();
             resizing = true;
+            resizeDir = dir;
             rw = panel.offsetWidth; rh = panel.offsetHeight;
             rLeft = panel.offsetLeft; rTop = panel.offsetTop;
             rmx = e.clientX; rmy = e.clientY;
@@ -1628,7 +1694,12 @@
             document.body.style.cursor = 'nwse-resize';
             document.addEventListener('mousemove', onResizeMove, true);
             document.addEventListener('mouseup', onResizeEnd, true);
-        });
+        }
+        resizeHandle.addEventListener('mousedown', function (e) { startChatResize(e, 'se'); });
+        const resizeHandleNw = panel.querySelector('#ds-chat-resize-nw');
+        if (resizeHandleNw) {
+            resizeHandleNw.addEventListener('mousedown', function (e) { startChatResize(e, 'nw'); });
+        }
 
         window.addEventListener('blur', function () { onDragEnd(); onResizeEnd(); });
 
@@ -2085,9 +2156,41 @@
         }
     }
 
+    let pdfCardMap = new Map();
+    let pdfPaintedSelectedPages = new Set();
+    let pdfCardProto = null;
+
+    function getPdfCardPrototype() {
+        if (pdfCardProto) return pdfCardProto;
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'ds-pdf-card';
+        const thumb = document.createElement('div');
+        thumb.className = 'ds-pdf-card-thumb';
+        const img = document.createElement('img');
+        img.className = 'ds-pdf-card-img';
+        img.hidden = true;
+        const ph = document.createElement('span');
+        ph.className = 'ds-pdf-card-ph';
+        const order = document.createElement('span');
+        order.className = 'ds-pdf-card-order';
+        thumb.append(img, ph, order);
+        const foot = document.createElement('div');
+        foot.className = 'ds-pdf-card-foot';
+        const labelWrap = document.createElement('span');
+        labelWrap.className = 'ds-pdf-card-label';
+        const num = document.createElement('span');
+        num.className = 'ds-pdf-card-num';
+        labelWrap.appendChild(num);
+        foot.appendChild(labelWrap);
+        card.append(thumb, foot);
+        pdfCardProto = card;
+        return card;
+    }
+
     function scrollPickerToPage(pageNum, instant) {
         if (!pdfGridEl) return;
-        const card = pdfGridEl.querySelector('.ds-pdf-card[data-page="' + pageNum + '"]');
+        const card = pdfCardMap.get(pageNum) || pdfGridEl.querySelector('.ds-pdf-card[data-page="' + pageNum + '"]');
         if (!card) return;
         const targetTop = Math.max(0, card.offsetTop - Math.max(0, (pdfGridEl.clientHeight - card.offsetHeight) / 2));
         if (instant || typeof pdfGridEl.scrollTo !== 'function') {
@@ -2106,14 +2209,14 @@
         if (curPage === pdfShownCurrentPage) return;
 
         const prevCard = pdfShownCurrentPage
-            ? pdfGridEl.querySelector('.ds-pdf-card[data-page="' + pdfShownCurrentPage + '"]')
+            ? (pdfCardMap.get(pdfShownCurrentPage) || pdfGridEl.querySelector('.ds-pdf-card[data-page="' + pdfShownCurrentPage + '"]'))
             : null;
         if (prevCard) {
             prevCard.classList.remove('is-current');
             const oldTag = prevCard.querySelector('.ds-pdf-card-cur');
             if (oldTag) oldTag.remove();
         }
-        const nextCard = pdfGridEl.querySelector('.ds-pdf-card[data-page="' + curPage + '"]');
+        const nextCard = pdfCardMap.get(curPage) || pdfGridEl.querySelector('.ds-pdf-card[data-page="' + curPage + '"]');
         if (nextCard) {
             nextCard.classList.add('is-current');
             const foot = nextCard.querySelector('.ds-pdf-card-foot');
@@ -2139,13 +2242,25 @@
         const orderMap = new Map();
         pdfSelectedPages.forEach(function (p, idx) { orderMap.set(p, idx + 1); });
 
-        pdfGridEl.querySelectorAll('.ds-pdf-card').forEach(function (card) {
-            const p = Number(card.dataset.page);
-            const ord = orderMap.get(p);
-            card.classList.toggle('is-selected', !!ord);
-            const ordEl = card.querySelector('.ds-pdf-card-order');
-            if (ordEl) ordEl.textContent = ord ? String(ord) : '';
+        pdfPaintedSelectedPages.forEach(function (p) {
+            if (!orderMap.has(p)) {
+                const card = pdfCardMap.get(p) || pdfGridEl.querySelector('.ds-pdf-card[data-page="' + p + '"]');
+                if (card) {
+                    card.classList.remove('is-selected');
+                    const ordEl = card.querySelector('.ds-pdf-card-order');
+                    if (ordEl) ordEl.textContent = '';
+                }
+            }
         });
+        orderMap.forEach(function (ord, p) {
+            const card = pdfCardMap.get(p) || pdfGridEl.querySelector('.ds-pdf-card[data-page="' + p + '"]');
+            if (card) {
+                card.classList.add('is-selected');
+                const ordEl = card.querySelector('.ds-pdf-card-order');
+                if (ordEl) ordEl.textContent = String(ord);
+            }
+        });
+        pdfPaintedSelectedPages = new Set(orderMap.keys());
 
         pdfClearBtn.disabled = pdfSelectedPages.length === 0;
 
@@ -2348,29 +2463,34 @@
 
         const dims = Array.isArray(rs.pageDimensions) ? rs.pageDimensions : [];
         const frag = document.createDocumentFragment();
+        const proto = getPdfCardPrototype();
+        pdfCardMap = new Map();
+        pdfPaintedSelectedPages = new Set();
         for (let p = 1; p <= totalPages; p++) {
             const dim = dims[p - 1];
             const ratio = dim && dim.width && dim.height
                 ? (Math.max(1, Math.round(dim.width)) + ' / ' + Math.max(1, Math.round(dim.height)))
                 : '595 / 842';
-            const card = document.createElement('button');
-            card.type = 'button';
-            card.className = 'ds-pdf-card' + (p === curPage ? ' is-current' : '');
+            const card = proto.cloneNode(true);
+            if (p === curPage) card.classList.add('is-current');
             card.dataset.page = String(p);
             const label = formatPdfPageLabel(p, rs, false);
             card.title = label + ' · 单击选择，Shift+单击连选，双击快速添加';
-            card.innerHTML =
-                '<div class="ds-pdf-card-thumb" style="aspect-ratio:' + ratio + ';">' +
-                    '<img class="ds-pdf-card-img" alt="' + label + '" hidden>' +
-                    '<span class="ds-pdf-card-ph">' + label + '</span>' +
-                    '<span class="ds-pdf-card-order"></span>' +
-                '</div>' +
-                '<div class="ds-pdf-card-foot">' +
-                    '<span class="ds-pdf-card-label">' +
-                        '<span class="ds-pdf-card-num">' + label + '</span>' +
-                    '</span>' +
-                    (p === curPage ? '<span class="ds-pdf-card-cur">当前页</span>' : '') +
-                '</div>';
+            const thumb = card.firstChild;
+            thumb.style.aspectRatio = ratio;
+            const img = thumb.firstChild;
+            img.alt = label;
+            const ph = img.nextSibling;
+            ph.textContent = label;
+            const foot = card.lastChild;
+            foot.firstChild.firstChild.textContent = label;
+            if (p === curPage) {
+                const curBadge = document.createElement('span');
+                curBadge.className = 'ds-pdf-card-cur';
+                curBadge.textContent = '当前页';
+                foot.appendChild(curBadge);
+            }
+            pdfCardMap.set(p, card);
             frag.appendChild(card);
         }
         pdfGridEl.replaceChildren(frag);
@@ -2411,12 +2531,12 @@
                         enqueueThumbRender(Number(card.dataset.page), card, doc, token, gen);
                     });
                 }, { root: pdfGridEl, rootMargin: '280px 0px', threshold: 0.01 });
-                pdfGridEl.querySelectorAll('.ds-pdf-card').forEach(function (card) {
+                pdfCardMap.forEach(function (card) {
                     pdfThumbObserver.observe(card);
                 });
             } else {
-                pdfGridEl.querySelectorAll('.ds-pdf-card').forEach(function (card) {
-                    enqueueThumbRender(Number(card.dataset.page), card, doc, token, gen);
+                pdfCardMap.forEach(function (card, p) {
+                    enqueueThumbRender(p, card, doc, token, gen);
                 });
             }
         });
@@ -2428,6 +2548,8 @@
         pdfThumbQueue = [];
         pdfConfirming = false;
         pdfShownCurrentPage = 0;
+        pdfCardMap = new Map();
+        pdfPaintedSelectedPages = new Set();
         if (pdfThumbObserver) {
             pdfThumbObserver.disconnect();
             pdfThumbObserver = null;

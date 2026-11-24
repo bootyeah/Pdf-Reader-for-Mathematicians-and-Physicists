@@ -2,6 +2,8 @@
 import base64
 import hashlib
 import os
+from pathlib import Path
+import re
 import subprocess
 import tempfile
 import threading
@@ -11,6 +13,56 @@ _TIKZ_CACHE_LOCK = threading.Lock()
 _TIKZ_INFLIGHT = {}
 _TIKZ_CACHE_MAX = 120
 _TIKZ_COMPILE_SLOTS = threading.Semaphore(2)
+_TIKZ_DISK_CACHE_VERSION = 'v1'
+_TIKZ_DISK_CACHE_MAX = 300
+_TIKZ_DISK_CACHE_DIR = Path(__file__).resolve().parents[2] / '.latex-manager' / 'tikz_cache'
+
+_ANCHOR_RE = re.compile(
+    r'(?<![A-Za-z0-9_\\])\(\s*([A-Za-z][A-Za-z0-9_@-]*)(?:'
+    r'\s+\.\s*([A-Za-z0-9_@ -]+?)'
+    r'|\.\s*((?:north|south)(?:\s+(?:east|west))?|(?:mid|base)(?:\s+(?:east|west))?|east|west|center|text)'
+    r')?\s*\)'
+)
+_PATH_CMD_RE = re.compile(r'\\(?:draw|path|fill|filldraw|clip|shade|shadedraw|node|coordinate|pic)\b')
+_BEGIN_END_RE = re.compile(r'\\(?:begin|end)\s*$')
+
+
+def _read_tikz_disk_cache(key):
+    try:
+        p = _TIKZ_DISK_CACHE_DIR / f'{key}.b64'
+        if not p.is_file():
+            return None
+        data = p.read_text(encoding='ascii').strip()
+        if not data:
+            return None
+        try:
+            os.utime(p, None)
+        except OSError:
+            pass
+        return (data, '')
+    except Exception:
+        return None
+
+
+def _write_tikz_disk_cache(key, svg_b64):
+    if not svg_b64:
+        return
+    try:
+        _TIKZ_DISK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        target = _TIKZ_DISK_CACHE_DIR / f'{key}.b64'
+        tmp = _TIKZ_DISK_CACHE_DIR / f'{key}.{os.getpid()}.{threading.get_ident()}.tmp'
+        tmp.write_text(svg_b64, encoding='ascii')
+        os.replace(tmp, target)
+        entries = list(_TIKZ_DISK_CACHE_DIR.glob('*.b64'))
+        if len(entries) > _TIKZ_DISK_CACHE_MAX:
+            entries.sort(key=lambda item: item.stat().st_mtime_ns if item.exists() else 0)
+            for stale in entries[:max(0, len(entries) - _TIKZ_DISK_CACHE_MAX)]:
+                try:
+                    stale.unlink(missing_ok=True)
+                except OSError:
+                    pass
+    except Exception:
+        pass
 
 
 def _tikz_error_detail(log_path, limit=300):
@@ -37,17 +89,8 @@ def _tikz_error_detail(log_path, limit=300):
 def render_latex_to_svg(tex_code):
     """编译一段完整 LaTeX 文档并转成 SVG。
     返回 (svg_base64, error_text)：成功时 error_text 为空字符串。"""
-    import re
-    anchor_re = re.compile(
-        r'(?<![A-Za-z0-9_\\])\(\s*([A-Za-z][A-Za-z0-9_@-]*)(?:'
-        r'\s+\.\s*([A-Za-z0-9_@ -]+?)'
-        r'|\.\s*((?:north|south)(?:\s+(?:east|west))?|(?:mid|base)(?:\s+(?:east|west))?|east|west|center|text)'
-        r')?\s*\)'
-    )
-    path_cmd_re = re.compile(r'\\(?:draw|path|fill|filldraw|clip|shade|shadedraw|node|coordinate|pic)\b')
-
     def _clean_segment(seg):
-        return anchor_re.sub(
+        return _ANCHOR_RE.sub(
             lambda m: f"({m.group(1)}.{(m.group(2) or m.group(3)).strip()})"
             if (m.group(2) or m.group(3)) else f"({m.group(1)})",
             seg,
@@ -72,7 +115,7 @@ def render_latex_to_svg(tex_code):
                 out.append(src[i:j]); i = j; continue
             if ch == '{':
                 prev = ''.join(buf)
-                is_env = bool(re.search(r'\\(?:begin|end)\s*$', prev))
+                is_env = bool(_BEGIN_END_RE.search(prev))
                 depth, j = 1, i + 1
                 while j < n and depth > 0:
                     if src[j] == '\\' and j + 1 < n:
@@ -85,7 +128,7 @@ def render_latex_to_svg(tex_code):
                 inner = src[i + 1:j - 1] if depth == 0 else src[i + 1:j]
                 end_ch = '}' if depth == 0 else ''
                 out.append(_clean_segment(prev)); buf.clear()
-                if not is_env and path_cmd_re.search(inner):
+                if not is_env and _PATH_CMD_RE.search(inner):
                     out.append('{' + _walk_tikz(inner) + end_ch)
                 else:
                     out.append('{' + inner + end_ch)
@@ -145,10 +188,12 @@ def render_latex_to_svg(tex_code):
 
 
 def render_tikz_cached(tex_code, compiler=None):
-    """带缓存的 TikZ 编译：同一段源码只编译一次。"""
+    """带内存与磁盘二级缓存的 TikZ 编译：同一段源码跨进程重启也只编译一次。"""
+    use_disk_cache = (compiler is None or compiler is render_latex_to_svg)
     if compiler is None:
         compiler = render_latex_to_svg
-    key = hashlib.sha256(tex_code.encode('utf-8')).hexdigest()
+    key_material = f'{_TIKZ_DISK_CACHE_VERSION}:{tex_code}' if use_disk_cache else tex_code
+    key = hashlib.sha256(key_material.encode('utf-8')).hexdigest()
     with _TIKZ_CACHE_LOCK:
         hit = _TIKZ_CACHE.get(key)
         if hit is not None:
@@ -162,11 +207,20 @@ def render_tikz_cached(tex_code, compiler=None):
         pending['event'].wait()
         return pending['result']
     result = (None, 'LaTeX 编译未完成')
+    from_disk = False
     try:
+        if use_disk_cache:
+            disk_hit = _read_tikz_disk_cache(key)
+            if disk_hit is not None:
+                result = disk_hit
+                from_disk = True
+                return result
         with _TIKZ_COMPILE_SLOTS:
             result = compiler(tex_code)
         return result
     finally:
+        if use_disk_cache and result[0] and not from_disk:
+            _write_tikz_disk_cache(key, result[0])
         with _TIKZ_CACHE_LOCK:
             if result[0]:
                 if len(_TIKZ_CACHE) >= _TIKZ_CACHE_MAX:

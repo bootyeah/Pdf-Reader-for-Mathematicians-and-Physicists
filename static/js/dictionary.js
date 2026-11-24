@@ -56,13 +56,15 @@
         panel.className = 'dict-panel bg-white/95 backdrop-blur-md border border-gray-200 shadow-xl rounded-xl flex flex-col ring-1 ring-black/5 overflow-hidden';
         panel.style.display = 'none';
         panel.innerHTML =
+            '<div class="dict-resize-nw" title="拖动调整大小"></div>' +
             '<div class="dict-panel-header px-3 py-2 border-b border-gray-100 bg-gray-50/80 flex justify-between items-center shrink-0" style="cursor: move;">' +
                 '<span class="dict-panel-title text-xs font-bold text-gray-500 uppercase flex items-center gap-1.5" id="dict-panel-title"><i class="ph ph-translate text-blue-500 text-sm"></i> 翻译</span>' +
                 '<button type="button" class="text-gray-400 hover:text-red-500 hover:bg-red-50 rounded p-1 transition-colors cursor-pointer flex items-center justify-center" id="dict-panel-close" title="关闭">' +
                     '<i class="ph ph-x"></i>' +
                 '</button>' +
             '</div>' +
-            '<div class="dict-panel-body p-3 overflow-y-auto text-sm text-gray-700 custom-scrollbar" id="dict-panel-body"></div>';
+            '<div class="dict-panel-body p-3 overflow-y-auto text-sm text-gray-700 custom-scrollbar flex-1 min-h-0" id="dict-panel-body"></div>' +
+            '<div class="dict-resize-se" title="拖动调整大小"></div>';
         document.body.appendChild(panel);
 
         panelBody = panel.querySelector('.dict-panel-body');
@@ -142,6 +144,67 @@
             document.addEventListener('mouseup', onMouseUp, true);
             window.addEventListener('blur', onMouseUp);
         });
+
+        // 面板右下角 / 左上角缩放逻辑
+        let isResizing = false, resizeDir = 'se';
+        let rStartX = 0, rStartY = 0, rStartLeft = 0, rStartTop = 0, rStartW = 0, rStartH = 0;
+        const DICT_MIN_W = 240, DICT_MIN_H = 120;
+
+        function onResizeMove(e) {
+            if (!isResizing) return;
+            if (e.buttons !== 1) { onResizeUp(); return; }
+            if (resizeDir === 'nw') {
+                const anchorRight = rStartLeft + rStartW;
+                const anchorBottom = rStartTop + rStartH;
+                const nextLeft = Math.max(8, Math.min(anchorRight - DICT_MIN_W, rStartLeft + e.clientX - rStartX));
+                const nextTop = Math.max(8, Math.min(anchorBottom - DICT_MIN_H, rStartTop + e.clientY - rStartY));
+                panel.style.left = nextLeft + 'px';
+                panel.style.top = nextTop + 'px';
+                panel.style.width = (anchorRight - nextLeft) + 'px';
+                panel.style.height = (anchorBottom - nextTop) + 'px';
+                return;
+            }
+            const maxW = Math.max(DICT_MIN_W, window.innerWidth - rStartLeft - 8);
+            const maxH = Math.max(DICT_MIN_H, window.innerHeight - rStartTop - 8);
+            panel.style.width = Math.max(DICT_MIN_W, Math.min(maxW, rStartW + e.clientX - rStartX)) + 'px';
+            panel.style.height = Math.max(DICT_MIN_H, Math.min(maxH, rStartH + e.clientY - rStartY)) + 'px';
+        }
+
+        function onResizeUp() {
+            if (!isResizing) return;
+            isResizing = false;
+            document.body.style.userSelect = '';
+            document.body.style.cursor = '';
+            document.removeEventListener('mousemove', onResizeMove, true);
+            document.removeEventListener('mouseup', onResizeUp, true);
+            window.removeEventListener('blur', onResizeUp);
+            window.FloatingWindowLayers?.resetViewportBase(panel);
+        }
+
+        function startDictResize(e, dir) {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            isResizing = true;
+            resizeDir = dir;
+            panelDragged = true;
+            rStartX = e.clientX;
+            rStartY = e.clientY;
+            rStartLeft = panel.offsetLeft;
+            rStartTop = panel.offsetTop;
+            rStartW = panel.offsetWidth;
+            rStartH = panel.offsetHeight;
+            panelBody.style.maxHeight = 'none';
+            panel.style.height = rStartH + 'px';
+            document.body.style.userSelect = 'none';
+            document.body.style.cursor = 'nwse-resize';
+            document.addEventListener('mousemove', onResizeMove, true);
+            document.addEventListener('mouseup', onResizeUp, true);
+            window.addEventListener('blur', onResizeUp);
+        }
+
+        panel.querySelector('.dict-resize-se')?.addEventListener('mousedown', function (e) { startDictResize(e, 'se'); });
+        panel.querySelector('.dict-resize-nw')?.addEventListener('mousedown', function (e) { startDictResize(e, 'nw'); });
     }
 
     // ---------- 文本智能清洗 ----------
@@ -294,7 +357,7 @@
             if (!findPageWrapper(ctx.pageNum)) {     // 该页已被虚拟滚动回收：停止还原选区，已展开面板保持可读
                 stopSelectionRestore();
                 hideBubble();
-                if (!panel || panel.style.display !== 'block') hideAll();
+                if (!panel || panel.style.display === 'none') hideAll();
                 return;
             }
             const range = buildRangeFromOffsets(ctx);
@@ -361,7 +424,7 @@
         // 选区没了：若气泡/面板还开着，多半是缩放把文本层重建了 —— 等它重建好把选区还原，
         // 而不是直接 hideAll（那样气泡会在缩放时凭空消失）
         const bubbleOn = bubble && bubble.style.display !== 'none';
-        const panelOn = panel && panel.style.display === 'block';
+        const panelOn = panel && panel.style.display !== 'none';
         if (current && (bubbleOn || panelOn)) {
             scheduleSelectionRestore();
             return;
@@ -436,13 +499,14 @@
 
     // ---------- 结果面板定位 ----------
     function showPanel() {
-        panel.style.display = 'block';
+        panel.style.display = 'flex';
         panel.style.visibility = 'hidden';
 
         const vw = window.innerWidth;
         const vh = window.innerHeight;
         const pw = Math.min(360, vw - 16);
         panel.style.width = pw + 'px';
+        panel.style.height = '';
 
         const headerEl = panel.querySelector('.dict-panel-header');
         const headerH = (headerEl && headerEl.offsetHeight) || 42;
@@ -692,7 +756,7 @@
                     if (bubble && bubble.style.display !== 'none') showBubble(current.rect);
                     if (panel && panel.style.display !== 'none' && !panelDragged) showPanel();
                 } else if ((bubble && bubble.style.display !== 'none') ||
-                           (panel && panel.style.display === 'block')) {
+                           (panel && panel.style.display !== 'none')) {
                     scheduleSelectionRestore();
                 }
             }).observe(els.zoomLevel, { childList: true, characterData: true, subtree: true });
