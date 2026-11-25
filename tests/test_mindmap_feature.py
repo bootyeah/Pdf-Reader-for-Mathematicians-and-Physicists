@@ -101,6 +101,8 @@ class TestMindMapFeature(unittest.TestCase):
         self.assertIn("page: null", content)
         self.assertIn("function countCollapsedDescendants", content)
         self.assertIn("countCollapsedDescendants(node, isSpine)", content)
+        self.assertNotIn("mm-toast-msg", content)
+        self.assertNotIn("showMindmapToast", content)
 
     def test_style_css(self):
         css_path = os.path.join(ROOT, 'static', 'css', 'style.css')
@@ -499,11 +501,11 @@ window.addEventListener('load', () => {
             const dAttr = s1ToL1Path.getAttribute('d');
             assert(!dAttr.includes('Q'), `Straight aligned single-child connector should not contain quadratic bends, got: ${dAttr}`);
 
-            // Verify right-edge quick-add button is hidden when .has-toggle is present
+            // Verify toggle pill exists on parent with children and zero hover scatter buttons exist on cards
             const s1Wrapper = s1Card.closest('.mm-card-wrapper');
             assert(s1Wrapper.classList.contains('has-toggle'), 's1 wrapper should have .has-toggle');
-            const s1QuickRight = s1Wrapper.querySelector('.mm-quick-add-sibling');
-            assert(getComputedStyle(s1QuickRight).display === 'none', 'Right quick-add button must be hidden when toggle button exists');
+            assert(document.querySelectorAll('.mm-card-actions, .mm-quick-add-down, .mm-quick-add-right').length === 0,
+                'Scattered card hover action bars and quick-add buttons must be completely removed');
 
             // 2. Verify complex convergence layout geometry, arrows, and lane de-collision
             const root = {
@@ -643,55 +645,54 @@ window.addEventListener('load', () => {
             const stage1ChildrenRestored = state.annotations.mindmap.nodes[0].children[0].children.map(n => n.id);
             assert(stage1ChildrenRestored[0] === 'a' && stage1ChildrenRestored[1] === 'b', 'moveNodeStep(a, -1) should restore a before b');
 
-            // 4. Verify card action bar buttons: up/down + reparent on the right, non-duplicate icon, and main-node fork
-            const centerBtnIcon = document.querySelector('#mindmap-center-btn i');
-            const bCardEl = document.querySelector('.mm-card[data-id="b"]');
-            const bActionBtns = [...bCardEl.querySelectorAll('.mm-card-actions .mm-act-btn')];
-            const bBtnClasses = bActionBtns.map(btn => btn.className);
-            assert(bBtnClasses[0].includes('mm-act-move-up'), 'First action button on non-root node must be move-up');
-            assert(bBtnClasses[1].includes('mm-act-move-down'), 'Second action button on non-root node must be move-down');
-            assert(bBtnClasses[2].includes('mm-act-reparent'), 'Reparent button must be immediately to the right of up/down buttons');
-            const reparentIcon = bCardEl.querySelector('.mm-act-reparent i');
-            assert(reparentIcon.classList.contains('ph-arrow-bend-up-left'), 'Reparent button must use ph-arrow-bend-up-left icon');
-            assert(!reparentIcon.classList.contains('ph-crosshair') && reparentIcon.className !== centerBtnIcon.className, 'Reparent button icon must not duplicate center view icon');
+            // 4. Verify unified bottom command dock (#mm-command-dock) actions & contextual fork visibility
+            const dock = document.getElementById('mm-command-dock');
+            const dockBar = document.getElementById('mm-dock-bar');
+            const dockTray = document.getElementById('mm-dock-tray');
+            assert(dock !== null && dockBar !== null && dockTray !== null, 'Unified command dock must exist');
 
-            // Verify redundant top-bar buttons are removed
+            // Verify redundant top-bar buttons and legacy popovers/menus are absent
             assert(document.getElementById('mindmap-fork-btn') === null, 'Redundant top-bar fork button should be removed');
             assert(document.getElementById('mindmap-merge-btn') === null, 'Redundant top-bar merge button should be removed');
             assert(document.getElementById('mindmap-bind-current-btn') === null, 'Redundant top-bar bind-current button should be removed');
 
-            // 5. Verify interactive canvas reparenting via card action button (.mm-act-reparent)
-            const cReparentBtn = document.querySelector('.mm-card[data-id="c"] .mm-act-reparent');
-            assert(cReparentBtn !== null, 'Card c must have .mm-act-reparent button');
-            cReparentBtn.click();
-            const reparentBanner = document.getElementById('mm-reparent-banner');
-            assert(reparentBanner !== null, 'Clicking .mm-act-reparent must start interactive reparent mode');
-            assert(reparentBanner.querySelector('#mm-reparent-promote-btn') === null, 'Promote button must not exist in reparent banner');
-            assert(reparentBanner.querySelector('#mm-reparent-demote-btn') === null, 'Demote button must not exist in reparent banner');
+            // Lateral node (b): dock shows build/edit/tag/page/connect/move/delete, without fork
+            const bCardEl = document.querySelector('.mm-card[data-id="b"]');
+            bCardEl.click();
+            for (const btnId of ['mm-dock-add-down', 'mm-dock-add-right', 'mm-dock-edit', 'mm-dock-tag', 'mm-dock-page', 'mm-dock-connect', 'mm-dock-move', 'mm-dock-delete']) {
+                assert(document.getElementById(btnId) !== null, `Lateral node dock must include #${btnId}`);
+            }
+            assert(document.getElementById('mm-dock-fork') === null, 'Lateral node dock must not include #mm-dock-fork');
+
+            // Main-chain spine node (stage-1): dock includes #mm-dock-fork
+            const stage1Card = document.querySelector('.mm-card[data-id="stage-1"]');
+            stage1Card.click();
+            assert(document.getElementById('mm-dock-fork') !== null, 'Main spine node dock must include #mm-dock-fork');
+
+            // 5. Verify interactive canvas reparenting via unified move tray (#mm-dock-move -> #mm-reparent-pick-canvas)
+            const cCard = document.querySelector('.mm-card[data-id="c"]');
+            cCard.click();
+            document.getElementById('mm-dock-move').click();
+            assert(!dockTray.hidden, 'Clicking #mm-dock-move must open inline move tray');
+            const reparentPickBtn = document.getElementById('mm-reparent-pick-canvas');
+            assert(reparentPickBtn !== null, 'Move tray must expose #mm-reparent-pick-canvas');
+            reparentPickBtn.click();
+            assert(document.getElementById('mindmap-viewport').classList.contains('is-reparenting-mode'),
+                'Clicking #mm-reparent-pick-canvas must arm interactive reparent mode');
+            assert(document.getElementById('mm-reparent-banner') === null, 'Legacy top reparent banner must not exist');
+            assert(document.getElementById('mm-reparent-target-hint') !== null, 'Inline reparent live hint must exist in dock tray');
+
             const bCard = document.querySelector('.mm-card[data-id="b"]');
             bCard.click();
-            assert(document.getElementById('mm-reparent-banner') === null, 'Clicking target card should finish interactive reparent mode');
+            assert(!document.getElementById('mindmap-viewport').classList.contains('is-reparenting-mode'),
+                'Clicking target card should finish interactive reparent mode');
+            assert(dockTray.hidden, 'Dock tray should close after interactive reparent completes');
             const bChildrenAfterClickReparent = state.annotations.mindmap.nodes[0].children[0].children[1].children.map(n => n.id);
             assert(bChildrenAfterClickReparent.includes('c'), 'Clicking card b in reparent mode should mount c under b');
 
-            // 6. Verify context menu structure: no inline 9 math role buttons, main-node has fork-branch, lateral node does not
-            const moreBtn = document.querySelector('.mm-card[data-id="b"] .mm-act-more');
-            moreBtn.click();
-            let ctxMenu = document.getElementById('mm-context-menu');
-            assert(ctxMenu !== null, 'Context menu must open');
-            assert(ctxMenu.querySelector('.mm-ctx-icon-bar') === null, 'Context menu must not duplicate card action bar icons');
-            assert(ctxMenu.querySelector('.mm-ctx-tag-grid') === null, 'Context menu must not expose 9 inline math role buttons');
-            assert(ctxMenu.querySelectorAll('[data-action="fork-branch"]').length === 0, 'Lateral node context menu must not have fork-branch');
-            assert(ctxMenu.querySelectorAll('[data-action="pick-tag"]').length === 1, 'pick-tag item must exist');
-            assert(ctxMenu.querySelectorAll('[data-action="reparent"]').length === 1, 'reparent item must exist');
-            assert(ctxMenu.querySelectorAll('[data-action="delete"]').length === 1, 'delete item must exist');
-
-            // Main-chain node (stage-1) must have both .mm-act-fork and context menu [data-action="fork-branch"]
-            const stage1Card = document.querySelector('.mm-card[data-id="stage-1"]');
-            assert(stage1Card.querySelector('.mm-act-fork') !== null, 'Main spine node must have .mm-act-fork button in card action bar');
-            stage1Card.querySelector('.mm-act-more').click();
-            ctxMenu = document.getElementById('mm-context-menu');
-            assert(ctxMenu.querySelectorAll('[data-action="fork-branch"]').length === 1, 'Main spine node context menu must include fork-branch');
+            // 6. Verify right-click on card does NOT spawn #mm-context-menu
+            bCard.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 200, clientY: 200 }));
+            assert(document.getElementById('mm-context-menu') === null, 'Right-click must not spawn floating context menu');
 
             // 7. Verify M-key dashed mergeTo arrows avoid overlapping solid lines
             window.MindMap.toggleMergeLink('a', 'ab');
@@ -850,11 +851,11 @@ window.addEventListener('load', () => {
             window.MindMap.addMainChain('第二页专属主链 II');
             assert(state.annotations.mindmap.nodes.length === 2, 'Page 2 should have 2 main chains');
 
-            // Bind Page 2 to PDF page 5 (current reading page) via page picker popover
+            // Bind Page 2 to PDF page 5 (current reading page) via unified sheet tray
             document.getElementById('mindmap-bind-page-btn').click();
-            const pop = document.getElementById('mm-popover-dialog');
-            assert(pop !== null, 'Clicking #mindmap-bind-page-btn must open page picker popover');
-            pop.querySelector('#mm-pop-bind-cur').click();
+            const tray = document.getElementById('mm-dock-tray');
+            assert(tray !== null && !tray.hidden, 'Clicking #mindmap-bind-page-btn must open inline sheet tray');
+            tray.querySelector('#mm-pop-bind-cur').click();
             assert(window.MindMap.getActivePage().page === 5, 'Page 2 should bind to current reading page 5');
 
             const tab2BadgeGroup = document.querySelector(`.mm-page-tab[data-page-id="${page2Id}"] .mm-tab-page-badge`);

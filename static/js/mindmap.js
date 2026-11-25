@@ -21,7 +21,9 @@
     let editingNodeId = null;
     let draggingNodeId = null;
     let draggingNodeObj = null;
-    let activePopoverNodeId = null;
+    let activeDockTray = null; // null | 'tag' | 'page' | 'connect' | 'move' | 'sheet'
+    let dockConnectMode = 'link'; // 'link' | 'converge' | 'fuse'
+    let activeSheetTargetId = null;
     let isSpaceDown = false;
     let isPanning = false;
     let startPanX = 0, startPanY = 0;
@@ -74,27 +76,6 @@
         }[char]));
     }
 
-    // 交互轻提示（替代原生 alert，提升现代感）
-    function showMindmapToast(message, type = 'info') {
-        let toast = document.getElementById('mm-toast-msg');
-        if (!toast) {
-            toast = document.createElement('div');
-            toast.id = 'mm-toast-msg';
-            toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-3.5 py-1.5 rounded-full text-xs font-medium shadow-lg transition-all duration-200 pointer-events-none flex items-center gap-1.5 opacity-0 translate-y-2';
-            document.body.appendChild(toast);
-        }
-        const isSuccess = type === 'success';
-        const isWarn = type === 'warn';
-        toast.className = `fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-3.5 py-1.5 rounded-full text-xs font-medium shadow-lg transition-all duration-200 pointer-events-none flex items-center gap-1.5 opacity-100 translate-y-0 ${
-            isSuccess ? 'bg-emerald-600 text-white' : isWarn ? 'bg-amber-600 text-white' : 'bg-gray-800 text-white'
-        }`;
-        toast.innerHTML = `<i class="ph ${isSuccess ? 'ph-check-circle' : isWarn ? 'ph-warning-circle' : 'ph-info'} text-sm"></i><span>${escapeMindMapText(message)}</span>`;
-        clearTimeout(toast._timer);
-        toast._timer = setTimeout(() => {
-            if (toast) toast.className = toast.className.replace('opacity-100 translate-y-0', 'opacity-0 translate-y-2');
-        }, 2200);
-    }
-
     // DOM 元素缓存
     let _cachedEls = null;
     const getEls = () => {
@@ -119,7 +100,10 @@
             closeBtn: document.getElementById('mindmap-close-btn'),
             shortcutBtn: document.getElementById('mindmap-shortcut-btn'),
             centerBtn: document.getElementById('mindmap-center-btn'),
-            toggleAllBtn: document.getElementById('mindmap-toggle-all-btn')
+            toggleAllBtn: document.getElementById('mindmap-toggle-all-btn'),
+            dock: document.getElementById('mm-command-dock'),
+            dockTray: document.getElementById('mm-dock-tray'),
+            dockBar: document.getElementById('mm-dock-bar')
         };
         if (elsObj.panel && elsObj.treeRoot) _cachedEls = elsObj;
         return elsObj;
@@ -907,7 +891,6 @@
         });
 
         selectedNodeId = newChainId;
-        showMindmapToast('已新建并列主链', 'success');
         setTimeout(() => {
             const card = document.querySelector(`.mm-tree-branch[data-id="${newChainId}"] > .mm-card-wrapper > .mm-card`);
             if (card) {
@@ -1033,7 +1016,6 @@
         const res = findParentAndList(data.root, targetId);
         if (!res || !res.node) return;
         if (!isVerticalSpineNode(data, targetId)) {
-            showMindmapToast('横向子链：Tab 添加子节点，Enter 添加同级，多选后合流');
             return false;
         }
 
@@ -1067,7 +1049,6 @@
             }
         });
 
-        showMindmapToast('已开启并行分支轨道', 'success');
         if (focusNodeId) {
             selectedNodeId = focusNodeId;
             setTimeout(() => {
@@ -1087,14 +1068,12 @@
         const rawIds = Array.isArray(sourceNodeIds) ? sourceNodeIds : [sourceNodeIds];
         const validIds = [...new Set(rawIds.filter(id => id && findNodeInTree(data.root, id)))];
         if (validIds.length === 0) {
-            showMindmapToast('请先选中至少一个要连接/汇合的子节点', 'warn');
             return;
         }
 
         // 情况 A：连入已有的目标节点（实线合流至下一个子节点）
         if (existingTargetId) {
             if (findNodeInTree(data.root, existingTargetId)) {
-                let linkedCount = 0;
                 commitMindMapChange((d) => {
                     validIds.forEach(srcId => {
                         if (srcId === existingTargetId) return;
@@ -1103,7 +1082,6 @@
                         if (!Array.isArray(src.convergeTo)) src.convergeTo = [];
                         if (!src.convergeTo.includes(existingTargetId)) {
                             src.convergeTo.push(existingTargetId);
-                            linkedCount++;
                         }
                         // 确保清理旧版 mergeTo 中可能残留的同一目标，避免虚实线重叠
                         if (Array.isArray(src.mergeTo)) {
@@ -1111,9 +1089,6 @@
                         }
                     });
                 });
-                const tgt = findNodeInTree(data.root, existingTargetId);
-                const tgtName = tgt ? (tgt.text || '目标节点').slice(0, 14) : '目标节点';
-                showMindmapToast(`已将 ${validIds.length} 个子节点实线合流汇入「${tgtName}」`, 'success');
                 selectNode(existingTargetId, true);
                 return;
             }
@@ -1173,7 +1148,6 @@
 
         if (createdNodeId) {
             selectNode(createdNodeId, true);
-            showMindmapToast(`已将 ${validIds.length} 个子节点实线合流至进一步子节点`, 'success');
             setTimeout(() => {
                 const card = document.querySelector(`.mm-tree-branch[data-id="${createdNodeId}"] > .mm-card-wrapper > .mm-card`);
                 if (card) {
@@ -1209,14 +1183,6 @@
             }
         });
 
-        const data = getMindMapData();
-        const tgtNode = findNodeInTree(data.root, targetId);
-        const tgtName = tgtNode ? (tgtNode.text || '目标节点').slice(0, 14) : '目标节点';
-        if (actionType === 'added') {
-            showMindmapToast(`已建立实线合流 →「${tgtName}」`, 'success');
-        } else {
-            showMindmapToast(`已解除与「${tgtName}」的实线合流`, 'info');
-        }
         return actionType === 'added';
     }
 
@@ -1230,7 +1196,6 @@
         const data = getMindMapData();
         const targetId = nodeId || selectedNodeId;
         if (!targetId) {
-            showMindmapToast('请先选中一个分支节点以执行合流', 'warn');
             return;
         }
 
@@ -1301,7 +1266,6 @@
 
             if (convergedNodeId) {
                 selectedNodeId = convergedNodeId;
-                showMindmapToast('已将各条并行分支合流至下游节点', 'success');
                 setTimeout(() => {
                     const card = document.querySelector(`.mm-tree-branch[data-id="${convergedNodeId}"] > .mm-card-wrapper > .mm-card`);
                     if (card) {
@@ -1340,14 +1304,6 @@
             }
         });
 
-        const data = getMindMapData();
-        const tgtNode = findNodeInTree(data.root, targetId);
-        const tgtName = tgtNode ? (tgtNode.text || '目标节点').slice(0, 14) : '目标节点';
-        if (actionType === 'added') {
-            showMindmapToast(`已建立汇合连线 →「${tgtName}」`, 'success');
-        } else {
-            showMindmapToast(`已解除与「${tgtName}」的汇合连线`, 'info');
-        }
         return actionType === 'added';
     }
 
@@ -1359,7 +1315,6 @@
         const tgtCheck = findNodeInTree(data.root, targetId);
         if (!srcCheck || !tgtCheck) return;
         if (isNodeInSubtree(srcCheck, targetId)) {
-            showMindmapToast('不能将父节点融合并入其自身子孙节点中', 'warn');
             return;
         }
 
@@ -1428,7 +1383,6 @@
         });
 
         selectNode(targetId, false);
-        showMindmapToast('已将两节点融合合并', 'success');
     }
 
     function deleteNode(nodeId) {
@@ -1456,7 +1410,6 @@
                 });
                 if (selectedNodeId === nodeId) selectedNodeId = null;
                 selectedNodeIds.delete(nodeId);
-                showMindmapToast('已删除主链（Ctrl+Z 可撤销）');
             } else {
                 if (confirm('是否清空思维导图并重置？')) {
                     commitMindMapChange((d) => {
@@ -1532,7 +1485,6 @@
 
         if (selectedNodeId === nodeId) selectedNodeId = null;
         selectedNodeIds.delete(nodeId);
-        showMindmapToast('已删除节点（Ctrl+Z 可撤销）');
     }
 
     // 重新连接/更改归属（将节点挂载到新父节点下）
@@ -1644,7 +1596,6 @@
             parentRes.list.splice(pIdx >= 0 ? pIdx + 1 : parentRes.list.length, 0, movingNode);
         });
         selectNode(nodeId, false);
-        showMindmapToast('已提升节点层级', 'success');
         return true;
     }
 
@@ -1670,13 +1621,12 @@
             prevSibling.collapsed = false;
         });
         selectNode(nodeId, false);
-        showMindmapToast('已挂载为上一同级节点的子节点', 'success');
         return true;
     }
 
     function updateCardTagBadgeInPlace(nodeId, nextTag) {
         const els = getEls();
-        if (!els.treeRoot || _mindmapDomDirty) return false;
+        if (!els.treeRoot) return false;
         const card = els.treeRoot.querySelector(`.mm-card[data-id="${nodeId}"]`);
         const head = card?.querySelector(':scope > .mm-card-head');
         const leftInfo = head?.querySelector(':scope > .mm-card-left');
@@ -1690,14 +1640,15 @@
                 tagBadge.type = 'button';
                 tagBadge.onclick = (e) => {
                     e.stopPropagation();
-                    showTagPickerPopover(nodeId, tagBadge);
+                    selectNode(nodeId, false);
+                    openDockTray('tag');
                 };
                 const pageGroup = leftInfo.querySelector(':scope > .mm-page-badge-group');
                 if (pageGroup) leftInfo.insertBefore(tagBadge, pageGroup);
                 else leftInfo.appendChild(tagBadge);
             }
             tagBadge.className = `mm-math-tag mm-tag-${nextTag}`;
-            tagBadge.title = `理论定位: ${tagDef.label} (点击更改)`;
+            tagBadge.title = `理论定位: ${tagDef.label}（点击更改）`;
             tagBadge.innerHTML = `<i class="ph ${tagDef.icon}"></i><span>${tagDef.label}</span>`;
         } else if (tagBadge) {
             tagBadge.remove();
@@ -1708,7 +1659,7 @@
 
     function updateCardPageBadgeInPlace(nodeId, nextPage) {
         const els = getEls();
-        if (!els.treeRoot || _mindmapDomDirty) return false;
+        if (!els.treeRoot) return false;
         const card = els.treeRoot.querySelector(`.mm-card[data-id="${nodeId}"]`);
         const head = card?.querySelector(':scope > .mm-card-head');
         const leftInfo = head?.querySelector(':scope > .mm-card-left');
@@ -1726,27 +1677,16 @@
                 pageBadge.oncontextmenu = (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    showPagePickerPopover(nodeId, pageBadge);
+                    selectNode(nodeId, false);
+                    openDockTray('page');
                 };
                 group.appendChild(pageBadge);
-
-                const clearPageBtn = document.createElement('button');
-                clearPageBtn.type = 'button';
-                clearPageBtn.className = 'mm-page-clear-btn';
-                clearPageBtn.title = '解除该页码关联';
-                clearPageBtn.innerHTML = '<i class="ph ph-x"></i>';
-                clearPageBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    setNodePage(nodeId, null);
-                    showMindmapToast('已解除页码关联');
-                };
-                group.appendChild(clearPageBtn);
                 leftInfo.appendChild(group);
             }
             group.className = 'mm-page-badge-group' + (isCurrent ? ' is-active-page' : '');
             const pageBadge = group.querySelector(':scope > .mm-page-badge');
             if (pageBadge) {
-                pageBadge.title = `点击直达 PDF 第 ${nextPage} 页（右键修改）`;
+                pageBadge.title = `点击直达 PDF 第 ${nextPage} 页（右键在底部操作台修改）`;
                 pageBadge.innerHTML = `<i class="ph ph-bookmark-simple"></i><span>P.${nextPage}${isCurrent ? ' · 当前' : ''}</span>`;
                 pageBadge.onclick = (e) => {
                     e.stopPropagation();
@@ -1773,6 +1713,7 @@
             _mindmapDomDirty = false;
             _lastRenderedMindmapRef = state.annotations['mindmap'];
             _svgLayoutCache = null;
+            renderCommandDock();
             scheduleSvgConnectionsUpdate();
         } else if (isMindmapOpen) {
             renderTree();
@@ -1836,7 +1777,6 @@
                     n.collapsed = targetExpand ? false : (hasSub ? true : false);
                 }
             });
-            showMindmapToast(targetExpand ? '已展开所有分支' : '已折叠所有子分支', 'info');
         });
     }
 
@@ -1854,6 +1794,7 @@
             _mindmapDomDirty = false;
             _lastRenderedMindmapRef = state.annotations['mindmap'];
             _svgLayoutCache = null;
+            renderCommandDock();
             scheduleSvgConnectionsUpdate();
         } else if (isMindmapOpen) {
             renderTree();
@@ -1933,12 +1874,6 @@
         createdPage.panX = panX;
         createdPage.panY = panY;
         if (selectedNodeId) selectNode(selectedNodeId, false);
-        showMindmapToast(
-            createdPage.page
-                ? `已新建「${createdPage.title}」并绑定第 ${createdPage.page} 页`
-                : `已新建导图页「${createdPage.title}」`,
-            'success'
-        );
         return createdPage.id;
     }
 
@@ -2054,11 +1989,9 @@
             });
             selectedNodeId = null;
             selectedNodeIds.clear();
-            showMindmapToast('已重置当前思维导图页');
             return true;
         }
 
-        const removedTitle = pages[idx].title || `第 ${idx + 1} 页`;
         commitMindMapChange((d) => {
             const list = getMindMapPages(d);
             const delIdx = list.findIndex(p => p && p.id === targetId);
@@ -2083,7 +2016,6 @@
         });
         selectedNodeId = null;
         selectedNodeIds.clear();
-        showMindmapToast(`已删除「${removedTitle}」（Ctrl+Z 可撤销）`);
         return true;
     }
 
@@ -2121,7 +2053,6 @@
             const nextTitle = input.value.trim();
             if (save && nextTitle && nextTitle !== originalTitle) {
                 renameMindMapPage(pageId, nextTitle);
-                showMindmapToast(`已重命名为「${nextTitle}」`, 'success');
             } else {
                 renderPagesBar(getMindMapData());
             }
@@ -2173,10 +2104,72 @@
         }
     }
 
-    // 启动交互式自由合并连线模式（支持单节点或多选节点批量连线，点击画布目标直接连线，或一键合流至新子节点）
+    // ==========================================
+    // 3.1 底部统一上下文操作台 (#mm-command-dock) 与单层内联抽屉 (#mm-dock-tray)
+    // ==========================================
+
+    function closeDockTray(options = {}) {
+        const hadTray = Boolean(activeDockTray);
+        const hadMerge = Boolean(mergingSourceNodeId || (mergingSourceNodeIds && mergingSourceNodeIds.length > 0));
+        const hadReparent = Boolean(reparentingSourceNodeId);
+        if (!hadTray && !hadMerge && !hadReparent) return;
+
+        activeDockTray = null;
+        activeSheetTargetId = null;
+        if (!options.keepInteractive) {
+            if (hadMerge) stopInteractiveMergeMode({ silentDock: true, keepTray: true });
+            if (hadReparent) stopInteractiveReparentMode({ silentDock: true, keepTray: true });
+        }
+        if (!options.silentDock && isMindmapOpen) {
+            renderCommandDock();
+        }
+    }
+
+    function closeAllPopovers() {
+        closeDockTray();
+    }
+
+    function openDockTray(trayName, targetId = null, options = {}) {
+        if (!trayName) {
+            closeDockTray();
+            return;
+        }
+        if (trayName !== 'connect' && (mergingSourceNodeId || (mergingSourceNodeIds && mergingSourceNodeIds.length > 0))) {
+            stopInteractiveMergeMode({ silentDock: true, keepTray: true });
+        }
+        if (trayName !== 'move' && reparentingSourceNodeId) {
+            stopInteractiveReparentMode({ silentDock: true, keepTray: true });
+        }
+        if (trayName === 'sheet') {
+            activeSheetTargetId = targetId || getActiveMindMapPage()?.id || null;
+        } else {
+            activeSheetTargetId = null;
+            if (targetId && !selectedNodeIds.has(targetId)) {
+                selectNode(targetId, false);
+            }
+        }
+        if (trayName === 'connect') {
+            if (options.mode) {
+                dockConnectMode = options.mode;
+            } else if (activeDockTray !== 'connect' && !mergingSourceNodeId) {
+                dockConnectMode = selectedNodeIds.size > 1 ? 'converge' : 'link';
+            }
+        }
+        activeDockTray = trayName;
+        renderCommandDock({ focusTrayInput: options.focusInput !== false });
+    }
+
+    function toggleDockTray(trayName, targetId = null, options = {}) {
+        if (activeDockTray === trayName && (!targetId || activeSheetTargetId === targetId)) {
+            closeDockTray();
+        } else {
+            openDockTray(trayName, targetId, options);
+        }
+    }
+
+    // 启动交互式自由合并连线模式（与连接面板单层融合，零额外顶部横幅）
     function startInteractiveMergeMode(sourceIds) {
-        closeAllPopovers();
-        stopInteractiveReparentMode();
+        stopInteractiveReparentMode({ silentDock: true, keepTray: true });
         const data = getMindMapData();
         const raw = Array.isArray(sourceIds) ? sourceIds : [sourceIds];
         const validIds = raw.filter(id => id && findNodeInTree(data.root, id));
@@ -2205,65 +2198,15 @@
             if (card) card.classList.add('mm-merge-source');
         });
 
-        // 顶部悬浮操作条
-        let banner = document.getElementById('mm-merge-banner');
-        if (banner) banner.remove();
-        banner = document.createElement('div');
-        banner.id = 'mm-merge-banner';
-
-        const firstNode = findNodeInTree(data.root, validIds[0]);
-        const shortName = validIds.length > 1
-            ? `选中的 ${validIds.length} 个子节点`
-            : `「${(firstNode?.text || '当前节点').slice(0, 10)}」`;
-
-        banner.innerHTML = `
-            <i class="ph ph-git-merge text-indigo-600 text-sm"></i>
-            <span class="mm-merge-instruction" title="${escapeMindMapText(shortName)}">选择连线目标${validIds.length > 1 ? ` · ${validIds.length} 个来源` : ''}</span>
-            <button type="button" id="mm-banner-converge-btn" class="mm-text-tool">
-                <i class="ph ph-plus"></i><span>新建合流</span>
-            </button>
-            <button type="button" id="mm-banner-list-btn" class="mm-text-tool">从列表选</button>
-            <button type="button" id="mm-banner-cancel-btn" class="text-gray-400 hover:text-gray-700 p-0.5 rounded-full transition" title="取消 (Esc)"><i class="ph ph-x"></i></button>
-        `;
-        const hint = document.createElement('span');
-        hint.id = 'mm-merge-target-hint';
-        hint.setAttribute('role', 'status');
-        hint.textContent = '点击目标完成连线 · Esc 取消';
-        banner.appendChild(hint);
-
-        if (els.viewport) {
-            els.viewport.appendChild(banner);
-        }
-
-        const convBtn = banner.querySelector('#mm-banner-converge-btn');
-        if (convBtn) {
-            convBtn.onclick = (e) => {
-                e.stopPropagation();
-                const sources = [...mergingSourceNodeIds];
-                stopInteractiveMergeMode();
-                convergeNodesToNext(sources);
-            };
-        }
-        const listBtn = banner.querySelector('#mm-banner-list-btn');
-        if (listBtn) {
-            listBtn.onclick = (e) => {
-                e.stopPropagation();
-                const anchor = document.querySelector(`.mm-card[data-id="${mergingSourceNodeId}"]`) || banner;
-                const srcId = mergingSourceNodeId;
-                stopInteractiveMergeMode();
-                showMergePopover(srcId, anchor);
-            };
-        }
-        const cancelBtn = banner.querySelector('#mm-banner-cancel-btn');
-        if (cancelBtn) {
-            cancelBtn.onclick = (e) => {
-                e.stopPropagation();
-                stopInteractiveMergeMode();
-            };
+        dockConnectMode = 'link';
+        activeDockTray = 'connect';
+        activeSheetTargetId = null;
+        if (isMindmapOpen) {
+            renderCommandDock({ focusTrayInput: false });
         }
     }
 
-    function stopInteractiveMergeMode() {
+    function stopInteractiveMergeMode(options = {}) {
         mergingSourceNodeId = null;
         mergingSourceNodeIds = [];
         mergingTargetNodeId = null;
@@ -2277,22 +2220,28 @@
         }
         document.querySelectorAll('.mm-card.mm-merge-source').forEach(c => c.classList.remove('mm-merge-source'));
         document.querySelectorAll('.mm-card.mm-merge-target').forEach(c => c.classList.remove('mm-merge-target'));
-        const banner = document.getElementById('mm-merge-banner');
-        if (banner) banner.remove();
         document.querySelectorAll('.mm-connector-merge-preview').forEach(path => path.remove());
+        if (!options.keepTray && activeDockTray === 'connect') {
+            activeDockTray = null;
+        }
+        if (!options.silentDock && isMindmapOpen) {
+            renderCommandDock();
+        }
     }
 
-    // 启动交互式更改挂载父节点模式（在画布上直接点击任意非下属节点即可完成挂载切换）
+    // 启动交互式更改挂载父节点模式（与顺序/挂载面板单层融合，零额外顶部横幅）
     function startInteractiveReparentMode(nodeId) {
-        closeAllPopovers();
-        stopInteractiveMergeMode();
+        stopInteractiveMergeMode({ silentDock: true, keepTray: true });
         const data = getMindMapData();
         const targetId = nodeId || selectedNodeId;
         if (!targetId) return;
         const res = findParentAndList(data.root, targetId);
         if (!res || (res.containerType === 'chains' && data.nodes.length <= 1)) {
-            showMindmapToast('主链根节点不可挂载到其他节点下', 'warn');
             return;
+        }
+
+        if (selectedNodeId !== targetId || selectedNodeIds.size > 1) {
+            selectNode(targetId, false, false);
         }
 
         reparentingSourceNodeId = targetId;
@@ -2310,49 +2259,14 @@
         const card = document.querySelector(`.mm-card[data-id="${targetId}"]`);
         if (card) card.classList.add('mm-reparent-source');
 
-        let banner = document.getElementById('mm-reparent-banner');
-        if (banner) banner.remove();
-        banner = document.createElement('div');
-        banner.id = 'mm-reparent-banner';
-
-        const shortName = (res.node?.text || '当前节点').slice(0, 12);
-
-        banner.innerHTML = `
-            <i class="ph ph-arrow-bend-up-left text-amber-600 text-sm"></i>
-            <span class="mm-merge-instruction" title="${escapeMindMapText(shortName)}">点击目标父节点挂载「${escapeMindMapText(shortName)}」</span>
-            <button type="button" id="mm-reparent-list-btn" class="mm-text-tool">列表选择</button>
-            <button type="button" id="mm-reparent-cancel-btn" class="text-gray-400 hover:text-gray-700 p-0.5 rounded-full transition" title="取消 (Esc)"><i class="ph ph-x"></i></button>
-        `;
-        const hint = document.createElement('span');
-        hint.id = 'mm-reparent-target-hint';
-        hint.style.cssText = 'flex-basis:100%;color:#64748b;font-size:10px;';
-        hint.textContent = '直接点击画布上的新父节点完成挂载 · Alt+↑/↓ 调整同级顺序 · Esc 取消';
-        banner.appendChild(hint);
-
-        if (els.viewport) {
-            els.viewport.appendChild(banner);
-        }
-
-        const listBtn = banner.querySelector('#mm-reparent-list-btn');
-        if (listBtn) {
-            listBtn.onclick = (e) => {
-                e.stopPropagation();
-                const anchor = document.querySelector(`.mm-card[data-id="${reparentingSourceNodeId}"]`) || banner;
-                const src = reparentingSourceNodeId;
-                stopInteractiveReparentMode();
-                showReparentPopover(src, anchor);
-            };
-        }
-        const cancelBtn = banner.querySelector('#mm-reparent-cancel-btn');
-        if (cancelBtn) {
-            cancelBtn.onclick = (e) => {
-                e.stopPropagation();
-                stopInteractiveReparentMode();
-            };
+        activeDockTray = 'move';
+        activeSheetTargetId = null;
+        if (isMindmapOpen) {
+            renderCommandDock({ focusTrayInput: false });
         }
     }
 
-    function stopInteractiveReparentMode() {
+    function stopInteractiveReparentMode(options = {}) {
         reparentingSourceNodeId = null;
         reparentingTargetNodeId = null;
         lastRawReparentTargetId = undefined;
@@ -2366,874 +2280,812 @@
         }
         document.querySelectorAll('.mm-card.mm-reparent-source').forEach(c => c.classList.remove('mm-reparent-source'));
         document.querySelectorAll('.mm-card.mm-reparent-target').forEach(c => c.classList.remove('mm-reparent-target'));
-        const banner = document.getElementById('mm-reparent-banner');
-        if (banner) banner.remove();
         document.querySelectorAll('.mm-connector-reparent-preview').forEach(path => path.remove());
-    }
-
-    // 弹出自由合并与汇合管理面板（支持：关联连线、分支合流、节点内容融合、解除已有连线）
-    function showMergePopover(nodeId, anchorEl) {
-        closeAllPopovers();
-        activePopoverNodeId = nodeId;
-        const data = getMindMapData();
-        const node = findNodeInTree(data, nodeId);
-        if (!node) return;
-        const res = findParentAndList(data, nodeId);
-        const candidates = getReparentCandidates(data, nodeId, true);
-        const sources = new Set(selectedNodeIds.has(nodeId) ? selectedNodeIds : [nodeId]);
-        sources.add(nodeId);
-        const canConvergeFork = isVerticalSpineNode(data, nodeId)
-            && (node.branches?.length || res?.containerType === 'fork-track');
-        let mode = sources.size > 1 ? 'converge' : 'link';
-
-        const pop = document.createElement('div');
-        pop.id = 'mm-popover-dialog';
-        pop.className = 'mm-connect-popover';
-        pop.setAttribute('role', 'dialog');
-        pop.setAttribute('aria-label', '连接节点');
-        pop.style.width = '275px';
-        pop.innerHTML = `
-            <div class="mm-pop-header">
-                <div class="mm-pop-title-wrap">
-                    <i class="ph ph-link-simple text-blue-500 text-sm shrink-0"></i>
-                    <h4 class="mm-pop-title">连接节点</h4>
-                    <span class="mm-pop-node-chip truncate" title="${escapeMindMapText(node.text || '当前节点')}">${escapeMindMapText(node.text || '当前节点')}</span>
-                </div>
-                <button type="button" id="mm-pop-close" class="mm-pop-close-btn" aria-label="关闭连接面板"><i class="ph ph-x"></i></button>
-            </div>
-            ${canConvergeFork ? '<button type="button" id="mm-pop-converge-fork" class="mm-connect-secondary mm-connect-fork-quick"><i class="ph ph-arrows-merge"></i> 合流当前并行分支</button>' : ''}
-            <div class="mm-pop-tabs" role="tablist" aria-label="连接方式">
-                <button type="button" role="tab" data-mode="link" class="mm-pop-tab ${mode === 'link' ? 'is-active' : ''}" aria-selected="${mode === 'link'}">连线</button>
-                <button type="button" role="tab" data-mode="converge" class="mm-pop-tab ${mode === 'converge' ? 'is-active' : ''}" aria-selected="${mode === 'converge'}">合流</button>
-                <button type="button" role="tab" data-mode="fuse" class="mm-pop-tab ${mode === 'fuse' ? 'is-active' : ''}" aria-selected="${mode === 'fuse'}">融合</button>
-            </div>
-            <div class="mm-pop-search-wrap">
-                <div class="mm-pop-search-field">
-                    <i class="ph ph-magnifying-glass mm-pop-search-icon"></i>
-                    <input id="mm-connect-search" class="mm-pop-search-input" type="search" placeholder="搜索节点…" aria-label="搜索节点">
-                </div>
-                <button type="button" id="mm-pop-pick-canvas" class="mm-pop-canvas-btn" title="在画布上直接点击目标节点 (快捷键 M)">
-                    <i class="ph ph-cursor-click"></i>
-                    <span>点选</span>
-                </button>
-            </div>
-            <div id="mm-merge-cand-list" class="mm-connect-list custom-scrollbar"></div>
-            <button type="button" id="mm-pop-converge-next" class="mm-connect-primary"></button>
-            <div id="mm-connect-existing" style="display:none;"></div>`;
-
-        const list = pop.querySelector('#mm-merge-cand-list');
-        const search = pop.querySelector('#mm-connect-search');
-        const primary = pop.querySelector('#mm-pop-converge-next');
-        const canvasPickBtn = pop.querySelector('#mm-pop-pick-canvas');
-
-        function renderCandidates() {
-            canvasPickBtn.style.display = mode === 'link' ? 'inline-flex' : 'none';
-            primary.hidden = mode !== 'converge';
-            primary.textContent = `合流为新阶段 · ${sources.size} 项`;
-
-            list.replaceChildren();
-            const choices = mode === 'converge'
-                ? [{ id: nodeId, text: node.text || '当前节点', current: true }, ...candidates]
-                : candidates;
-            const query = search.value.trim().toLocaleLowerCase();
-            choices.filter(c => String(c.text).toLocaleLowerCase().includes(query)).forEach(cand => {
-                const row = document.createElement(mode === 'converge' ? 'label' : 'button');
-                row.className = 'mm-connect-row';
-                if (mode === 'converge') {
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.checked = sources.has(cand.id);
-                    checkbox.disabled = !!cand.current;
-                    checkbox.onchange = () => {
-                        if (checkbox.checked) sources.add(cand.id); else sources.delete(cand.id);
-                        primary.textContent = `合流为新阶段 · ${sources.size} 项`;
-                    };
-                    row.appendChild(checkbox);
-                } else {
-                    row.type = 'button';
-                    const linked = node.mergeTo?.includes(cand.id);
-                    row.title = mode === 'fuse' ? '将当前节点内容移入此节点' : linked ? '解除此连线' : '连线到此节点';
-                    row.onclick = () => {
-                        closeAllPopovers();
-                        if (mode === 'fuse') fuseNodeInto(nodeId, cand.id);
-                        else toggleMergeLink(nodeId, cand.id);
-                    };
-                }
-                const text = document.createElement('span');
-                text.textContent = cand.text || '未命名节点';
-                text.title = text.textContent;
-                const context = document.createElement('small');
-                context.textContent = cand.current ? '当前' : `主链 ${toRoman(cand.chainIdx)}`;
-                row.append(text, context);
-
-                if (mode === 'link') {
-                    const linked = node.mergeTo?.includes(cand.id);
-                    const actionBadge = document.createElement('span');
-                    if (linked) {
-                        actionBadge.className = 'mm-pop-linked-tag';
-                        actionBadge.innerHTML = '<i class="ph ph-check"></i><span>已连</span>';
-                    } else {
-                        actionBadge.className = 'mm-pop-link-action';
-                        actionBadge.textContent = '连接';
-                    }
-                    row.appendChild(actionBadge);
-                } else if (mode === 'fuse') {
-                    const actionBadge = document.createElement('span');
-                    actionBadge.className = 'mm-pop-link-action';
-                    actionBadge.style.background = '#fef3c7';
-                    actionBadge.style.color = '#d97706';
-                    actionBadge.textContent = '并入';
-                    row.appendChild(actionBadge);
-                }
-
-                list.appendChild(row);
-            });
-            if (!list.children.length) list.innerHTML = '<p class="mm-pop-empty-text">无匹配节点</p>';
+        if (!options.keepTray && activeDockTray === 'move') {
+            activeDockTray = null;
         }
-
-        pop.querySelectorAll('[data-mode]').forEach(tab => {
-            tab.onclick = () => {
-                mode = tab.dataset.mode;
-                pop.querySelectorAll('[data-mode]').forEach(t => {
-                    const active = (t === tab);
-                    t.setAttribute('aria-selected', String(active));
-                    t.classList.toggle('is-active', active);
-                });
-                renderCandidates();
-            };
-        });
-        search.oninput = renderCandidates;
-        pop.addEventListener('keydown', e => {
-            e.stopPropagation();
-            if (e.key === 'Escape') { e.preventDefault(); closeAllPopovers(); anchorEl.focus?.({ preventScroll: true }); }
-            const tab = e.target.closest('[data-mode]');
-            if (tab && ['ArrowLeft', 'ArrowRight'].includes(e.key)) {
-                e.preventDefault();
-                const tabs = [...pop.querySelectorAll('[data-mode]')];
-                const next = tabs[(tabs.indexOf(tab) + (e.key === 'ArrowRight' ? 1 : 2)) % tabs.length];
-                next.click(); next.focus();
-            }
-        });
-        primary.onclick = () => { closeAllPopovers(); convergeNodesToNext([...sources]); };
-        canvasPickBtn.onclick = () => {
-            closeAllPopovers();
-            startInteractiveMergeMode([...sources]);
-        };
-        const fork = pop.querySelector('#mm-pop-converge-fork');
-        if (fork) fork.onclick = () => { closeAllPopovers(); convergeBranches(nodeId, { forceFork: true }); };
-
-        const links = [];
-        getIncomingMergeSources(data, nodeId).forEach(src => links.push({
-            source: src.id, target: nodeId, solid: src.convergeTo?.includes(nodeId), text: `← ${src.text || '节点'}`
-        }));
-        [['convergeTo', true], ['mergeTo', false]].forEach(([key, solid]) => {
-            (node[key] || []).forEach(id => {
-                const target = findNodeInTree(data, id);
-                if (target) links.push({ source: nodeId, target: id, solid, text: `→ ${target.text || '节点'}` });
-            });
-        });
-        if (links.length) {
-            const bar = document.createElement('div');
-            bar.className = 'mm-pop-links-bar';
-            bar.innerHTML = '<span class="mm-pop-links-label">已连:</span>';
-            links.forEach(link => {
-                const chip = document.createElement('span');
-                chip.className = 'mm-pop-chip';
-                chip.title = `${link.solid ? '合流' : '引用'}：${link.text}`;
-                const name = document.createElement('span');
-                name.textContent = link.text.replace(/^[←→]\s*/, '');
-                const del = document.createElement('button');
-                del.type = 'button';
-                del.setAttribute('aria-label', `解除连接：${link.text}`);
-                del.innerHTML = '×';
-                del.onclick = (e) => {
-                    e.stopPropagation();
-                    if (link.solid) toggleConvergeLink(link.source, link.target);
-                    else toggleMergeLink(link.source, link.target);
-                    closeAllPopovers();
-                };
-                chip.append(name, del);
-                bar.appendChild(chip);
-            });
-            const existingWrap = pop.querySelector('#mm-connect-existing');
-            existingWrap.style.display = 'block';
-            existingWrap.replaceChildren(bar);
+        if (!options.silentDock && isMindmapOpen) {
+            renderCommandDock();
         }
-        pop.querySelector('#mm-pop-close').onclick = closeAllPopovers;
-        renderCandidates();
-        document.body.appendChild(pop);
-        const rect = anchorEl.getBoundingClientRect();
-        pop.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - pop.offsetWidth - 12))}px`;
-        pop.style.top = `${Math.max(8, Math.min(rect.bottom + 8, window.innerHeight - pop.offsetHeight - 12))}px`;
-        setTimeout(() => window.addEventListener('click', onDocClickOutsidePopover, { capture: true }), 10);
     }
 
-    // 弹出快捷修改页码气泡（支持节点与思维导图页绑定 PDF 页码）
-    function showPagePickerPopover(targetId, anchorEl, options = {}) {
-        closeAllPopovers();
-        const isPageTarget = Boolean(options && options.targetType === 'page');
-        activePopoverNodeId = targetId;
-        const data = getMindMapData();
-        const targetObj = isPageTarget
-            ? (getMindMapPages(data).find(p => p && p.id === (targetId || data.activePageId)) || getActiveMindMapPage(data))
-            : findNodeInTree(data, targetId);
-        if (!targetObj) return;
-
-        const pop = document.createElement('div');
-        pop.id = 'mm-popover-dialog';
-        pop.style.width = '296px';
-        
-        const curReadingPage = (state.currentPhysicalPage && state.currentPhysicalPage > 0) ? state.currentPhysicalPage : 1;
-        const curAssignedPage = targetObj.page || '';
-        const titleLabel = isPageTarget ? '设置导图页关联页码' : '设置关联页码';
-        const chipLabel = isPageTarget ? (targetObj.title || '当前导图页') : '';
-
-        pop.innerHTML = `
-            <div class="mm-pop-header">
-                <div class="mm-pop-title-wrap">
-                    <i class="ph ph-link text-blue-500 text-base"></i>
-                    <h4 class="mm-pop-title">${titleLabel}</h4>
-                    ${chipLabel ? `<span class="mm-pop-node-chip truncate" title="${escapeMindMapText(chipLabel)}">${escapeMindMapText(chipLabel)}</span>` : ''}
-                </div>
-                <button type="button" id="mm-pop-close" class="mm-pop-close-btn" title="关闭"><i class="ph ph-x"></i></button>
-            </div>
-            <div style="padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 11.5px; color: #64748b; flex-shrink: 0;">PDF 页码:</span>
-                    <input type="number" id="mm-pop-input" min="1" max="9999" value="${curAssignedPage}" placeholder="未关联页码" class="mm-pop-search-input" style="padding-left: 10px;">
-                </div>
-                <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; padding-top: 8px; border-top: 1px solid #f1f5f9;">
-                    <button type="button" id="mm-pop-bind-cur" style="padding: 4px 8px; border-radius: 6px; border: 1px solid #bfdbfe; background: #eff6ff; color: #2563eb; font-size: 11px; font-weight: 500; cursor: pointer; transition: all 0.15s ease;">当前阅读页 (P. ${curReadingPage})</button>
-                    <div style="display: flex; gap: 6px;">
-                        <button type="button" id="mm-pop-clear" style="padding: 4px 8px; border-radius: 6px; border: none; background: transparent; color: #94a3b8; font-size: 11px; cursor: pointer;">清除</button>
-                        <button type="button" id="mm-pop-ok" class="mm-connect-primary" style="margin: 0; padding: 5px 12px; font-size: 11px;">确定</button>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(pop);
-
-        const safeAnchor = anchorEl || getEls().bindPageBtn || getEls().pagesBar || getEls().panel;
-        const rect = safeAnchor ? safeAnchor.getBoundingClientRect() : { left: 60, top: 80, bottom: 110 };
-        let left = rect.left;
-        let top = rect.bottom + 6;
-        if (left + 296 > window.innerWidth) left = window.innerWidth - 306;
-        if (top + 160 > window.innerHeight) top = rect.top - 160;
-        pop.style.left = `${Math.max(8, left)}px`;
-        pop.style.top = `${Math.max(8, top)}px`;
-
-        const input = pop.querySelector('#mm-pop-input');
-        input.focus();
-        input.select();
-
-        const applyPageVal = (nextPage) => {
-            if (isPageTarget) {
-                setMindMapPagePdfPage(targetObj.id, nextPage);
-                if (nextPage) {
-                    showMindmapToast(`已将「${targetObj.title || '导图页'}」绑定至第 ${nextPage} 页`, 'success');
-                } else {
-                    showMindmapToast(`已取消「${targetObj.title || '导图页'}」的页码关联`);
-                }
-            } else {
-                setNodePage(targetId, nextPage);
-            }
-        };
-
-        const commit = () => {
-            const val = input.value.trim();
-            applyPageVal(val ? parseInt(val, 10) : null);
-            closeAllPopovers();
-        };
-
-        pop.querySelector('#mm-pop-ok').onclick = commit;
-        pop.querySelector('#mm-pop-bind-cur').onclick = () => {
-            applyPageVal(curReadingPage);
-            closeAllPopovers();
-        };
-        pop.querySelector('#mm-pop-clear').onclick = () => {
-            applyPageVal(null);
-            closeAllPopovers();
-        };
-        pop.querySelector('#mm-pop-close').onclick = closeAllPopovers;
-
-        input.onkeydown = (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); commit(); }
-            if (e.key === 'Escape') { e.preventDefault(); closeAllPopovers(); }
-        };
-
-        setTimeout(() => {
-            window.addEventListener('click', onDocClickOutsidePopover, { capture: true });
-        }, 10);
-    }
-
-    function showMindMapPagePickerPopover(pageId, anchorEl) {
+    function showMindMapPagePickerPopover(pageId) {
         const targetId = pageId || getActiveMindMapPage()?.id;
         if (!targetId) return;
-        showPagePickerPopover(targetId, anchorEl || getEls().bindPageBtn || getEls().pagesBar, { targetType: 'page' });
+        openDockTray('sheet', targetId);
     }
 
-    // 弹出设置数学理论角色标签弹窗
-    function showTagPickerPopover(nodeId, anchorEl) {
-        closeAllPopovers();
-        const data = getMindMapData();
-        const node = findNodeInTree(data, nodeId);
-        if (!node) return;
+    function refocusSelectedCard() {
+        if (!selectedNodeId) return;
+        const card = getEls().treeRoot?.querySelector(`.mm-card[data-id="${selectedNodeId}"]`);
+        card?.focus({ preventScroll: true });
+    }
 
-        const pop = document.createElement('div');
-        pop.id = 'mm-popover-dialog';
-        pop.style.width = '300px';
+    function renderDockTray(data, activePage, options = {}) {
+        const els = getEls();
+        const tray = els.dockTray;
+        if (!tray) return;
 
-        pop.innerHTML = `
-            <div class="mm-pop-header">
-                <div class="mm-pop-title-wrap">
-                    <i class="ph ph-tag text-blue-500 text-base"></i>
-                    <h4 class="mm-pop-title">数学理论角色</h4>
+        if (!activeDockTray) {
+            tray.hidden = true;
+            tray.replaceChildren();
+            return;
+        }
+
+        const prevReparentQuery = tray.querySelector('#mm-reparent-search')?.value || '';
+        const prevConnectQuery = tray.querySelector('#mm-connect-search')?.value || '';
+        const curReadingPage = (state.currentPhysicalPage && state.currentPhysicalPage > 0) ? state.currentPhysicalPage : 1;
+
+        if (activeDockTray === 'sheet') {
+            const pages = getMindMapPages(data);
+            const targetPage = pages.find(p => p && p.id === (activeSheetTargetId || data.activePageId)) || activePage;
+            if (!targetPage) {
+                activeDockTray = null;
+                tray.hidden = true;
+                tray.replaceChildren();
+                return;
+            }
+            tray.hidden = false;
+            const curAssignedPage = targetPage.page || '';
+            tray.innerHTML = `
+                <div class="mm-tray-head">
+                    <span class="mm-tray-title" title="${escapeMindMapText(targetPage.title || '当前导图页')}">
+                        <i class="ph ph-bookmark-simple"></i>
+                        <span>导图页设置 · ${escapeMindMapText(targetPage.title || '当前页')}</span>
+                    </span>
+                    <button type="button" id="mm-pop-close" class="mm-tray-close" aria-label="关闭导图页设置"><i class="ph ph-x"></i></button>
                 </div>
-                <button type="button" id="mm-pop-close" class="mm-pop-close-btn" title="关闭"><i class="ph ph-x"></i></button>
-            </div>
-            <div style="padding: 12px 14px;">
-                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px;">
+                <div class="mm-tray-row">
+                    <button type="button" id="mm-pop-bind-cur" class="mm-tray-btn ${targetPage.page === curReadingPage ? 'is-active' : ''}">
+                        <i class="ph ph-book-open-text"></i>
+                        <span>当前阅读页 (P.${curReadingPage})</span>
+                    </button>
+                    ${targetPage.page ? `<button type="button" id="mm-pop-locate" class="mm-tray-btn" title="跳转到 PDF 第 ${targetPage.page} 页"><i class="ph ph-arrow-square-out"></i><span>定位 P.${targetPage.page}</span></button>` : ''}
+                </div>
+                <div class="mm-tray-row">
+                    <input type="number" id="mm-pop-input" class="mm-tray-input" min="1" max="9999" value="${curAssignedPage}" placeholder="关联 PDF 页码…" aria-label="导图页关联 PDF 页码">
+                    <button type="button" id="mm-pop-clear" class="mm-tray-btn is-danger">清除</button>
+                    <button type="button" id="mm-pop-ok" class="mm-tray-btn is-primary">确定</button>
+                </div>
+                <div class="mm-tray-divider"></div>
+                <div class="mm-tray-row">
+                    <input type="text" id="mm-sheet-rename-input" class="mm-tray-input" value="${escapeMindMapText(targetPage.title || '')}" placeholder="导图页名称" aria-label="导图页名称">
+                    <button type="button" id="mm-sheet-rename-ok" class="mm-tray-btn">改名</button>
+                    <button type="button" id="mm-sheet-add-after" class="mm-tray-btn" title="在右侧新建导图页 (Alt+T)"><i class="ph ph-plus"></i><span>新页</span></button>
+                    <button type="button" id="mm-sheet-delete" class="mm-tray-btn is-danger" title="${pages.length > 1 ? '删除此导图页' : '清空重置此导图页'}" aria-label="${pages.length > 1 ? '删除此导图页' : '清空重置此导图页'}"><i class="ph ph-trash"></i></button>
+                </div>
+            `;
+
+            const input = tray.querySelector('#mm-pop-input');
+            const renameInput = tray.querySelector('#mm-sheet-rename-input');
+            const applySheetPdf = (nextPage) => {
+                setMindMapPagePdfPage(targetPage.id, nextPage);
+                closeDockTray();
+            };
+
+            tray.querySelector('#mm-pop-ok').onclick = () => {
+                const val = input.value.trim();
+                applySheetPdf(val ? parseInt(val, 10) : null);
+            };
+            tray.querySelector('#mm-pop-bind-cur').onclick = () => applySheetPdf(curReadingPage);
+            tray.querySelector('#mm-pop-clear').onclick = () => applySheetPdf(null);
+            const locateBtn = tray.querySelector('#mm-pop-locate');
+            if (locateBtn) {
+                locateBtn.onclick = () => {
+                    if (data.activePageId !== targetPage.id) {
+                        switchMindMapPage(targetPage.id, { locatePdf: true });
+                    } else if (targetPage.page) {
+                        locatePdfPage(targetPage.page);
+                    }
+                    closeDockTray();
+                };
+            }
+            const commitSheetRename = () => {
+                const nextTitle = renameInput.value.trim();
+                if (nextTitle && nextTitle !== targetPage.title) {
+                    renameMindMapPage(targetPage.id, nextTitle);
+                }
+                closeDockTray();
+            };
+            tray.querySelector('#mm-sheet-rename-ok').onclick = commitSheetRename;
+            tray.querySelector('#mm-sheet-add-after').onclick = () => {
+                closeDockTray({ silentDock: true });
+                addMindMapPage({ insertAfterId: targetPage.id });
+            };
+            tray.querySelector('#mm-sheet-delete').onclick = () => {
+                closeDockTray({ silentDock: true });
+                deleteMindMapPage(targetPage.id);
+            };
+            tray.querySelector('#mm-pop-close').onclick = () => closeDockTray();
+
+            input.onkeydown = (e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const val = input.value.trim();
+                    applySheetPdf(val ? parseInt(val, 10) : null);
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeDockTray();
+                }
+            };
+            renameInput.onkeydown = (e) => {
+                e.stopPropagation();
+                if (e.isComposing || e.keyCode === 229) return;
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    commitSheetRename();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeDockTray();
+                }
+            };
+            if (options.focusTrayInput) {
+                input.focus({ preventScroll: true });
+                input.select();
+            }
+            return;
+        }
+
+        const leadId = mergingSourceNodeId || reparentingSourceNodeId || selectedNodeId || [...selectedNodeIds][0] || null;
+        const node = leadId ? findNodeInTree(data, leadId) : null;
+        if (!node) {
+            activeDockTray = null;
+            tray.hidden = true;
+            tray.replaceChildren();
+            return;
+        }
+
+        if (activeDockTray === 'tag') {
+            tray.hidden = false;
+            tray.innerHTML = `
+                <div class="mm-tray-head">
+                    <span class="mm-tray-title"><i class="ph ph-tag"></i><span>数学理论角色</span></span>
+                    <div class="mm-tray-head-right">
+                        <button type="button" id="mm-tag-clear" class="mm-tray-link-danger">清除角色</button>
+                        <button type="button" id="mm-pop-close" class="mm-tray-close" aria-label="关闭角色面板"><i class="ph ph-x"></i></button>
+                    </div>
+                </div>
+                <div class="mm-tray-tag-grid">
                     ${Object.entries(MATH_TAGS).map(([k, t]) => `
-                        <button type="button" class="mm-tag-pick-btn mm-tag-${k} ${node.tag === k ? 'is-active' : ''}" data-key="${k}" style="padding: 6px 4px; border-radius: 6px; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; cursor: pointer; transition: all 0.15s ease;">
+                        <button type="button" class="mm-tag-pick-btn mm-tag-${k} ${node.tag === k ? 'is-active' : ''}" data-key="${k}">
                             <i class="ph ${t.icon}"></i><span>${t.label}</span>
                         </button>
                     `).join('')}
                 </div>
-                <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 8px; border-top: 1px solid #f1f5f9;">
-                    <button type="button" id="mm-tag-clear" style="padding: 3px 8px; border-radius: 6px; border: none; background: transparent; color: #ef4444; font-size: 11px; cursor: pointer;">清除角色</button>
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(pop);
-
-        const rect = anchorEl.getBoundingClientRect();
-        let left = rect.left;
-        let top = rect.bottom + 6;
-        if (left + 300 > window.innerWidth) left = window.innerWidth - 310;
-        if (top + 220 > window.innerHeight) top = rect.top - 220;
-        pop.style.left = `${Math.max(8, left)}px`;
-        pop.style.top = `${Math.max(8, top)}px`;
-
-        pop.querySelectorAll('.mm-tag-pick-btn').forEach(btn => {
-            btn.onclick = () => {
-                const k = btn.dataset.key;
-                setNodeTag(nodeId, k);
-                showMindmapToast(`已标记为「${MATH_TAGS[k].label}」`, 'success');
-                closeAllPopovers();
+            `;
+            tray.querySelectorAll('.mm-tag-pick-btn').forEach(btn => {
+                btn.onclick = () => {
+                    const k = btn.dataset.key;
+                    closeDockTray({ silentDock: true });
+                    setNodeTag(node.id, k);
+                };
+            });
+            tray.querySelector('#mm-tag-clear').onclick = () => {
+                closeDockTray({ silentDock: true });
+                setNodeTag(node.id, null);
             };
-        });
-
-        pop.querySelector('#mm-tag-clear').onclick = () => {
-            setNodeTag(nodeId, null);
-            showMindmapToast('已清除角色标签');
-            closeAllPopovers();
-        };
-
-        pop.querySelector('#mm-pop-close').onclick = closeAllPopovers;
-
-        setTimeout(() => {
-            window.addEventListener('click', onDocClickOutsidePopover, { capture: true });
-        }, 10);
-    }
-
-    // 弹出更换父节点弹窗
-    function showReparentPopover(nodeId, anchorEl) {
-        closeAllPopovers();
-        activePopoverNodeId = nodeId;
-        const data = getMindMapData();
-        const node = findNodeInTree(data, nodeId);
-        if (!node) return;
-        const res = findParentAndList(data, nodeId);
-
-        const candidates = getReparentCandidates(data, nodeId);
-
-        if (candidates.length === 0) {
-            showMindmapToast('当前没有其他可挂载的目标节点！', 'warn');
+            tray.querySelector('#mm-pop-close').onclick = () => {
+                closeDockTray();
+                refocusSelectedCard();
+            };
             return;
         }
 
-        const pop = document.createElement('div');
-        pop.id = 'mm-popover-dialog';
-        pop.style.width = '290px';
-
-        pop.innerHTML = `
-            <div class="mm-pop-header">
-                <div class="mm-pop-title-wrap">
-                    <i class="ph ph-arrow-bend-up-left text-blue-500 text-sm shrink-0"></i>
-                    <h4 class="mm-pop-title">选择新父节点</h4>
-                    <span class="mm-pop-node-chip truncate" title="${escapeMindMapText(node.text || '当前节点')}">${escapeMindMapText(node.text || '当前节点')}</span>
+        if (activeDockTray === 'page') {
+            tray.hidden = false;
+            const curAssignedPage = node.page || '';
+            tray.innerHTML = `
+                <div class="mm-tray-head">
+                    <span class="mm-tray-title"><i class="ph ph-bookmark-simple"></i><span>设置关联页码</span></span>
+                    <button type="button" id="mm-pop-close" class="mm-tray-close" aria-label="关闭页码面板"><i class="ph ph-x"></i></button>
                 </div>
-                <button type="button" id="mm-pop-close" class="mm-pop-close-btn" title="关闭"><i class="ph ph-x"></i></button>
-            </div>
-            <div class="mm-pop-search-wrap">
-                <div class="mm-pop-search-field">
-                    <i class="ph ph-magnifying-glass mm-pop-search-icon"></i>
-                    <input id="mm-reparent-search" class="mm-pop-search-input" type="search" placeholder="搜索新父节点…" aria-label="搜索新父节点">
+                <div class="mm-tray-row">
+                    <button type="button" id="mm-pop-bind-cur" class="mm-tray-btn ${node.page === curReadingPage ? 'is-active' : ''}">
+                        <i class="ph ph-book-open-text"></i>
+                        <span>当前阅读页 (P.${curReadingPage})</span>
+                    </button>
+                    ${node.page ? `<button type="button" id="mm-pop-locate" class="mm-tray-btn" title="定位到 PDF 第 ${node.page} 页"><i class="ph ph-arrow-square-out"></i><span>定位 P.${node.page}</span></button>` : ''}
                 </div>
-                <button type="button" id="mm-reparent-pick-canvas" class="mm-pop-canvas-btn" title="在画布上直接点击新父节点 (快捷键 R)">
-                    <i class="ph ph-cursor-click"></i>
-                    <span>点选</span>
-                </button>
-            </div>
-            <div id="mm-reparent-list" class="mm-connect-list custom-scrollbar" style="margin-bottom: 8px; max-height: 190px;"></div>
-        `;
-
-        const listEl = pop.querySelector('#mm-reparent-list');
-        const searchInput = pop.querySelector('#mm-reparent-search');
-        const currentParentId = res && res.parent ? res.parent.id : null;
-
-        function renderReparentList() {
-            listEl.replaceChildren();
-            const q = searchInput.value.trim().toLocaleLowerCase();
-            const filtered = candidates.filter(c => String(c.text || '').toLocaleLowerCase().includes(q));
-            filtered.forEach(cand => {
-                const isCurParent = (cand.id === currentParentId);
-                const btn = document.createElement('button');
-                btn.type = 'button';
-                btn.className = 'mm-connect-row';
-                btn.style.paddingLeft = `${Math.min(cand.depth, 4) * 11 + 8}px`;
-                btn.innerHTML = `
-                    <i class="ph ${cand.depth === 0 ? 'ph-compass' : 'ph-arrow-elbow-down-right'} text-gray-400 text-xs shrink-0"></i>
-                    <span class="truncate">${escapeMindMapText(cand.text)}</span>
-                    ${isCurParent ? '<small style="color:#2563eb;background:#eff6ff;">当前父级</small>' : `<small>主链 ${toRoman(cand.chainIdx)}</small>`}
-                `;
-                btn.onclick = () => {
-                    reparentNode(nodeId, cand.id);
-                    showMindmapToast(`已挂载至「${cand.text}」`, 'success');
-                    closeAllPopovers();
-                };
-                listEl.appendChild(btn);
-            });
-            if (!listEl.children.length) {
-                listEl.innerHTML = '<p class="mm-pop-empty-text">无匹配节点</p>';
-            }
-        }
-
-        const canvasBtn = pop.querySelector('#mm-reparent-pick-canvas');
-        if (canvasBtn) {
-            canvasBtn.onclick = (ev) => {
-                ev.stopPropagation();
-                closeAllPopovers();
-                startInteractiveReparentMode(nodeId);
+                <div class="mm-tray-row">
+                    <input type="number" id="mm-pop-input" class="mm-tray-input" min="1" max="9999" value="${curAssignedPage}" placeholder="输入 PDF 页码…" aria-label="PDF 页码">
+                    <button type="button" id="mm-pop-clear" class="mm-tray-btn is-danger">清除</button>
+                    <button type="button" id="mm-pop-ok" class="mm-tray-btn is-primary">确定</button>
+                </div>
+            `;
+            const input = tray.querySelector('#mm-pop-input');
+            const applyNodePdf = (nextPage) => {
+                closeDockTray({ silentDock: true });
+                setNodePage(node.id, nextPage);
+                refocusSelectedCard();
             };
+            tray.querySelector('#mm-pop-ok').onclick = () => {
+                const val = input.value.trim();
+                applyNodePdf(val ? parseInt(val, 10) : null);
+            };
+            tray.querySelector('#mm-pop-bind-cur').onclick = () => applyNodePdf(curReadingPage);
+            tray.querySelector('#mm-pop-clear').onclick = () => applyNodePdf(null);
+            const locateBtn = tray.querySelector('#mm-pop-locate');
+            if (locateBtn) {
+                locateBtn.onclick = () => {
+                    if (node.page) locatePdfPage(node.page);
+                };
+            }
+            tray.querySelector('#mm-pop-close').onclick = () => {
+                closeDockTray();
+                refocusSelectedCard();
+            };
+            input.onkeydown = (e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const val = input.value.trim();
+                    applyNodePdf(val ? parseInt(val, 10) : null);
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeDockTray();
+                    refocusSelectedCard();
+                }
+            };
+            if (options.focusTrayInput) {
+                input.focus({ preventScroll: true });
+                input.select();
+            }
+            return;
         }
 
-        searchInput.oninput = renderReparentList;
-        renderReparentList();
+        if (activeDockTray === 'connect') {
+            tray.hidden = false;
+            const res = findParentAndList(data, node.id);
+            const candidates = getReparentCandidates(data, node.id, true);
+            const initialSources = (mergingSourceNodeIds && mergingSourceNodeIds.length > 0)
+                ? mergingSourceNodeIds
+                : (selectedNodeIds.has(node.id) ? [...selectedNodeIds] : [node.id]);
+            const sources = new Set(initialSources);
+            sources.add(node.id);
+            const canConvergeFork = isVerticalSpineNode(data, node.id)
+                && (node.branches?.length || res?.containerType === 'fork-track');
+            let mode = dockConnectMode || (sources.size > 1 ? 'converge' : 'link');
 
-        document.body.appendChild(pop);
-
-        const rect = anchorEl.getBoundingClientRect();
-        let left = rect.left;
-        let top = rect.bottom + 6;
-        if (left + 295 > window.innerWidth) left = window.innerWidth - 305;
-        if (top + pop.offsetHeight > window.innerHeight - 10) top = Math.max(8, rect.top - pop.offsetHeight - 6);
-        pop.style.left = `${Math.max(8, left)}px`;
-        pop.style.top = `${Math.max(8, top)}px`;
-
-        pop.querySelector('#mm-pop-close').onclick = closeAllPopovers;
-
-        setTimeout(() => {
-            window.addEventListener('click', onDocClickOutsidePopover, { capture: true });
-        }, 10);
-    }
-
-    function onDocClickOutsidePopover(e) {
-        const pop = document.getElementById('mm-popover-dialog');
-        const ctx = document.getElementById('mm-context-menu');
-        const clickedInsidePop = pop && pop.contains(e.target);
-        const clickedInsideCtx = ctx && ctx.contains(e.target);
-
-        if (!clickedInsidePop && !clickedInsideCtx) {
-            closeAllPopovers();
-        }
-    }
-
-    function closeAllPopovers() {
-        const pop = document.getElementById('mm-popover-dialog');
-        if (pop) pop.remove();
-        const ctx = document.getElementById('mm-context-menu');
-        if (ctx) ctx.remove();
-        activePopoverNodeId = null;
-        window.removeEventListener('click', onDocClickOutsidePopover, { capture: true });
-        window.removeEventListener('contextmenu', onDocClickOutsidePopover, { capture: true });
-    }
-
-    // 自定义卡片右键菜单
-    function showCardContextMenu(e, nodeId) {
-        e.preventDefault();
-        e.stopPropagation();
-        closeAllPopovers();
-        if (!selectedNodeIds.has(nodeId)) {
-            selectNode(nodeId, false);
-        }
-
-        const data = getMindMapData();
-        const node = findNodeInTree(data.root, nodeId);
-        if (!node) return;
-        const res = findParentAndList(data.root, nodeId);
-        const isChainRoot = (res && res.containerType === 'chains');
-        const isPrimaryRoot = (data.root && data.root.id === nodeId && getAllMainChains(data).length <= 1);
-        const isVerticalMain = isVerticalSpineNode(data, nodeId);
-        const curReadingPage = (state.currentPhysicalPage && state.currentPhysicalPage > 0) ? state.currentPhysicalPage : 1;
-        const hasChildren = (node.children && node.children.length > 0) || (node.branches && node.branches.length > 0);
-
-        const menu = document.createElement('div');
-        menu.id = 'mm-context-menu';
-        menu.setAttribute('role', 'menu');
-        menu.setAttribute('aria-label', '节点操作');
-
-        let html = '';
-
-        if (selectedNodeIds.size > 1) {
-            html += `
-                <div class="mm-menu-item font-semibold text-indigo-700 bg-indigo-50/70" data-action="converge-multi">
-                    <div class="menu-left"><i class="ph ph-git-merge text-indigo-600"></i><span>合流所选 ${selectedNodeIds.size} 个子节点到新节点</span></div>
-                    <span class="mm-menu-shortcut">Enter</span>
+            tray.innerHTML = `
+                <div class="mm-tray-head">
+                    <span class="mm-tray-title">
+                        <i class="ph ph-git-merge"></i>
+                        <span>连接节点${sources.size > 1 ? ` · ${sources.size} 项` : ''}</span>
+                    </span>
+                    <button type="button" id="mm-pop-close" class="mm-tray-close" aria-label="关闭连接面板"><i class="ph ph-x"></i></button>
                 </div>
-                <div class="mm-menu-item text-indigo-700" data-action="merge-multi-interactive">
-                    <div class="menu-left"><i class="ph ph-cursor-click text-indigo-600"></i><span>批量连线所选 ${selectedNodeIds.size} 个节点...</span></div>
-                    <span class="mm-menu-shortcut">M</span>
+                ${canConvergeFork ? '<button type="button" id="mm-pop-converge-fork" class="mm-connect-secondary"><i class="ph ph-arrows-merge"></i><span>合流当前并行分支</span></button>' : ''}
+                <div class="mm-pop-tabs" role="tablist" aria-label="连接方式">
+                    <button type="button" role="tab" data-mode="link" class="mm-pop-tab ${mode === 'link' ? 'is-active' : ''}" aria-selected="${mode === 'link'}">连线</button>
+                    <button type="button" role="tab" data-mode="converge" class="mm-pop-tab ${mode === 'converge' ? 'is-active' : ''}" aria-selected="${mode === 'converge'}">合流</button>
+                    <button type="button" role="tab" data-mode="fuse" class="mm-pop-tab ${mode === 'fuse' ? 'is-active' : ''}" aria-selected="${mode === 'fuse'}">融合</button>
                 </div>
-                <div class="mm-menu-divider"></div>
-            `;
-        }
-
-        const hasForkTracks = Array.isArray(node.branches) && node.branches.some(t => Array.isArray(t) && t.length > 0);
-        const canConvergeFork = isVerticalMain && (hasForkTracks || res?.containerType === 'fork-track');
-
-        if (isVerticalMain) {
-            html += `
-                <div class="mm-menu-item" data-action="fork-branch">
-                    <div class="menu-left"><i class="ph ph-git-fork text-blue-600"></i><span>向下拆分并行推演</span></div>
-                    <span class="mm-menu-shortcut">Shift+Enter</span>
-                </div>
-            `;
-            if (canConvergeFork) {
-                html += `
-                    <div class="mm-menu-item font-medium text-indigo-700" data-action="converge-fork">
-                        <div class="menu-left"><i class="ph ph-arrows-merge text-indigo-600"></i><span>合流并行分支为主节点</span></div>
+                <div class="mm-pop-search-wrap">
+                    <div class="mm-pop-search-field">
+                        <i class="ph ph-magnifying-glass mm-pop-search-icon"></i>
+                        <input id="mm-connect-search" class="mm-pop-search-input" type="search" placeholder="搜索节点…" aria-label="搜索节点">
                     </div>
-                `;
+                    <button type="button" id="mm-pop-pick-canvas" class="mm-pop-canvas-btn ${mergingSourceNodeId ? 'is-active' : ''}" title="在画布上直接点击目标节点连线 (快捷键 M)">
+                        <i class="ph ph-cursor-click"></i>
+                        <span>${mergingSourceNodeId ? '点选中' : '点选'}</span>
+                    </button>
+                </div>
+                ${mergingSourceNodeId ? '<div id="mm-merge-target-hint" class="mm-tray-hint is-live" role="status">点击画布目标建立连线 · 再点解除 · Esc 取消</div>' : ''}
+                <div id="mm-merge-cand-list" class="mm-connect-list custom-scrollbar"></div>
+                <button type="button" id="mm-pop-converge-next" class="mm-connect-primary"></button>
+                <div id="mm-connect-existing" style="display:none;"></div>
+            `;
+
+            const list = tray.querySelector('#mm-merge-cand-list');
+            const search = tray.querySelector('#mm-connect-search');
+            const primary = tray.querySelector('#mm-pop-converge-next');
+            const canvasPickBtn = tray.querySelector('#mm-pop-pick-canvas');
+            if (prevConnectQuery) search.value = prevConnectQuery;
+
+            function renderCandidates() {
+                canvasPickBtn.style.display = mode === 'link' ? 'inline-flex' : 'none';
+                primary.hidden = mode !== 'converge';
+                primary.textContent = `合流为新阶段 · ${sources.size} 项`;
+
+                list.replaceChildren();
+                const choices = mode === 'converge'
+                    ? [{ id: node.id, text: node.text || '当前节点', current: true }, ...candidates]
+                    : candidates;
+                const query = search.value.trim().toLocaleLowerCase();
+                choices.filter(c => String(c.text).toLocaleLowerCase().includes(query)).forEach(cand => {
+                    const row = document.createElement(mode === 'converge' ? 'label' : 'button');
+                    row.className = 'mm-connect-row';
+                    if (mode === 'converge') {
+                        const checkbox = document.createElement('input');
+                        checkbox.type = 'checkbox';
+                        checkbox.checked = sources.has(cand.id);
+                        checkbox.disabled = !!cand.current;
+                        checkbox.onchange = () => {
+                            if (checkbox.checked) sources.add(cand.id); else sources.delete(cand.id);
+                            primary.textContent = `合流为新阶段 · ${sources.size} 项`;
+                        };
+                        row.appendChild(checkbox);
+                    } else {
+                        row.type = 'button';
+                        const linked = node.mergeTo?.includes(cand.id);
+                        row.title = mode === 'fuse' ? '将当前节点内容并入此节点' : linked ? '解除此连线' : '连线到此节点';
+                        row.onclick = () => {
+                            const activeSources = [...sources];
+                            closeDockTray({ silentDock: true });
+                            if (mode === 'fuse') {
+                                fuseNodeInto(node.id, cand.id);
+                            } else if (activeSources.length > 1) {
+                                activeSources.forEach(sId => toggleMergeLink(sId, cand.id));
+                            } else {
+                                toggleMergeLink(node.id, cand.id);
+                            }
+                        };
+                    }
+                    const text = document.createElement('span');
+                    text.textContent = cand.text || '未命名节点';
+                    text.title = text.textContent;
+                    const context = document.createElement('small');
+                    context.textContent = cand.current ? '当前' : `主链 ${toRoman(cand.chainIdx)}`;
+                    row.append(text, context);
+
+                    if (mode === 'link') {
+                        const linked = node.mergeTo?.includes(cand.id);
+                        const actionBadge = document.createElement('span');
+                        if (linked) {
+                            actionBadge.className = 'mm-pop-linked-tag';
+                            actionBadge.innerHTML = '<i class="ph ph-check"></i><span>已连</span>';
+                        } else {
+                            actionBadge.className = 'mm-pop-link-action';
+                            actionBadge.textContent = '连接';
+                        }
+                        row.appendChild(actionBadge);
+                    } else if (mode === 'converge' && !cand.current) {
+                        const intoBtn = document.createElement('button');
+                        intoBtn.type = 'button';
+                        intoBtn.className = 'mm-pop-link-action';
+                        intoBtn.title = '实线合流汇入此已有节点';
+                        intoBtn.textContent = '汇入';
+                        intoBtn.onclick = (ev) => {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            const activeSources = [...sources];
+                            closeDockTray({ silentDock: true });
+                            convergeNodesToNext(activeSources, cand.id);
+                        };
+                        row.appendChild(intoBtn);
+                    } else if (mode === 'fuse') {
+                        const actionBadge = document.createElement('span');
+                        actionBadge.className = 'mm-pop-link-action';
+                        actionBadge.style.background = '#fef3c7';
+                        actionBadge.style.color = '#d97706';
+                        actionBadge.textContent = '并入';
+                        row.appendChild(actionBadge);
+                    }
+
+                    list.appendChild(row);
+                });
+                if (!list.children.length) list.innerHTML = '<p class="mm-pop-empty-text">无匹配节点</p>';
             }
-        }
 
-        html += `
-            <div class="mm-menu-item" data-action="pick-tag">
-                <div class="menu-left"><i class="ph ph-tag text-teal-600"></i><span>标记数学角色...</span></div>
-            </div>
-            <div class="mm-menu-item" data-action="bind-current">
-                <div class="menu-left"><i class="ph ph-bookmark-simple text-blue-600"></i><span>${node.page === curReadingPage ? '解除绑定当前页' : `绑定当前页 (P. ${curReadingPage})`}</span></div>
-                <span class="mm-menu-shortcut">P</span>
-            </div>
-            <div class="mm-menu-item" data-action="pick-page">
-                <div class="menu-left"><i class="ph ph-link text-blue-500"></i><span>指定关联页码...</span></div>
-            </div>
-        `;
-
-        if (!isChainRoot) {
-            html += `
-                <div class="mm-menu-item" data-action="reparent">
-                    <div class="menu-left"><i class="ph ph-arrow-bend-up-left text-purple-500"></i><span>更改挂载父节点...</span></div>
-                    <span class="mm-menu-shortcut">R</span>
-                </div>
-            `;
-        }
-
-        if (isChainRoot) {
-            html += `
-                <div class="mm-menu-item" data-action="add-main-chain">
-                    <div class="menu-left"><i class="ph ph-plus-square text-blue-600"></i><span>新建一条并列主链</span></div>
-                    <span class="mm-menu-shortcut">Alt+N</span>
-                </div>
-                <div class="mm-menu-item" data-action="toggle-all-branches">
-                    <div class="menu-left"><i class="ph ph-arrows-in-line-vertical text-gray-500"></i><span>折叠/展开全部子分支</span></div>
-                </div>
-            `;
-        } else if (hasChildren) {
-            html += `
-                <div class="mm-menu-item" data-action="toggle-collapse">
-                    <div class="menu-left"><i class="ph ${node.collapsed ? 'ph-caret-right' : 'ph-caret-left'} text-gray-500"></i><span>${node.collapsed ? '展开下属分支' : '折叠下属分支'}</span></div>
-                </div>
-            `;
-        }
-
-        html += `
-            <div class="mm-menu-divider"></div>
-            <div class="mm-menu-item danger" data-action="delete">
-                <div class="menu-left"><i class="ph ph-trash text-red-500"></i><span>${isPrimaryRoot ? '清空重置导图' : (isChainRoot ? '删除整条主链' : '删除节点')}</span></div>
-                <span class="mm-menu-shortcut">Del</span>
-            </div>
-        `;
-
-        menu.innerHTML = html;
-        menu.querySelectorAll('.mm-menu-item').forEach(item => {
-            item.tabIndex = 0;
-            item.setAttribute('role', 'menuitem');
-        });
-        menu.addEventListener('keydown', event => {
-            event.stopPropagation();
-            const items = [...menu.querySelectorAll('.mm-menu-item')];
-            const index = items.indexOf(document.activeElement);
-            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                event.preventDefault();
-                items[(index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
-            } else if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                items[index]?.click();
-            } else if (event.key === 'Escape') {
-                event.preventDefault();
-                closeAllPopovers();
-                getEls().treeRoot.querySelector(`.mm-card[data-id="${nodeId}"]`)?.focus({ preventScroll: true });
-            }
-        });
-        document.body.appendChild(menu);
-
-        const menuW = 216;
-        const menuH = menu.offsetHeight || 260;
-        let x = e.clientX;
-        let y = e.clientY;
-        if (x + menuW > window.innerWidth - 10) x = window.innerWidth - menuW - 10;
-        if (y + menuH > window.innerHeight - 10) y = window.innerHeight - menuH - 10;
-        menu.style.left = `${Math.max(10, x)}px`;
-        menu.style.top = `${Math.max(10, y)}px`;
-
-        menu.addEventListener('click', (ev) => {
-            const item = ev.target.closest('.mm-menu-item');
-            if (!item) return;
-            const act = item.dataset.action;
-            closeAllPopovers();
-
-            const cardEl = document.querySelector(`.mm-tree-branch[data-id="${nodeId}"] > .mm-card-wrapper > .mm-card`);
-            if (act === 'converge-multi') convergeNodesToNext(Array.from(selectedNodeIds));
-            else if (act === 'merge-multi-interactive') startInteractiveMergeMode(Array.from(selectedNodeIds));
-            else if (act === 'fork-branch') forkNodeBranch(nodeId);
-            else if (act === 'converge-fork') convergeBranches(nodeId, { forceFork: true });
-            else if (act === 'add-main-chain') addMainChain();
-            else if (act === 'bind-current') {
-                if (node.page === curReadingPage) {
-                    setNodePage(nodeId, null);
-                    showMindmapToast('已取消页码关联');
-                } else {
-                    setNodePage(nodeId, curReadingPage);
-                    showMindmapToast(`已绑定第 ${curReadingPage} 页`, 'success');
+            tray.querySelectorAll('[data-mode]').forEach(tab => {
+                tab.onclick = () => {
+                    mode = tab.dataset.mode;
+                    dockConnectMode = mode;
+                    if (mode !== 'link' && mergingSourceNodeId) {
+                        stopInteractiveMergeMode({ keepTray: true, silentDock: true });
+                        canvasPickBtn.classList.remove('is-active');
+                        const hintEl = tray.querySelector('#mm-merge-target-hint');
+                        if (hintEl) hintEl.remove();
+                    }
+                    tray.querySelectorAll('[data-mode]').forEach(t => {
+                        const active = (t === tab);
+                        t.setAttribute('aria-selected', String(active));
+                        t.classList.toggle('is-active', active);
+                    });
+                    renderCandidates();
+                };
+            });
+            search.oninput = renderCandidates;
+            search.onkeydown = (e) => {
+                e.stopPropagation();
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeDockTray();
+                    refocusSelectedCard();
                 }
+            };
+            primary.onclick = () => {
+                const activeSources = [...sources];
+                closeDockTray({ silentDock: true });
+                convergeNodesToNext(activeSources);
+            };
+            canvasPickBtn.onclick = (e) => {
+                e.stopPropagation();
+                if (mergingSourceNodeId) {
+                    stopInteractiveMergeMode({ keepTray: true });
+                } else {
+                    startInteractiveMergeMode([...sources]);
+                }
+            };
+            const forkBtn = tray.querySelector('#mm-pop-converge-fork');
+            if (forkBtn) {
+                forkBtn.onclick = () => {
+                    closeDockTray({ silentDock: true });
+                    convergeBranches(node.id, { forceFork: true });
+                };
             }
-            else if (act === 'pick-page') {
-                if (cardEl) showPagePickerPopover(nodeId, cardEl);
-            }
-            else if (act === 'pick-tag') {
-                if (cardEl) showTagPickerPopover(nodeId, cardEl);
-            }
-            else if (act === 'reparent') {
-                if (cardEl) showReparentPopover(nodeId, cardEl);
-            }
-            else if (act === 'toggle-all-branches') toggleAllNodes(null);
-            else if (act === 'toggle-collapse') toggleNodeCollapse(nodeId);
-            else if (act === 'delete') deleteNode(nodeId);
-        });
 
-        setTimeout(() => {
-            window.addEventListener('click', onDocClickOutsidePopover, { capture: true });
-            window.addEventListener('contextmenu', onDocClickOutsidePopover, { capture: true });
-        }, 10);
+            const links = [];
+            getIncomingMergeSources(data, node.id).forEach(src => links.push({
+                source: src.id, target: node.id, solid: src.convergeTo?.includes(node.id), text: `← ${src.text || '节点'}`
+            }));
+            [['convergeTo', true], ['mergeTo', false]].forEach(([key, solid]) => {
+                (node[key] || []).forEach(id => {
+                    const target = findNodeInTree(data, id);
+                    if (target) links.push({ source: node.id, target: id, solid, text: `→ ${target.text || '节点'}` });
+                });
+            });
+            if (links.length) {
+                const bar = document.createElement('div');
+                bar.className = 'mm-pop-links-bar';
+                bar.innerHTML = '<span class="mm-pop-links-label">已连:</span>';
+                links.forEach(link => {
+                    const chip = document.createElement('span');
+                    chip.className = 'mm-pop-chip';
+                    chip.title = `${link.solid ? '合流' : '引用'}：${link.text}`;
+                    const name = document.createElement('span');
+                    name.textContent = link.text.replace(/^[←→]\s*/, '');
+                    const del = document.createElement('button');
+                    del.type = 'button';
+                    del.setAttribute('aria-label', `解除连接：${link.text}`);
+                    del.innerHTML = '×';
+                    del.onclick = (e) => {
+                        e.stopPropagation();
+                        closeDockTray({ silentDock: true });
+                        if (link.solid) toggleConvergeLink(link.source, link.target);
+                        else toggleMergeLink(link.source, link.target);
+                    };
+                    chip.append(name, del);
+                    bar.appendChild(chip);
+                });
+                const existingWrap = tray.querySelector('#mm-connect-existing');
+                existingWrap.style.display = 'block';
+                existingWrap.replaceChildren(bar);
+            }
+            tray.querySelector('#mm-pop-close').onclick = () => {
+                closeDockTray();
+                refocusSelectedCard();
+            };
+            renderCandidates();
+            return;
+        }
+
+        if (activeDockTray === 'move') {
+            tray.hidden = false;
+            const res = findParentAndList(data, node.id);
+            const chains = getAllMainChains(data);
+            const isChainRoot = Boolean(res && res.containerType === 'chains');
+            const canReparent = !(isChainRoot && chains.length <= 1);
+            const canUp = canMoveNodeStep(data, node.id, -1);
+            const canDown = canMoveNodeStep(data, node.id, 1);
+            const canPromote = canPromoteNode(data, node.id);
+            const canDemote = canDemoteNode(data, node.id);
+            const hasSub = (node.children && node.children.length > 0) || (node.branches && node.branches.length > 0);
+            const candidates = canReparent ? getReparentCandidates(data, node.id) : [];
+
+            tray.innerHTML = `
+                <div class="mm-tray-head">
+                    <span class="mm-tray-title"><i class="ph ph-arrows-out-cardinal"></i><span>顺序与层级挂载</span></span>
+                    <div class="mm-tray-head-right">
+                        ${hasSub ? `<button type="button" id="mm-move-toggle-fold" class="mm-tray-btn" style="height:21px;padding:0 6px;font-size:10.5px;">${isChainRoot ? '折叠/展开子支' : (node.collapsed ? '展开下属' : '折叠下属')}</button>` : ''}
+                        <button type="button" id="mm-pop-close" class="mm-tray-close" aria-label="关闭移动面板"><i class="ph ph-x"></i></button>
+                    </div>
+                </div>
+                <div class="mm-tray-move-grid">
+                    <button type="button" id="mm-move-up" class="mm-tray-btn" ${canUp ? '' : 'disabled'} title="同级上移 / 前移 (Alt+↑)"><i class="ph ph-arrow-up"></i><span>上移</span></button>
+                    <button type="button" id="mm-move-down" class="mm-tray-btn" ${canDown ? '' : 'disabled'} title="同级下移 / 后移 (Alt+↓)"><i class="ph ph-arrow-down"></i><span>下移</span></button>
+                    <button type="button" id="mm-move-promote" class="mm-tray-btn" ${canPromote ? '' : 'disabled'} title="提升一层级 (Alt+←)"><i class="ph ph-arrow-left"></i><span>升级</span></button>
+                    <button type="button" id="mm-move-demote" class="mm-tray-btn" ${canDemote ? '' : 'disabled'} title="挂载为上一同级的子节点 (Alt+→)"><i class="ph ph-arrow-right"></i><span>降级</span></button>
+                </div>
+                ${canReparent ? `
+                    <div class="mm-tray-divider"></div>
+                    <div class="mm-pop-search-wrap">
+                        <div class="mm-pop-search-field">
+                            <i class="ph ph-magnifying-glass mm-pop-search-icon"></i>
+                            <input id="mm-reparent-search" class="mm-pop-search-input" type="search" placeholder="搜索新父节点…" aria-label="搜索新父节点">
+                        </div>
+                        <button type="button" id="mm-reparent-pick-canvas" class="mm-pop-canvas-btn ${reparentingSourceNodeId === node.id ? 'is-active' : ''}" title="在画布上直接点击新父节点 (快捷键 R)">
+                            <i class="ph ph-cursor-click"></i>
+                            <span>${reparentingSourceNodeId === node.id ? '点选中' : '点选'}</span>
+                        </button>
+                    </div>
+                    ${reparentingSourceNodeId === node.id ? '<div id="mm-reparent-target-hint" class="mm-tray-hint is-live" role="status">直接点击画布上的新父节点完成挂载 · Esc 取消</div>' : ''}
+                    <div id="mm-reparent-list" class="mm-connect-list custom-scrollbar"></div>
+                ` : ''}
+            `;
+
+            tray.querySelector('#mm-move-up').onclick = () => moveNodeStep(node.id, -1);
+            tray.querySelector('#mm-move-down').onclick = () => moveNodeStep(node.id, 1);
+            tray.querySelector('#mm-move-promote').onclick = () => promoteNode(node.id);
+            tray.querySelector('#mm-move-demote').onclick = () => demoteNode(node.id);
+            const foldBtn = tray.querySelector('#mm-move-toggle-fold');
+            if (foldBtn) {
+                foldBtn.onclick = () => toggleNodeCollapse(node.id);
+            }
+            tray.querySelector('#mm-pop-close').onclick = () => {
+                closeDockTray();
+                refocusSelectedCard();
+            };
+
+            if (canReparent) {
+                const listEl = tray.querySelector('#mm-reparent-list');
+                const searchInput = tray.querySelector('#mm-reparent-search');
+                const canvasBtn = tray.querySelector('#mm-reparent-pick-canvas');
+                const currentParentId = res && res.parent ? res.parent.id : null;
+                if (prevReparentQuery) searchInput.value = prevReparentQuery;
+
+                const renderReparentList = () => {
+                    listEl.replaceChildren();
+                    const q = searchInput.value.trim().toLocaleLowerCase();
+                    const filtered = candidates.filter(c => String(c.text || '').toLocaleLowerCase().includes(q));
+                    filtered.forEach(cand => {
+                        const isCurParent = (cand.id === currentParentId);
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'mm-connect-row';
+                        btn.style.paddingLeft = `${Math.min(cand.depth, 4) * 10 + 6}px`;
+                        btn.innerHTML = `
+                            <i class="ph ${cand.depth === 0 ? 'ph-compass' : 'ph-arrow-elbow-down-right'} text-gray-400 text-xs shrink-0"></i>
+                            <span class="truncate">${escapeMindMapText(cand.text)}</span>
+                            ${isCurParent ? '<small style="color:#2563eb;background:#eff6ff;">当前父级</small>' : `<small>主链 ${toRoman(cand.chainIdx)}</small>`}
+                        `;
+                        btn.onclick = () => {
+                            closeDockTray({ silentDock: true });
+                            reparentNode(node.id, cand.id);
+                        };
+                        listEl.appendChild(btn);
+                    });
+                    if (!listEl.children.length) {
+                        listEl.innerHTML = '<p class="mm-pop-empty-text">无匹配节点</p>';
+                    }
+                };
+
+                searchInput.oninput = renderReparentList;
+                searchInput.onkeydown = (e) => {
+                    e.stopPropagation();
+                    if (e.key === 'Escape') {
+                        e.preventDefault();
+                        closeDockTray();
+                        refocusSelectedCard();
+                    }
+                };
+                canvasBtn.onclick = (ev) => {
+                    ev.stopPropagation();
+                    if (reparentingSourceNodeId === node.id) {
+                        stopInteractiveReparentMode({ keepTray: true });
+                    } else {
+                        startInteractiveReparentMode(node.id);
+                    }
+                };
+                renderReparentList();
+            }
+        }
     }
 
-    // 自定义思维导图页签右键菜单
-    function showPageTabContextMenu(e, pageId) {
-        e.preventDefault();
-        e.stopPropagation();
-        closeAllPopovers();
+    function renderCommandDock(options = {}) {
+        const els = getEls();
+        if (!els.dock || !els.dockBar) return;
 
         const data = getMindMapData();
-        const pages = getMindMapPages(data);
-        const pageObj = pages.find(p => p && p.id === pageId);
-        if (!pageObj) return;
+        const activePage = getActiveMindMapPage(data);
+        const chains = getAllMainChains(data);
+        const count = selectedNodeIds.size;
 
-        const curReadingPage = (state.currentPhysicalPage && state.currentPhysicalPage > 0) ? state.currentPhysicalPage : 1;
-        const tabEl = document.querySelector(`.mm-page-tab[data-page-id="${pageId}"]`);
+        els.dock.classList.toggle('is-idle', count === 0 && activeDockTray !== 'sheet');
 
-        const menu = document.createElement('div');
-        menu.id = 'mm-context-menu';
-        menu.setAttribute('role', 'menu');
-        menu.setAttribute('aria-label', '导图页操作');
-
-        let html = `
-            <div class="mm-menu-item" data-action="bind-current-page">
-                <div class="menu-left"><i class="ph ph-bookmark-simple text-blue-600"></i><span>${pageObj.page === curReadingPage ? '解除绑定当前页' : `绑定当前页 (P. ${curReadingPage})`}</span></div>
-                <span class="mm-menu-shortcut">P</span>
-            </div>
-            <div class="mm-menu-item" data-action="pick-pdf-page">
-                <div class="menu-left"><i class="ph ph-link text-blue-500"></i><span>指定关联页码...</span></div>
-            </div>
-        `;
-        if (pageObj.page) {
-            html += `
-                <div class="mm-menu-item" data-action="locate-pdf-page">
-                    <div class="menu-left"><i class="ph ph-arrow-square-out text-indigo-600"></i><span>定位到关联页 (P. ${pageObj.page})</span></div>
-                </div>
+        // 1. 多节点选中态：聚焦批量合流与批量连线
+        if (count > 1) {
+            if (activeDockTray && activeDockTray !== 'connect') {
+                activeDockTray = null;
+                activeSheetTargetId = null;
+            }
+            els.dockBar.innerHTML = `
+                <span class="mm-dock-sel-badge">已选 ${count} 项</span>
+                <button type="button" id="mm-dock-multi-converge" class="mm-dock-btn mm-dock-pill mm-dock-primary" title="将所选节点实线合流至新阶段节点 (Enter)">
+                    <i class="ph ph-arrows-merge"></i><span>合流新节点</span>
+                </button>
+                <button type="button" id="mm-dock-multi-connect" class="mm-dock-btn mm-dock-pill ${(activeDockTray === 'connect' || mergingSourceNodeId) ? 'is-active' : ''}" title="连线或合流至已有目标节点 (M)">
+                    <i class="ph ph-git-merge"></i><span>连线目标</span>
+                </button>
+                <button type="button" id="mm-dock-multi-clear" class="mm-dock-btn" title="取消多选 (Esc)" aria-label="取消多选">
+                    <i class="ph ph-x"></i>
+                </button>
             `;
+            els.dockBar.querySelector('#mm-dock-multi-converge').onclick = () => {
+                closeDockTray({ silentDock: true });
+                convergeNodesToNext([...selectedNodeIds]);
+            };
+            els.dockBar.querySelector('#mm-dock-multi-connect').onclick = () => {
+                toggleDockTray('connect', null, { mode: 'link' });
+            };
+            els.dockBar.querySelector('#mm-dock-multi-clear').onclick = () => {
+                closeDockTray({ silentDock: true });
+                selectNode(null, false);
+            };
+            renderDockTray(data, activePage, options);
+            return;
         }
-        html += `
-            <div class="mm-menu-divider"></div>
-            <div class="mm-menu-item" data-action="rename-page">
-                <div class="menu-left"><i class="ph ph-pencil-simple text-teal-600"></i><span>重命名导图页...</span></div>
-                <span class="mm-menu-shortcut">双击</span>
-            </div>
-            <div class="mm-menu-item" data-action="add-page-after">
-                <div class="menu-left"><i class="ph ph-plus-circle text-blue-600"></i><span>在右侧新建导图页</span></div>
-                <span class="mm-menu-shortcut">Alt+T</span>
-            </div>
-            <div class="mm-menu-divider"></div>
-            <div class="mm-menu-item danger" data-action="delete-page">
-                <div class="menu-left"><i class="ph ph-trash text-red-500"></i><span>${pages.length > 1 ? '删除此导图页' : '清空重置此导图页'}</span></div>
-            </div>
+
+        // 2. 单节点选中态：纯图标紧凑上下文操作栏
+        const singleId = selectedNodeId || (count === 1 ? [...selectedNodeIds][0] : null);
+        const node = singleId ? findNodeInTree(data, singleId) : null;
+        if (node) {
+            const res = findParentAndList(data, node.id);
+            const isChainRoot = Boolean(res && res.containerType === 'chains');
+            const isPrimaryRoot = Boolean(data.root && data.root.id === node.id && chains.length <= 1);
+            const isVerticalMain = isVerticalSpineNode(data, node.id);
+            const hasForkTracks = Array.isArray(node.branches) && node.branches.some(t => Array.isArray(t) && t.length > 0);
+            const forkOwner = hasForkTracks ? node : (res?.containerType === 'fork-track' ? res.parent : null);
+            let needsForkConverge = false;
+            if (isVerticalMain && forkOwner) {
+                const ownerIsRoot = chains.some(c => c && c.id === forkOwner.id);
+                const ownerRes = ownerIsRoot ? null : findParentAndList(data, forkOwner.id);
+                const ownerHasDownstream = ownerIsRoot
+                    ? Boolean(!forkOwner.collapsed && Array.isArray(forkOwner.children) && forkOwner.children.length > 0)
+                    : Boolean(ownerRes && ownerRes.list && ownerRes.index < ownerRes.list.length - 1);
+                needsForkConverge = forkOwner.forkConverge === false || !ownerHasDownstream;
+            }
+            const hasTag = Boolean(node.tag && MATH_TAGS[node.tag]);
+            const hasPage = Boolean(node.page && node.page > 0);
+            const hasLinks = Boolean(
+                (Array.isArray(node.mergeTo) && node.mergeTo.length > 0) ||
+                (Array.isArray(node.convergeTo) && node.convergeTo.length > 0) ||
+                getIncomingMergeSources(data, node.id).length > 0
+            );
+
+            const downTitle = isChainRoot
+                ? '向下推进主链阶段 (Enter)'
+                : (isVerticalMain ? '向下推进下一阶段 (Enter)' : '向下添加同级节点 (Enter)');
+            const rightTitle = isChainRoot
+                ? '在右侧新建并列主链 (Tab)'
+                : '向右展开子分支 (Tab)';
+            const tagTitle = hasTag
+                ? `数学角色：${MATH_TAGS[node.tag].label}（点击更改）`
+                : '标记数学理论角色';
+            const pageTitle = hasPage
+                ? `已关联 P.${node.page}（左键修改 · 右键切换当前页 P）`
+                : '关联 PDF 页码（左键设置 · 右键绑定当前页 P）';
+            const delTitle = isPrimaryRoot
+                ? '清空重置导图 (Del)'
+                : (isChainRoot ? '删除整条主链 (Del)' : '删除节点 (Del)');
+
+            els.dockBar.innerHTML = `
+                <button type="button" id="mm-dock-add-down" class="mm-dock-btn" title="${downTitle}" aria-label="${downTitle}">
+                    <i class="ph ph-rows-plus-bottom"></i>
+                </button>
+                <button type="button" id="mm-dock-add-right" class="mm-dock-btn" title="${rightTitle}" aria-label="${rightTitle}">
+                    <i class="ph ph-columns-plus-right"></i>
+                </button>
+                ${isVerticalMain ? `
+                    <button type="button" id="mm-dock-fork" class="mm-dock-btn" title="向下拆分并行推演 (Shift+Enter)" aria-label="向下拆分并行推演">
+                        <i class="ph ph-git-fork"></i>
+                    </button>
+                ` : ''}
+                ${needsForkConverge ? `
+                    <button type="button" id="mm-dock-converge-fork" class="mm-dock-btn" title="合流并行分支至下游主节点" aria-label="合流并行分支为主节点">
+                        <i class="ph ph-arrows-merge"></i>
+                    </button>
+                ` : ''}
+                <span class="mm-dock-sep" aria-hidden="true"></span>
+                <button type="button" id="mm-dock-edit" class="mm-dock-btn" title="编辑内容与公式 (双击 / F2)" aria-label="编辑节点">
+                    <i class="ph ph-pencil-simple"></i>
+                </button>
+                <button type="button" id="mm-dock-tag" class="mm-dock-btn ${activeDockTray === 'tag' ? 'is-active' : ''} ${hasTag ? 'has-value' : ''}" title="${tagTitle}" aria-label="数学理论角色">
+                    <i class="ph ph-tag"></i>
+                </button>
+                <button type="button" id="mm-dock-page" class="mm-dock-btn ${activeDockTray === 'page' ? 'is-active' : ''} ${hasPage ? 'has-value' : ''}" title="${pageTitle}" aria-label="关联页码">
+                    <i class="ph ph-bookmark-simple"></i>
+                </button>
+                <span class="mm-dock-sep" aria-hidden="true"></span>
+                <button type="button" id="mm-dock-connect" class="mm-dock-btn ${(activeDockTray === 'connect' || mergingSourceNodeId) ? 'is-active' : ''} ${hasLinks ? 'has-value' : ''}" title="连接节点：连线、合流与内容融合 (M)" aria-label="连接节点">
+                    <i class="ph ph-git-merge"></i>
+                </button>
+                <button type="button" id="mm-dock-move" class="mm-dock-btn ${(activeDockTray === 'move' || reparentingSourceNodeId) ? 'is-active' : ''}" title="调整顺序、升降级与挂载父节点 (Alt+方向键 / R)" aria-label="顺序与挂载">
+                    <i class="ph ph-arrows-out-cardinal"></i>
+                </button>
+                <span class="mm-dock-sep" aria-hidden="true"></span>
+                <button type="button" id="mm-dock-delete" class="mm-dock-btn mm-dock-danger" title="${delTitle}" aria-label="${delTitle}">
+                    <i class="ph ph-trash"></i>
+                </button>
+            `;
+
+            els.dockBar.querySelector('#mm-dock-add-down').onclick = () => {
+                closeDockTray({ silentDock: true });
+                if (isChainRoot) addChildNode(node.id);
+                else addSiblingNode(node.id);
+            };
+            els.dockBar.querySelector('#mm-dock-add-right').onclick = () => {
+                closeDockTray({ silentDock: true });
+                if (isChainRoot) addMainChain(null, node.id);
+                else addChildNode(node.id);
+            };
+            const forkBtn = els.dockBar.querySelector('#mm-dock-fork');
+            if (forkBtn) {
+                forkBtn.onclick = () => {
+                    closeDockTray({ silentDock: true });
+                    forkNodeBranch(node.id);
+                };
+            }
+            const convForkBtn = els.dockBar.querySelector('#mm-dock-converge-fork');
+            if (convForkBtn) {
+                convForkBtn.onclick = () => {
+                    closeDockTray({ silentDock: true });
+                    convergeBranches(node.id, { forceFork: true });
+                };
+            }
+            els.dockBar.querySelector('#mm-dock-edit').onclick = () => {
+                closeDockTray({ silentDock: true });
+                startEditingNode(node.id);
+            };
+            els.dockBar.querySelector('#mm-dock-tag').onclick = () => toggleDockTray('tag');
+            const pageBtn = els.dockBar.querySelector('#mm-dock-page');
+            pageBtn.onclick = () => toggleDockTray('page');
+            pageBtn.oncontextmenu = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                closeDockTray({ silentDock: true });
+                const curPage = (state.currentPhysicalPage && state.currentPhysicalPage > 0) ? state.currentPhysicalPage : 1;
+                setNodePage(node.id, node.page === curPage ? null : curPage);
+            };
+            els.dockBar.querySelector('#mm-dock-connect').onclick = () => toggleDockTray('connect');
+            els.dockBar.querySelector('#mm-dock-move').onclick = () => toggleDockTray('move');
+            els.dockBar.querySelector('#mm-dock-delete').onclick = () => {
+                closeDockTray({ silentDock: true });
+                deleteNode(node.id);
+            };
+
+            renderDockTray(data, activePage, options);
+            return;
+        }
+
+        // 3. 画布空闲态：安静轻量的全局快捷胶囊
+        if (activeDockTray && activeDockTray !== 'sheet') {
+            activeDockTray = null;
+        }
+        els.dockBar.innerHTML = `
+            <button type="button" id="mm-dock-add-chain" class="mm-dock-btn mm-dock-pill" title="新建一条并列主链 (Alt+N)">
+                <i class="ph ph-plus"></i><span>主链</span>
+            </button>
+            <span class="mm-dock-sep" aria-hidden="true"></span>
+            <button type="button" id="mm-dock-sheet-btn" class="mm-dock-btn mm-dock-pill ${activeDockTray === 'sheet' ? 'is-active' : ''} ${activePage?.page ? 'has-value' : ''}" title="导图页设置与关联页码 (左键设置 · 右键绑定当前页 P)">
+                <i class="ph ph-bookmark-simple"></i><span>${activePage?.page ? `P.${activePage.page}` : '本页'}</span>
+            </button>
+            <button type="button" id="mm-dock-fit-btn" class="mm-dock-btn" title="自适应全图视野 (Ctrl+0)" aria-label="自适应全图视野">
+                <i class="ph ph-corners-out"></i>
+            </button>
+            <button type="button" id="mm-dock-expand-btn" class="mm-dock-btn" title="展开 / 折叠所有子分支" aria-label="展开或折叠所有子分支">
+                <i class="ph ph-arrows-in-line-vertical"></i>
+            </button>
         `;
+        els.dockBar.querySelector('#mm-dock-add-chain').onclick = () => {
+            closeDockTray({ silentDock: true });
+            addMainChain();
+        };
+        const sheetBtn = els.dockBar.querySelector('#mm-dock-sheet-btn');
+        sheetBtn.onclick = () => toggleDockTray('sheet', activePage?.id);
+        sheetBtn.oncontextmenu = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!activePage) return;
+            closeDockTray({ silentDock: true });
+            const curPage = (state.currentPhysicalPage && state.currentPhysicalPage > 0) ? state.currentPhysicalPage : 1;
+            setMindMapPagePdfPage(activePage.id, activePage.page === curPage ? null : curPage);
+        };
+        els.dockBar.querySelector('#mm-dock-fit-btn').onclick = () => centerView(true, true);
+        els.dockBar.querySelector('#mm-dock-expand-btn').onclick = () => toggleAllNodes(null);
 
-        menu.innerHTML = html;
-        document.body.appendChild(menu);
-
-        const menuW = 210;
-        const menuH = menu.offsetHeight || 220;
-        let x = e.clientX;
-        let y = e.clientY;
-        if (x + menuW > window.innerWidth - 10) x = window.innerWidth - menuW - 10;
-        if (y + menuH > window.innerHeight - 10) y = window.innerHeight - menuH - 10;
-        menu.style.left = `${Math.max(10, x)}px`;
-        menu.style.top = `${Math.max(10, y)}px`;
-
-        menu.addEventListener('click', (ev) => {
-            const item = ev.target.closest('.mm-menu-item');
-            if (!item) return;
-            const act = item.dataset.action;
-            closeAllPopovers();
-
-            if (act === 'bind-current-page') {
-                if (pageObj.page === curReadingPage) {
-                    setMindMapPagePdfPage(pageId, null);
-                    showMindmapToast(`已取消「${pageObj.title}」的页码关联`);
-                } else {
-                    setMindMapPagePdfPage(pageId, curReadingPage);
-                    showMindmapToast(`已将「${pageObj.title}」绑定至第 ${curReadingPage} 页`, 'success');
-                }
-            } else if (act === 'pick-pdf-page') {
-                showMindMapPagePickerPopover(pageId, tabEl || getEls().bindPageBtn);
-            } else if (act === 'locate-pdf-page' && pageObj.page) {
-                if (data.activePageId !== pageId) {
-                    switchMindMapPage(pageId, { locatePdf: true });
-                } else {
-                    locatePdfPage(pageObj.page);
-                }
-            } else if (act === 'rename-page') {
-                startInlineRenamePageTab(pageId, tabEl);
-            } else if (act === 'add-page-after') {
-                addMindMapPage({ insertAfterId: pageId });
-            } else if (act === 'delete-page') {
-                deleteMindMapPage(pageId);
-            }
-        });
-
-        setTimeout(() => {
-            window.addEventListener('click', onDocClickOutsidePopover, { capture: true });
-            window.addEventListener('contextmenu', onDocClickOutsidePopover, { capture: true });
-        }, 10);
-    }
-
-    // 自定义画布空白区右键菜单
-    function showCanvasContextMenu(e) {
-        if (e.target.closest('.mm-card') || e.target.closest('button') || e.target.closest('#mm-context-menu') || e.target.closest('#mm-popover-dialog')) return;
-        e.preventDefault();
-        closeAllPopovers();
-
-        const activePage = getActiveMindMapPage();
-        const curReadingPage = (state.currentPhysicalPage && state.currentPhysicalPage > 0) ? state.currentPhysicalPage : 1;
-
-        const menu = document.createElement('div');
-        menu.id = 'mm-context-menu';
-
-        menu.innerHTML = `
-            <div class="mm-menu-item" data-action="add-chain">
-                <div class="menu-left"><i class="ph ph-plus-circle text-blue-600"></i><span>新建并列主链</span></div>
-                <span class="mm-menu-shortcut">Alt+N</span>
-            </div>
-            <div class="mm-menu-item" data-action="add-page">
-                <div class="menu-left"><i class="ph ph-file-plus text-indigo-600"></i><span>新增思维导图页</span></div>
-                <span class="mm-menu-shortcut">Alt+T</span>
-            </div>
-            <div class="mm-menu-item" data-action="bind-page-pdf">
-                <div class="menu-left"><i class="ph ph-bookmark-simple text-blue-500"></i><span>${activePage && activePage.page === curReadingPage ? '解除本导图页当前页关联' : `本导图页绑定当前页 (P. ${curReadingPage})`}</span></div>
-                <span class="mm-menu-shortcut">P</span>
-            </div>
-            <div class="mm-menu-item" data-action="pick-page-pdf">
-                <div class="menu-left"><i class="ph ph-link text-blue-500"></i><span>设置本导图页关联页码...</span></div>
-            </div>
-            <div class="mm-menu-divider"></div>
-            <div class="mm-menu-item" data-action="center">
-                <div class="menu-left"><i class="ph ph-crosshair text-blue-500"></i><span>居中视野</span></div>
-                <span class="mm-menu-shortcut">Ctrl+0</span>
-            </div>
-            <div class="mm-menu-item" data-action="fit">
-                <div class="menu-left"><i class="ph ph-corners-out text-emerald-500"></i><span>自适应全图缩放</span></div>
-            </div>
-            <div class="mm-menu-item" data-action="reset-zoom">
-                <div class="menu-left"><i class="ph ph-magnifying-glass text-indigo-500"></i><span>重置缩放到 100%</span></div>
-            </div>
-            <div class="mm-menu-divider"></div>
-            <div class="mm-menu-item" data-action="expand-all">
-                <div class="menu-left"><i class="ph ph-arrows-out-simple text-gray-600"></i><span>展开所有分支</span></div>
-            </div>
-            <div class="mm-menu-item" data-action="collapse-all">
-                <div class="menu-left"><i class="ph ph-arrows-in-simple text-gray-600"></i><span>折叠所有分支</span></div>
-            </div>
-        `;
-
-        document.body.appendChild(menu);
-
-        const menuW = 210;
-        const menuH = menu.offsetHeight || 240;
-        let x = e.clientX;
-        let y = e.clientY;
-        if (x + menuW > window.innerWidth - 10) x = window.innerWidth - menuW - 10;
-        if (y + menuH > window.innerHeight - 10) y = window.innerHeight - menuH - 10;
-        menu.style.left = `${Math.max(10, x)}px`;
-        menu.style.top = `${Math.max(10, y)}px`;
-
-        menu.addEventListener('click', (ev) => {
-            const item = ev.target.closest('.mm-menu-item');
-            if (!item) return;
-            const act = item.dataset.action;
-            closeAllPopovers();
-
-            if (act === 'add-chain') addMainChain();
-            else if (act === 'add-page') addMindMapPage();
-            else if (act === 'bind-page-pdf') {
-                const cur = getActiveMindMapPage();
-                if (!cur) return;
-                if (cur.page === curReadingPage) {
-                    setMindMapPagePdfPage(cur.id, null);
-                    showMindmapToast(`已取消「${cur.title}」的页码关联`);
-                } else {
-                    setMindMapPagePdfPage(cur.id, curReadingPage);
-                    showMindmapToast(`已将「${cur.title}」绑定至第 ${curReadingPage} 页`, 'success');
-                }
-            }
-            else if (act === 'pick-page-pdf') {
-                const cur = getActiveMindMapPage();
-                if (cur) showMindMapPagePickerPopover(cur.id, getEls().bindPageBtn);
-            }
-            else if (act === 'center') centerView(true, false);
-            else if (act === 'fit') centerView(true, true);
-            else if (act === 'reset-zoom') applyZoom(1.0);
-            else if (act === 'expand-all') toggleAllNodes(true);
-            else if (act === 'collapse-all') toggleAllNodes(false);
-        });
-
-        setTimeout(() => {
-            window.addEventListener('click', onDocClickOutsidePopover, { capture: true });
-            window.addEventListener('contextmenu', onDocClickOutsidePopover, { capture: true });
-        }, 10);
+        renderDockTray(data, activePage, options);
     }
 
     // ==========================================
@@ -3259,7 +3111,9 @@
         if (!node) return;
 
         editingNodeId = nodeId;
+        closeDockTray({ silentDock: true });
         selectNode(nodeId, false);
+        getEls().dock?.classList.add('is-editing-dim');
         // 可拖拽祖先会吞掉 textarea 内的鼠标选字，编辑期间强制关闭
         cardEl.draggable = false;
         cardEl.classList.add('is-editing');
@@ -3351,9 +3205,12 @@
                 renderNodeContent(bodyEl, finalText);
                 cardEl.classList.remove('is-editing');
                 cardEl.draggable = true;
+                getEls().dock?.classList.remove('is-editing-dim');
+                renderCommandDock();
                 updateSvgConnections();
                 if (refocus) cardEl.focus({ preventScroll: true });
             } else {
+                getEls().dock?.classList.remove('is-editing-dim');
                 renderTree();
             }
         };
@@ -3563,16 +3420,8 @@
             ? (!node.collapsed && hasChildren)
             : Boolean(options.hasDownstream);
         const ownForkNeedsConverge = (isRoot || isSpine) && hasForkBranches && (node.forkConverge === false || !ownForkHasDownstream);
-        const showDirectConvergeAct = ownForkNeedsConverge || ((isRoot || isSpine) && Boolean(options.parentForkNeedsConverge));
         const data = options.data || getMindMapData();
         const renderIndex = options.renderIndex || null;
-        const incomingCount = renderIndex
-            ? (renderIndex.incomingMergeCount.get(node.id) || 0)
-            : getIncomingMergeSources(data, node.id).length;
-        const forkConvCount = renderIndex
-            ? (renderIndex.forkConvergenceCount.get(node.id) || 0)
-            : getForkConvergenceSources(data, node.id).length;
-        const totalIncomingCount = incomingCount + (forkConvCount > 1 ? forkConvCount : 0);
 
         const branchContainer = document.createElement('div');
         branchContainer.className = 'mm-tree-branch'
@@ -3679,7 +3528,6 @@
                 toggleMergeLink(srcId, node.id);
             } else if (isChildDrop) {
                 reparentNode(srcId, node.id);
-                showMindmapToast(`已挂载至「${node.text || '节点'}」`, 'success');
             } else {
                 moveNodeRelative(srcId, node.id, isTopDrop ? 'before' : 'after');
             }
@@ -3695,13 +3543,9 @@
                 const srcNode = findNodeInTree(data, srcId);
                 if (srcId === node.id) {
                     stopInteractiveReparentMode();
-                    showMindmapToast('已取消更改挂载');
-                } else if (srcNode && isNodeInSubtree(srcNode, node.id)) {
-                    showMindmapToast('不能挂载到自身的子孙节点下', 'warn');
-                } else {
+                } else if (!(srcNode && isNodeInSubtree(srcNode, node.id))) {
                     stopInteractiveReparentMode();
                     reparentNode(srcId, node.id);
-                    showMindmapToast(`已挂载至「${node.text || '节点'}」`, 'success');
                 }
                 return;
             }
@@ -3713,15 +3557,18 @@
                     : [mergingSourceNodeId];
                 if (sources.includes(node.id)) {
                     stopInteractiveMergeMode();
-                    showMindmapToast('已取消合并连线模式');
                 } else {
                     stopInteractiveMergeMode();
                     sources.forEach(srcId => toggleMergeLink(srcId, node.id));
                 }
                 return;
             }
-            const wasSelected = (selectedNodeId === node.id);
+            const wasSelected = (selectedNodeId === node.id && selectedNodeIds.size === 1);
             const isMulti = (e.ctrlKey || e.metaKey || e.shiftKey);
+            if (!isMulti && (selectedNodeId !== node.id || activeDockTray === 'sheet')) {
+                activeDockTray = null;
+                activeSheetTargetId = null;
+            }
             selectNode(node.id, false, isMulti);
             if (!card.classList.contains('is-editing')) {
                 card.focus({ preventScroll: true });
@@ -3740,23 +3587,15 @@
             startEditingNode(node.id);
         });
 
-        // 自定义右键菜单（编辑框内保留系统菜单，方便复制/粘贴）
+        // 编辑框内保留原生系统菜单方便复制/粘贴；其余区域与主阅读器一致支持无遮挡右键平移
         card.addEventListener('contextmenu', (e) => {
             if (e.target.closest('.mm-inline-editor')) {
                 e.stopPropagation();
                 return;
             }
-            if (mergingSourceNodeId || reparentingSourceNodeId) {
-                e.preventDefault();
-                e.stopPropagation();
-                stopInteractiveMergeMode();
-                stopInteractiveReparentMode();
-                return;
-            }
-            showCardContextMenu(e, node.id);
         });
 
-        // 卡片顶部信息与操作行
+        // 卡片顶部纯粹徽标栏（主链编号、里程碑序号、数学角色、关联页码；零悬停散落按钮）
         const head = document.createElement('div');
         head.className = 'mm-card-head';
 
@@ -3773,7 +3612,7 @@
             leftInfo.appendChild(rootBadge);
         }
 
-        // 主干链里程碑序号徽标（已去除支线 ABCD 轨道标签）
+        // 主干链里程碑序号徽标
         if (isSpine && spineIndex !== null && !forkLabel) {
             const spineBadge = document.createElement('span');
             spineBadge.className = 'mm-spine-index';
@@ -3782,22 +3621,23 @@
             leftInfo.appendChild(spineBadge);
         }
 
-        // 数学理论角色标签徽标 (公理/定义/引理/定理/证明/推论/反例)
+        // 数学理论角色标签徽标 (公理/定义/引理/定理/命题/证明/动机/推论/反例)
         if (node.tag && MATH_TAGS[node.tag]) {
             const tagDef = MATH_TAGS[node.tag];
             const tagBadge = document.createElement('button');
             tagBadge.type = 'button';
             tagBadge.className = `mm-math-tag mm-tag-${node.tag}`;
-            tagBadge.title = `理论定位: ${tagDef.label} (点击更改)`;
+            tagBadge.title = `理论定位: ${tagDef.label}（点击更改）`;
             tagBadge.innerHTML = `<i class="ph ${tagDef.icon}"></i><span>${tagDef.label}</span>`;
             tagBadge.onclick = (e) => {
                 e.stopPropagation();
-                showTagPickerPopover(node.id, tagBadge);
+                selectNode(node.id, false);
+                openDockTray('tag');
             };
             leftInfo.appendChild(tagBadge);
         }
 
-        // 页面 Badge：仅在指定了页码时显示，支持一键定位、双向联动与快速解绑
+        // 页面 Badge：仅在指定了页码时显示，干净无叉号，单击跳转 PDF、右键在操作台修改
         if (node.page != null && node.page > 0) {
             const curReadingPage = (state.currentPhysicalPage && state.currentPhysicalPage > 0) ? state.currentPhysicalPage : 1;
             const isCurrent = (node.page === curReadingPage);
@@ -3808,7 +3648,7 @@
             const pageBadge = document.createElement('button');
             pageBadge.type = 'button';
             pageBadge.className = 'mm-page-badge';
-            pageBadge.title = `点击直达 PDF 第 ${node.page} 页（右键修改）`;
+            pageBadge.title = `点击直达 PDF 第 ${node.page} 页（右键在底部操作台修改）`;
             pageBadge.innerHTML = `<i class="ph ph-bookmark-simple"></i><span>P.${node.page}${isCurrent ? ' · 当前' : ''}</span>`;
             pageBadge.onclick = (e) => {
                 e.stopPropagation();
@@ -3817,22 +3657,10 @@
             pageBadge.oncontextmenu = (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                showPagePickerPopover(node.id, pageBadge);
+                selectNode(node.id, false);
+                openDockTray('page');
             };
             pageBadgeGroup.appendChild(pageBadge);
-
-            const clearPageBtn = document.createElement('button');
-            clearPageBtn.type = 'button';
-            clearPageBtn.className = 'mm-page-clear-btn';
-            clearPageBtn.title = '解除该页码关联';
-            clearPageBtn.innerHTML = '<i class="ph ph-x"></i>';
-            clearPageBtn.onclick = (e) => {
-                e.stopPropagation();
-                setNodePage(node.id, null);
-                showMindmapToast('已解除页码关联');
-            };
-            pageBadgeGroup.appendChild(clearPageBtn);
-
             leftInfo.appendChild(pageBadgeGroup);
         }
 
@@ -3840,118 +3668,6 @@
             head.classList.add('is-empty-head');
         }
         head.appendChild(leftInfo);
-
-        // 纯图标快捷操作栏：同级上下移动、选新父节点、主节点向下拆分并行推演、连接汇合与更多菜单
-        const actions = document.createElement('div');
-        actions.className = 'mm-card-actions';
-
-        if (!isRoot) {
-            const stepFlags = renderIndex ? renderIndex.moveStepFlags.get(node.id) : null;
-            const canUp = stepFlags ? stepFlags.canUp : canMoveNodeStep(data, node.id, -1);
-            const canDown = stepFlags ? stepFlags.canDown : canMoveNodeStep(data, node.id, 1);
-
-            const upBtn = document.createElement('button');
-            upBtn.type = 'button';
-            upBtn.className = 'mm-act-btn mm-act-move-up';
-            upBtn.disabled = !canUp;
-            upBtn.title = '同级上移 (Alt+↑)';
-            upBtn.setAttribute('aria-label', upBtn.title);
-            upBtn.innerHTML = '<i class="ph ph-arrow-up"></i>';
-            upBtn.onclick = (e) => {
-                e.stopPropagation();
-                moveNodeStep(node.id, -1);
-            };
-            actions.appendChild(upBtn);
-
-            const downBtn = document.createElement('button');
-            downBtn.type = 'button';
-            downBtn.className = 'mm-act-btn mm-act-move-down';
-            downBtn.disabled = !canDown;
-            downBtn.title = '同级下移 (Alt+↓)';
-            downBtn.setAttribute('aria-label', downBtn.title);
-            downBtn.innerHTML = '<i class="ph ph-arrow-down"></i>';
-            downBtn.onclick = (e) => {
-                e.stopPropagation();
-                moveNodeStep(node.id, 1);
-            };
-            actions.appendChild(downBtn);
-
-            const reparentActBtn = document.createElement('button');
-            reparentActBtn.type = 'button';
-            reparentActBtn.className = 'mm-act-btn mm-act-reparent' + (reparentingSourceNodeId === node.id ? ' text-amber-600' : '');
-            reparentActBtn.title = '选新父节点 (点击在画布点选目标父节点 / 快捷键 R)';
-            reparentActBtn.setAttribute('aria-label', '选新父节点');
-            reparentActBtn.innerHTML = '<i class="ph ph-arrow-bend-up-left"></i>';
-            reparentActBtn.onclick = (e) => {
-                e.stopPropagation();
-                if (reparentingSourceNodeId === node.id) {
-                    stopInteractiveReparentMode();
-                    showMindmapToast('已退出更改挂载模式');
-                } else {
-                    startInteractiveReparentMode(node.id);
-                }
-            };
-            actions.appendChild(reparentActBtn);
-        }
-
-        if (isRoot || isSpine) {
-            const forkActBtn = document.createElement('button');
-            forkActBtn.type = 'button';
-            forkActBtn.className = 'mm-act-btn mm-act-fork';
-            forkActBtn.title = '向下拆分并行推演 (Shift+Enter)';
-            forkActBtn.setAttribute('aria-label', '向下拆分并行推演');
-            forkActBtn.innerHTML = '<i class="ph ph-git-fork"></i>';
-            forkActBtn.onclick = (e) => {
-                e.stopPropagation();
-                forkNodeBranch(node.id);
-            };
-            actions.appendChild(forkActBtn);
-
-            if (showDirectConvergeAct) {
-                const convergeForkBtn = document.createElement('button');
-                convergeForkBtn.type = 'button';
-                convergeForkBtn.className = 'mm-act-btn mm-act-converge-fork';
-                convergeForkBtn.title = '合流当前并行分支为主节点';
-                convergeForkBtn.setAttribute('aria-label', '合流当前并行分支为主节点');
-                convergeForkBtn.innerHTML = '<i class="ph ph-arrows-merge"></i>';
-                convergeForkBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    convergeBranches(node.id, { forceFork: true });
-                };
-                actions.appendChild(convergeForkBtn);
-            }
-        }
-
-        // 合并连线 / 汇合到其他节点
-        const hasOutMerge = Array.isArray(node.mergeTo) && node.mergeTo.length > 0;
-        const mergeActBtn = document.createElement('button');
-        mergeActBtn.type = 'button';
-        mergeActBtn.className = 'mm-act-btn mm-act-merge' + ((hasOutMerge || totalIncomingCount > 0) ? ' text-violet-600' : '');
-        mergeActBtn.title = '连接节点：合流、连线与内容融合';
-        mergeActBtn.setAttribute('aria-label', mergeActBtn.title);
-        mergeActBtn.innerHTML = '<i class="ph ph-git-merge"></i>';
-        mergeActBtn.onclick = (e) => {
-            e.stopPropagation();
-            showMergePopover(node.id, mergeActBtn);
-        };
-        actions.appendChild(mergeActBtn);
-
-        const moreBtn = document.createElement('button');
-        moreBtn.type = 'button';
-        moreBtn.className = 'mm-act-btn mm-act-more';
-        moreBtn.title = '更多操作：新增、标签、页码、移动与删除';
-        moreBtn.setAttribute('aria-label', '更多节点操作');
-        moreBtn.setAttribute('aria-haspopup', 'menu');
-        moreBtn.innerHTML = '<i class="ph ph-dots-three"></i>';
-        moreBtn.onclick = (e) => {
-            const rect = moreBtn.getBoundingClientRect();
-            showCardContextMenu({ preventDefault: () => e.preventDefault(), stopPropagation: () => e.stopPropagation(),
-                clientX: rect.left, clientY: rect.bottom + 6 }, node.id);
-            if (!e.detail) document.querySelector('#mm-context-menu .mm-menu-item')?.focus();
-        };
-        actions.appendChild(moreBtn);
-
-        head.appendChild(actions);
         card.appendChild(head);
 
         // 卡片内容展示区（保留 card.draggable = true，支持从卡片任意区域拖拽重排或重挂载）
@@ -3962,47 +3678,7 @@
 
         cardWrapper.appendChild(card);
 
-        // 下方添加阶段 / 同级节点 (Enter)，右侧添加子节点 (Tab)。
-        const quickAddDown = document.createElement('button');
-        quickAddDown.type = 'button';
-        quickAddDown.className = 'mm-quick-add-child mm-quick-add-down';
-        quickAddDown.title = isRoot
-            ? '向下开启主链第一个阶段 (Enter)'
-            : (isSpine ? '向下推进下一阶段 (Enter)' : (isLateralFork ? '在下方并列新增一条并行支线 (Enter)' : '向下添加同级节点 (Enter)'));
-        quickAddDown.innerHTML = '<i class="ph ph-plus"></i>';
-        quickAddDown.onmousedown = (e) => e.stopPropagation();
-        quickAddDown.onclick = (e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            if (isRoot) {
-                addChildNode(node.id);
-            } else {
-                addSiblingNode(node.id);
-            }
-        };
-        cardWrapper.appendChild(quickAddDown);
-
-        // 悬浮快捷微按钮：右侧展开侧向论证分支 / 子节点 (Tab)；主链根节点右侧 + 号在右边新增并列主链
-        const quickAddRight = document.createElement('button');
-        quickAddRight.type = 'button';
-        quickAddRight.className = 'mm-quick-add-sibling mm-quick-add-right';
-        quickAddRight.title = isRoot
-            ? '在右侧新建并列主链 (Tab)'
-            : (isLateralFork ? '沿当前并行支线向右顺延节点 (Tab)' : '向右展开论证细节 / 侧向子分支 (Tab)');
-        quickAddRight.innerHTML = '<i class="ph ph-plus"></i>';
-        quickAddRight.onmousedown = (e) => e.stopPropagation();
-        quickAddRight.onclick = (e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            if (isRoot) {
-                addMainChain(null, node.id);
-            } else {
-                addChildNode(node.id);
-            }
-        };
-        cardWrapper.appendChild(quickAddRight);
-
-        // 折叠/展开胶囊按钮
+        // 折叠/展开胶囊按钮（仅在非根节点确有下属分支时安静显现）
         const hasLateralForkSub = !isRoot && !isSpine && hasForkBranches;
         if ((hasChildren || hasLateralForkSub) && !isRoot) {
             cardWrapper.classList.add('has-children', 'has-toggle');
@@ -5078,11 +4754,11 @@
             els.bindPageBtn.classList.toggle('is-bound', Boolean(boundPage));
             els.bindPageBtn.classList.toggle('is-active-page', isCurPdf);
             if (els.bindPageText) {
-                els.bindPageText.textContent = boundPage ? `P.${boundPage}` : '绑页码';
+                els.bindPageText.textContent = boundPage ? `P.${boundPage}` : '';
             }
             els.bindPageBtn.title = boundPage
-                ? `当前导图页已绑定 PDF 第 ${boundPage} 页（左键修改关联页码 · 右键解绑或切换当前阅读页）`
-                : '为当前导图页绑定 PDF 页码（点击设置 · 右键一键绑定当前阅读页）';
+                ? `当前导图页已绑定 PDF 第 ${boundPage} 页（左键打开页设置 · 右键解绑或切换当前阅读页）`
+                : '导图页设置与关联页码（点击展开 · 右键一键绑定当前阅读页）';
         }
 
         if (!els.pagesList) return;
@@ -5131,7 +4807,7 @@
                 pageBadge.addEventListener('contextmenu', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    showMindMapPagePickerPopover(pageObj.id, badgeGroup);
+                    openDockTray('sheet', pageObj.id);
                 });
 
                 const clearBtn = document.createElement('button');
@@ -5142,7 +4818,6 @@
                 clearBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     setMindMapPagePdfPage(pageObj.id, null);
-                    showMindmapToast(`已取消「${displayTitle}」的页码关联`);
                 });
 
                 badgeGroup.appendChild(pageBadge);
@@ -5179,7 +4854,9 @@
 
             tab.addEventListener('contextmenu', (e) => {
                 if (e.target.closest('.mm-page-badge-group')) return;
-                showPageTabContextMenu(e, pageObj.id);
+                e.preventDefault();
+                e.stopPropagation();
+                openDockTray('sheet', pageObj.id);
             });
 
             tab.addEventListener('keydown', (e) => {
@@ -5216,7 +4893,7 @@
             if (tabLeft < viewLeft) {
                 els.pagesList.scrollLeft = tabLeft;
             } else if (tabRight > viewRight) {
-                els.pagesList.scrollLeft = tabRight - els.pagesList.clientWidth;
+                els.pagesList.scrollLeft = Math.min(tabLeft, tabRight - els.pagesList.clientWidth);
             }
         }
     }
@@ -5266,8 +4943,8 @@
             guide.className = 'mm-empty-guide';
             guide.innerHTML = '<p>点选根节点后：</p>'
                 + '<div><kbd>Enter</kbd><span>向下推进主链阶段</span></div>'
-                + '<div><kbd>Shift+Enter</kbd><span>拆分并行分支</span></div>'
-                + '<div><kbd>右键</kbd><span>标签 · 页码 · 合并等更多操作</span></div>';
+                + '<div><kbd>Tab</kbd><span>向右展开分支或新主链</span></div>'
+                + '<div><kbd>操作台</kbd><span>底部集中管理角色 · 页码 · 连线</span></div>';
             els.treeRoot.firstElementChild.appendChild(guide);
         }
 
@@ -5360,7 +5037,7 @@
 
         if (autoFit && treeW > 0 && treeH > 0) {
             const fitW = (vpW - 48) / treeW;
-            const fitH = (vpH - 80) / treeH;
+            const fitH = (vpH - 96) / treeH;
             const targetZoom = Math.min(1.0, Math.max(0.35, Math.min(fitW, fitH)));
             currentZoom = Math.round(targetZoom * 100) / 100;
             const data = getMindMapData();
@@ -5396,6 +5073,7 @@
         const cardRect = card.getBoundingClientRect();
         const vpRect = els.viewport.getBoundingClientRect();
         const pad = 24;
+        const padBottom = 68;
 
         let deltaX = 0;
         let deltaY = 0;
@@ -5408,8 +5086,8 @@
 
         if (cardRect.top < vpRect.top + pad) {
             deltaY = (vpRect.top + pad) - cardRect.top;
-        } else if (cardRect.bottom > vpRect.bottom - pad) {
-            deltaY = (vpRect.bottom - pad) - cardRect.bottom;
+        } else if (cardRect.bottom > vpRect.bottom - padBottom) {
+            deltaY = (vpRect.bottom - padBottom) - cardRect.bottom;
         }
 
         if (deltaX !== 0 || deltaY !== 0) {
@@ -5546,10 +5224,10 @@
     }
 
     function updateSelectionTools() {
-        const els = getEls();
         const count = selectedNodeIds.size || (selectedNodeId ? 1 : 0);
         const label = document.getElementById('mindmap-selection-label');
         if (label) label.textContent = count ? `已选 ${count} 项` : '点选节点开始编辑';
+        renderCommandDock();
     }
 
     function selectNode(nodeId, scrollIntoView = true, isMulti = false) {
@@ -5772,7 +5450,7 @@
                 e.stopPropagation();
                 const activePage = getActiveMindMapPage();
                 if (activePage) {
-                    showMindMapPagePickerPopover(activePage.id, els.bindPageBtn);
+                    toggleDockTray('sheet', activePage.id);
                 }
             });
             els.bindPageBtn.addEventListener('contextmenu', (e) => {
@@ -5781,13 +5459,7 @@
                 const activePage = getActiveMindMapPage();
                 if (!activePage) return;
                 const curPage = (state.currentPhysicalPage && state.currentPhysicalPage > 0) ? state.currentPhysicalPage : 1;
-                if (activePage.page === curPage) {
-                    setMindMapPagePdfPage(activePage.id, null);
-                    showMindmapToast(`已取消「${activePage.title}」的页码关联`);
-                } else {
-                    setMindMapPagePdfPage(activePage.id, curPage);
-                    showMindmapToast(`已将「${activePage.title}」绑定至第 ${curPage} 页`, 'success');
-                }
+                setMindMapPagePdfPage(activePage.id, activePage.page === curPage ? null : curPage);
             });
         }
         if (els.pagesList) {
@@ -5798,6 +5470,29 @@
                     els.pagesList.scrollLeft += (e.deltaY || e.deltaX);
                 }
             }, { passive: false });
+        }
+
+        if (els.dockTray) {
+            els.dockTray.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    closeDockTray();
+                    refocusSelectedCard();
+                    return;
+                }
+                const tab = e.target.closest?.('[role="tab"][data-mode]');
+                if (tab && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const tabs = [...els.dockTray.querySelectorAll('[role="tab"][data-mode]')];
+                    if (tabs.length > 0) {
+                        const next = tabs[(tabs.indexOf(tab) + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+                        next?.click();
+                        next?.focus({ preventScroll: true });
+                    }
+                }
+            });
         }
 
         // 核心滚轮隔离与缩放：导图区域滚轮绝对不影响底层 PDF
@@ -5820,12 +5515,14 @@
                 suppressPanClick = false;
                 const panel = getEls().panel;
                 if (!panel || panel.contains(e.target)) return;
-                if (e.target.closest && (e.target.closest('#mm-context-menu') || e.target.closest('#mm-popover-dialog'))) return;
                 if (mergingSourceNodeId) {
                     stopInteractiveMergeMode();
                 }
                 if (reparentingSourceNodeId) {
                     stopInteractiveReparentMode();
+                }
+                if (activeDockTray) {
+                    closeDockTray();
                 }
                 const ae = document.activeElement;
                 if (ae && ae.classList && ae.classList.contains('mm-card') && panel.contains(ae)) {
@@ -5833,33 +5530,55 @@
                 }
             }, { capture: true });
 
-            // 右键自定义空白区菜单 (若执行了右键拖拽平移，则阻断弹出)
+            // 右键与主阅读器一致支持全域无遮挡拖拽平移；原地右击取消交互态或安静选中卡片，不弹出右键菜单
             els.viewport.addEventListener('contextmenu', (e) => {
-                if (mergingSourceNodeId) {
-                    e.preventDefault();
+                if (e.target.closest('.mm-inline-editor')) {
                     e.stopPropagation();
-                    stopInteractiveMergeMode();
-                    showMindmapToast('已取消合并连线模式');
                     return;
                 }
-                if (reparentingSourceNodeId) {
+                if (e.target.closest('#mm-command-dock')) {
+                    if (e.target.tagName === 'INPUT') {
+                        e.stopPropagation();
+                        return;
+                    }
                     e.preventDefault();
                     e.stopPropagation();
-                    stopInteractiveReparentMode();
-                    showMindmapToast('已取消更改挂载模式');
                     return;
                 }
+                e.preventDefault();
+                e.stopPropagation();
                 if (rightPanMoved) {
-                    e.preventDefault();
-                    e.stopPropagation();
                     rightPanMoved = false;
                     return;
                 }
-                showCanvasContextMenu(e);
+                if (mergingSourceNodeId) {
+                    stopInteractiveMergeMode();
+                    return;
+                }
+                if (reparentingSourceNodeId) {
+                    stopInteractiveReparentMode();
+                    return;
+                }
+                const cardEl = e.target.closest('.mm-card');
+                if (cardEl && cardEl.dataset.id && !selectedNodeIds.has(cardEl.dataset.id)) {
+                    activeDockTray = null;
+                    activeSheetTargetId = null;
+                    selectNode(cardEl.dataset.id, false);
+                }
             });
 
             els.viewport.addEventListener('wheel', (e) => {
                 e.stopPropagation(); // 严格阻断向主阅读器冒泡
+                if (e.target.closest('#mm-command-dock')) {
+                    if (!e.ctrlKey && !e.metaKey) {
+                        const listScrollable = e.target.closest('.mm-connect-list');
+                        if (listScrollable && listScrollable.scrollHeight > listScrollable.clientHeight) {
+                            return;
+                        }
+                    }
+                    e.preventDefault();
+                    return;
+                }
                 if (e.ctrlKey || e.metaKey) {
                     e.preventDefault();
                     const rect = els.viewport.getBoundingClientRect();
@@ -5893,9 +5612,9 @@
                 }
             }, { passive: false });
 
-            // 视口平移（支持空白画布直接左键拖拽、右键拖拽、中键拖拽与空格抓手模式）
+            // 视口平移（支持空白画布直接左键拖拽、全域右键拖拽、中键拖拽与空格抓手模式）
             els.viewport.addEventListener('mousedown', (e) => {
-                if (e.target.closest('#mm-popover-dialog') || e.target.closest('.mm-inline-editor') || e.target.closest('#mm-context-menu') || e.target.closest('#mm-merge-banner') || e.target.closest('#mm-reparent-banner')) return;
+                if (e.target.closest('#mm-command-dock') || e.target.closest('.mm-inline-editor')) return;
 
                 const isMiddle = (e.button === 1);
                 const isLeft = (e.button === 0);
@@ -5904,7 +5623,7 @@
                 const isOverButton = !!e.target.closest('button');
 
                 // 右键拖拽平移支持（与全局主阅读器右键拖屏交互完全统一）
-                if (isRight && !isOverCard && !isOverButton) {
+                if (isRight && !isOverButton) {
                     isRightMouseDown = true;
                     rightPanMoved = false;
                     startPanX = e.clientX;
@@ -6038,18 +5757,18 @@
                     rightPanMoved = false;
                     return;
                 }
-                // 点击空白处退出合并连线模式、退出重挂载模式或取消卡片选中
-                if (!e.target.closest('.mm-card') && !e.target.closest('button') && !e.target.closest('#mm-popover-dialog') && !e.target.closest('#mm-context-menu') && !e.target.closest('#mm-merge-banner') && !e.target.closest('#mm-reparent-banner')) {
+                // 点击空白处退出合并连线模式、退出重挂载模式、收起操作抽屉或取消卡片选中
+                if (!e.target.closest('.mm-card') && !e.target.closest('button') && !e.target.closest('#mm-command-dock')) {
                     if (reparentingSourceNodeId) {
                         stopInteractiveReparentMode();
-                        showMindmapToast('已取消更改挂载模式');
                         return;
                     }
                     if (mergingSourceNodeId || (mergingSourceNodeIds && mergingSourceNodeIds.length > 0)) {
                         stopInteractiveMergeMode();
-                        showMindmapToast('已取消合并连线模式');
                         return;
                     }
+                    activeDockTray = null;
+                    activeSheetTargetId = null;
                     selectedNodeId = null;
                     selectedNodeIds.clear();
                     document.querySelectorAll('.mm-card.selected').forEach(c => c.classList.remove('selected', 'is-multi-selected'));
@@ -6171,12 +5890,11 @@
             if (e.key === 'Escape') {
                 if (reparentingSourceNodeId) {
                     stopInteractiveReparentMode();
-                    showMindmapToast('已取消更改挂载模式');
                 } else if (mergingSourceNodeId || (mergingSourceNodeIds && mergingSourceNodeIds.length > 0)) {
                     stopInteractiveMergeMode();
-                    showMindmapToast('已取消合并连线模式');
-                } else if (document.getElementById('mm-popover-dialog') || document.getElementById('mm-context-menu')) {
-                    closeAllPopovers();
+                } else if (activeDockTray) {
+                    closeDockTray();
+                    refocusSelectedCard();
                 } else if (selectedNodeId || selectedNodeIds.size > 0) {
                     selectedNodeId = null;
                     selectedNodeIds.clear();
@@ -6199,13 +5917,7 @@
                         e.preventDefault();
                         e.stopPropagation();
                         const curPage = (state.currentPhysicalPage && state.currentPhysicalPage > 0) ? state.currentPhysicalPage : 1;
-                        if (activePage.page === curPage) {
-                            setMindMapPagePdfPage(activePage.id, null);
-                            showMindmapToast(`已取消「${activePage.title}」与第 ${curPage} 页的关联`);
-                        } else {
-                            setMindMapPagePdfPage(activePage.id, curPage);
-                            showMindmapToast(`已将「${activePage.title}」绑定至第 ${curPage} 页`, 'success');
-                        }
+                        setMindMapPagePdfPage(activePage.id, activePage.page === curPage ? null : curPage);
                     }
                 }
                 return;
@@ -6255,7 +5967,6 @@
                 e.stopPropagation();
                 if (reparentingSourceNodeId) {
                     stopInteractiveReparentMode();
-                    showMindmapToast('已退出更改挂载模式');
                 } else if (selectedNodeId) {
                     startInteractiveReparentMode(selectedNodeId);
                 }
@@ -6265,7 +5976,6 @@
                 const sources = selectedNodeIds.size > 1 ? Array.from(selectedNodeIds) : (selectedNodeId ? [selectedNodeId] : []);
                 if (mergingSourceNodeId) {
                     stopInteractiveMergeMode();
-                    showMindmapToast('已退出合并连线模式');
                 } else if (sources.length > 0) {
                     startInteractiveMergeMode(sources);
                 }
@@ -6284,13 +5994,7 @@
                     const curPage = (state.currentPhysicalPage && state.currentPhysicalPage > 0) ? state.currentPhysicalPage : 1;
                     const data = getMindMapData();
                     const node = findNodeInTree(data, selectedNodeId);
-                    if (node && node.page === curPage) {
-                        setNodePage(selectedNodeId, null);
-                        showMindmapToast(`已取消节点与第 ${curPage} 页的关联`);
-                    } else {
-                        setNodePage(selectedNodeId, curPage);
-                        showMindmapToast(`已成功绑定当前正文第 ${curPage} 页`, 'success');
-                    }
+                    setNodePage(selectedNodeId, (node && node.page === curPage) ? null : curPage);
                 }
             } else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
                 if (handleTreeNavigation(e.key)) {
@@ -6362,10 +6066,12 @@
         closeAllPopovers();
         if (isMindmapOpen) {
             const els = getEls();
+            els.dock?.classList.remove('is-editing-dim');
             els.treeRoot?.replaceChildren();
             els.svgCanvas?.querySelectorAll('path, g.mm-dynamic')?.forEach(n => n.remove());
             els.pagesList?.replaceChildren();
             if (els.nodeCount) els.nodeCount.textContent = '0';
+            renderCommandDock();
         }
     }
 

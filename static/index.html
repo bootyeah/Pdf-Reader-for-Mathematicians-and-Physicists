@@ -437,64 +437,66 @@
  
         <!-- 🧠 思维导图面板（左侧空间，自适应宽度可拖动调整，支持多主链、自由分支与合并） -->
         <div id="mindmap-panel" class="hidden relative w-[400px] bg-white border-r border-gray-200 flex flex-col h-full z-20 shrink-0 select-none">
-            <!-- 导图顶部工具栏（与左侧边栏及浏览器窗口语言统一） -->
-            <div id="mindmap-toolbar" class="px-3.5 py-2.5 border-b border-gray-200/90 bg-gray-50/80 backdrop-blur-sm flex items-center justify-between gap-1.5 shrink-0 select-none">
+            <!-- 导图顶部工具栏（纯图标轻量化设计，与主阅读器顶栏及左侧边栏语言完全统一） -->
+            <div id="mindmap-toolbar" class="px-3 py-1.5 border-b border-gray-200 bg-white flex items-center justify-between gap-2 shrink-0 select-none">
                 <div class="mm-toolbar-brand flex items-center gap-1.5 shrink-0 min-w-0">
-                    <span class="mm-toolbar-title font-bold text-xs text-gray-700 tracking-tight flex items-center gap-1.5 shrink-0" title="思维导图">
-                        <i class="ph ph-tree-structure text-blue-500 text-sm"></i>
-                        <span class="mm-toolbar-title-text">思维导图</span>
+                    <span class="mm-toolbar-title flex items-center justify-center text-blue-600 shrink-0" title="思维导图">
+                        <i class="ph ph-tree-structure text-[15px]"></i>
                     </span>
                     <button type="button" id="mindmap-shortcut-btn" class="window-shortcut-btn mm-shortcut-btn" title="收起思维导图 (快捷键: T)" aria-label="收起思维导图 (T)">
                         <span class="ws-action">收起</span>
                         <kbd class="ws-key">T</kbd>
                     </button>
-                    <span id="mindmap-node-count" class="bg-blue-100 text-blue-700 border border-blue-200/60 text-[11px] font-semibold px-2 py-0.5 rounded-full tabular-nums shrink-0" title="节点总数">0</span>
-                    <span id="mindmap-selection-label" class="hidden text-[11px] text-gray-400 font-medium truncate shrink-0 ml-1"></span>
+                    <span id="mindmap-node-count" class="mm-node-count tabular-nums shrink-0" title="节点总数">0</span>
+                    <span id="mindmap-selection-label" class="hidden"></span>
                 </div>
-                <!-- 导图多页签与 PDF 页码绑定栏（并入顶栏中间部分） -->
+                <!-- 导图多页签与 PDF 页码绑定栏 -->
                 <div id="mindmap-pages-bar" class="mm-pages-bar select-none" role="tablist" aria-label="思维导图分页栏">
                     <div id="mindmap-pages-list" class="mm-pages-list custom-scrollbar"></div>
                     <div class="mm-pages-actions">
-                        <button id="mindmap-bind-page-btn" type="button" class="mm-page-action-btn" title="为当前导图页绑定 PDF 页码（点击设置 · 右键一键绑定当前阅读页）" aria-label="绑定当前导图页 PDF 页码">
+                        <button id="mindmap-bind-page-btn" type="button" class="mm-page-action-btn" title="导图页设置与关联页码（左键展开设置 · 右键绑定当前页）" aria-label="导图页设置与绑定页码">
                             <i class="ph ph-bookmark-simple"></i>
-                            <span id="mindmap-bind-page-text">绑页码</span>
+                            <span id="mindmap-bind-page-text"></span>
                         </button>
-                        <button id="mindmap-add-page-btn" type="button" class="mm-page-action-btn mm-page-add-btn" title="新增一页思维导图 (Alt+T)" aria-label="新增思维导图页">
+                        <button id="mindmap-add-page-btn" type="button" class="mm-page-action-btn mm-page-add-btn" title="新增思维导图页 (Alt+T · 右键新建并绑定当前页)" aria-label="新增思维导图页">
                             <i class="ph ph-plus"></i>
-                            <span>新页</span>
                         </button>
                     </div>
                 </div>
-                <div class="mm-toolbar-actions flex items-center gap-0.5 shrink-0">
-                    <!-- 独立缩放控制胶囊（与阅读器顶部视觉一致） -->
-                    <div class="mm-toolbar-zoom mm-zoom-pill">
-                        <button id="mindmap-zoom-out" type="button" title="缩小导图">
-                            <i class="ph ph-minus text-xs"></i>
+                <div class="mm-toolbar-actions flex items-center gap-1 shrink-0">
+                    <div class="mm-view-group">
+                        <div class="mm-toolbar-zoom mm-zoom-pill">
+                            <button id="mindmap-zoom-out" type="button" title="缩小导图">
+                                <i class="ph ph-minus text-xs"></i>
+                            </button>
+                            <span id="mindmap-zoom-val" title="点击重置为 100%">100%</span>
+                            <button id="mindmap-zoom-in" type="button" title="放大导图">
+                                <i class="ph ph-plus text-xs"></i>
+                            </button>
+                        </div>
+                        <span class="mm-view-divider" aria-hidden="true"></span>
+                        <button id="mindmap-center-btn" type="button" class="mm-tool-btn" title="居中视野 (单击居中 · 双击自适应全图 Ctrl+0)">
+                            <i class="ph ph-crosshair text-[14px]"></i>
                         </button>
-                        <span id="mindmap-zoom-val" title="点击重置为 100%">100%</span>
-                        <button id="mindmap-zoom-in" type="button" title="放大导图">
-                            <i class="ph ph-plus text-xs"></i>
+                        <button id="mindmap-toggle-all-btn" type="button" class="mm-tool-btn" title="折叠 / 展开所有子分支">
+                            <i class="ph ph-arrows-in-line-vertical text-[14px]"></i>
                         </button>
                     </div>
-                    <button id="mindmap-center-btn" type="button" class="mm-tool-btn hover:text-blue-600" title="居中视野 (单击居中，双击自适应全图 Ctrl+0)">
-                        <i class="ph ph-crosshair text-[15px]"></i>
-                    </button>
-                    <button id="mindmap-toggle-all-btn" type="button" class="mm-tool-btn hover:text-gray-700" title="折叠 / 展开所有分支">
-                        <i class="ph ph-arrows-in-line-vertical text-[15px]"></i>
-                    </button>
                     <button id="mindmap-close-btn" type="button" class="mm-tool-btn mm-tool-close" title="收起思维导图 (T)">
-                        <i class="ph ph-x text-[15px]"></i>
+                        <i class="ph ph-x text-[14px]"></i>
                     </button>
                 </div>
             </div>
             <!-- 导图主视图容器：独立自由平移与缩放，不影响 PDF -->
-            <div id="mindmap-viewport" class="flex-1 overflow-hidden relative select-none bg-[#fafbfe]">
+            <div id="mindmap-viewport" class="flex-1 overflow-hidden relative select-none">
                 <div id="mindmap-canvas" class="absolute will-change-transform" style="transform-origin: 0 0;">
                     <svg id="mindmap-svg-canvas" class="pointer-events-none absolute inset-0 overflow-visible" style="z-index: 1; width: 100%; height: 100%;"></svg>
                     <div id="mindmap-tree-root" class="relative z-10 w-auto"></div>
                 </div>
-                <div class="pointer-events-none select-none absolute bottom-2.5 left-3 z-10 text-[10px] text-gray-400/70 font-sans tracking-wide">
-                    Ctrl + 滚轮缩放 · 拖拽平移画布
+                <!-- 底部统一上下文操作坞：收敛全部节点、连线、标签、页码与视图操作，无悬停散落按钮与套娃弹窗 -->
+                <div id="mm-command-dock" class="mm-command-dock" role="toolbar" aria-label="思维导图操作台">
+                    <div id="mm-dock-tray" class="mm-dock-tray" hidden></div>
+                    <div id="mm-dock-bar" class="mm-dock-bar"></div>
                 </div>
             </div>
             <!-- 右侧拖拽调宽把手 -->

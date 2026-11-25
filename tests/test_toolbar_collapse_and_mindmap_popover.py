@@ -81,33 +81,33 @@ window.addEventListener('load', () => {
             }
 
             // =================================================================
-            // 1. MindMap Math Role Popover: verify removed texts & intact behavior
+            // 1. MindMap Math Role Tray: verify unified dock tray & intact behavior
             // =================================================================
             window.MindMap.toggle(true);
             const firstCard = document.querySelector('#mindmap-tree-root .mm-card');
             assert(firstCard !== null, 'Mindmap card must exist');
-            const nodeId = firstCard.dataset.id;
-            firstCard.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 160, clientY: 180 }));
+            firstCard.click();
 
-            const ctxMenu = document.getElementById('mm-context-menu');
-            assert(ctxMenu !== null, 'Context menu must open on right-click');
-            const pickTagItem = ctxMenu.querySelector('.mm-menu-item[data-action="pick-tag"]');
-            assert(pickTagItem !== null, 'pick-tag menu item must exist');
-            pickTagItem.click();
+            const tagBtn = document.getElementById('mm-dock-tag');
+            assert(tagBtn !== null, '#mm-dock-tag button must exist in unified command dock');
+            tagBtn.click();
 
-            const pop = document.getElementById('mm-popover-dialog');
-            assert(pop !== null, 'Math role popover must open');
-            const popText = pop.textContent || '';
-            assert(!popText.includes('Math Logic'), 'Popover must NOT contain "Math Logic"');
-            assert(!popText.includes('标记该节点在推演论证中的角色定位'), 'Popover must NOT contain subtitle text');
-            assert(popText.includes('数学理论角色'), 'Popover title "数学理论角色" must remain');
+            const tray = document.getElementById('mm-dock-tray');
+            assert(tray !== null && !tray.hidden, 'Math role inline tray must open in command dock');
+            assert(document.getElementById('mm-popover-dialog') === null, 'Legacy floating popover must not exist');
+            assert(document.getElementById('mm-context-menu') === null, 'Legacy floating context menu must not exist');
+            const popText = tray.textContent || '';
+            assert(!popText.includes('Math Logic'), 'Tray must NOT contain "Math Logic"');
+            assert(!popText.includes('标记该节点在推演论证中的角色定位'), 'Tray must NOT contain subtitle text');
+            assert(popText.includes('数学理论角色'), 'Tray title "数学理论角色" must remain');
             assert(popText.includes('清除角色'), 'Clear button "清除角色" must remain');
-            assert(pop.querySelectorAll('.mm-tag-pick-btn').length === 9, 'All 9 math role buttons must remain');
+            assert(tray.querySelectorAll('.mm-tag-pick-btn').length === 9, 'All 9 math role buttons must remain');
 
-            const lemmaBtn = pop.querySelector('.mm-tag-pick-btn[data-key="lemma"]');
+            const lemmaBtn = tray.querySelector('.mm-tag-pick-btn[data-key="lemma"]');
             assert(lemmaBtn !== null, 'Lemma tag button must exist');
             lemmaBtn.click();
-            assert(document.getElementById('mm-popover-dialog') === null, 'Popover should close after picking tag');
+            assert(tray.hidden === true, 'Inline tray should close after picking tag');
+            assert(firstCard.querySelector('.mm-math-tag.mm-tag-lemma') !== null, 'Card should render lemma role tag badge');
             window.MindMap.toggle(false);
 
             // =================================================================

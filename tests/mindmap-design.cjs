@@ -153,7 +153,7 @@ const server = http.createServer((req, res) => {
     console.log('PASS: uniform parent-child/convergence strokes, matching direction arrows and group selection in both themes');
     await page.locator('.mm-card[data-id="ab"]').dblclick();
     await page.locator('.mm-inline-editor').fill('有限子覆盖\n每个开覆盖都存在有限子覆盖\n$K \\subset X$');
-    await page.keyboard.press('Enter');
+    await page.keyboard.press('Shift+Enter');
     await settle();
     assert.deepEqual((await geometry()).overlaps, [], 'editing a shared conclusion must reflow adjacent cards');
     await page.keyboard.press('Control+z');
@@ -172,7 +172,7 @@ const server = http.createServer((req, res) => {
     console.log('PASS: collapse and expand preserve all shared descendants');
 
     await page.locator('.mm-card[data-id="b"]').click();
-    await page.locator('#mindmap-merge-btn').click();
+    await page.locator('#mm-dock-connect').click();
     assert.match(await page.locator('.mm-pop-tabs [aria-selected="true"]').textContent(), /连线/);
     await page.locator('.mm-pop-tabs [data-mode="converge"]').click();
     assert.match(await page.locator('.mm-pop-tabs [aria-selected="true"]').textContent(), /合流/);
@@ -181,44 +181,39 @@ const server = http.createServer((req, res) => {
     await page.locator('.mm-connect-list input').check();
     assert.match(await page.locator('#mm-pop-converge-next').textContent(), /2 项/);
     await page.locator('#mm-connect-search').fill('');
-    await page.locator('#mm-popover-dialog').screenshot({ path: path.join(output, 'connect-panel.png') });
+    await page.locator('#mm-command-dock').screenshot({ path: path.join(output, 'connect-panel.png') });
     await page.locator('#mm-pop-close').click();
-    // All streamlined node actions remain available with clean text labels.
-    await page.locator('.mm-card[data-id="b"] .mm-act-more').click();
-    assert.equal(await page.locator('#mm-context-menu [data-action="fork-branch"]').count(), 0);
-    assert.equal(await page.locator('#mm-context-menu [data-action="edit"]').count(), 0);
-    assert.equal(await page.locator('#mm-context-menu [data-action="add-child"]').count(), 0);
-    assert.equal(await page.locator('#mm-context-menu [data-action="add-sibling"]').count(), 0);
-    assert.equal(await page.locator('#mm-context-menu [data-action="merge-link"]').count(), 0);
-    for (const action of ['pick-tag','pick-page','reparent','delete']) {
-      assert.equal(await page.locator(`#mm-context-menu [data-action="${action}"]`).count(), 1);
+    // All streamlined node actions live in the unified bottom command dock, with zero scattered hover buttons or context menus.
+    assert.equal(await page.locator('.mm-card-actions, .mm-quick-add-down, .mm-quick-add-right, #mm-context-menu, #mm-popover-dialog').count(), 0);
+    assert.equal(await page.locator('#mm-dock-fork').count(), 0);
+    for (const dockBtnId of ['mm-dock-add-down', 'mm-dock-add-right', 'mm-dock-edit', 'mm-dock-tag', 'mm-dock-page', 'mm-dock-connect', 'mm-dock-move', 'mm-dock-delete']) {
+      assert.equal(await page.locator(`#${dockBtnId}`).count(), 1);
     }
-    await page.keyboard.press('Escape');
     await page.locator('.mm-card[data-id="c"]').click({ modifiers: ['Control'] });
     assert.equal(await page.locator('#mindmap-selection-label').textContent(), '已选 2 项');
-    assert.equal(await page.locator('#mindmap-fork-btn').isDisabled(), true);
+    assert.equal(await page.locator('#mm-dock-fork').count(), 0);
     const beforeMerge = await page.evaluate(() => JSON.stringify(state.annotations.mindmap.nodes));
-    await page.locator('#mindmap-merge-btn').click();
+    await page.locator('#mm-dock-multi-converge').click();
     await page.waitForSelector('.mm-inline-editor');
     await page.keyboard.press('Escape');
     await page.keyboard.press('Control+z');
     assert.equal(await page.evaluate(() => JSON.stringify(state.annotations.mindmap.nodes)), beforeMerge);
-    console.log('PASS: searchable source selection, more menu, contextual multi-selection and atomic undo');
+    console.log('PASS: searchable source selection, unified dock actions, contextual multi-selection and atomic undo');
 
     await page.evaluate(() => {
       document.getElementById('mindmap-panel').style.width = '280px';
       window.MindMap.center(false, true);
       document.querySelector('.mm-card[data-id="b"]').click();
     });
-    await page.locator('#mindmap-merge-btn').click();
+    await page.locator('#mm-dock-connect').click();
     await page.locator('[data-mode="link"]').click();
     await page.locator('#mm-connect-search').fill('序列条件');
-    await page.locator('.mm-connect-list button').click();
+    await page.locator('.mm-connect-list button.mm-connect-row').click();
     assert.deepEqual(await page.evaluate(() => state.annotations.mindmap.root.children[0].children[1].mergeTo), ['c']);
-    await page.locator('#mindmap-merge-btn').click();
+    await page.locator('#mm-dock-connect').click();
     await page.locator('[data-mode="fuse"]').click();
     await page.locator('#mm-connect-search').fill('序列条件');
-    await page.locator('.mm-connect-list button').click();
+    await page.locator('.mm-connect-list button.mm-connect-row').click();
     assert.equal(await page.locator('.mm-card[data-id="b"]').count(), 0);
     await page.keyboard.press('Control+z');
     assert.equal(await page.locator('.mm-card[data-id="b"]').count(), 1);
@@ -246,18 +241,18 @@ const server = http.createServer((req, res) => {
 
     await fixture();
     await page.locator('.mm-card[data-id="b"]').click();
-    assert.equal(await page.locator('#mindmap-fork-btn').isVisible(), false);
+    assert.equal(await page.locator('#mm-dock-fork').count(), 0);
     const lateralData = await page.evaluate(() => JSON.stringify(state.annotations.mindmap.nodes));
     await page.keyboard.press('Shift+Enter');
     assert.equal(await page.evaluate(() => MindMap.forkBranch('b')), false);
     assert.equal(await page.evaluate(() => JSON.stringify(state.annotations.mindmap.nodes)), lateralData);
-    await page.locator('#mindmap-merge-btn').click();
+    await page.locator('#mm-dock-connect').click();
     assert.equal(await page.locator('#mm-pop-converge-fork').count(), 0);
     await page.locator('#mm-pop-close').click();
 
     await page.locator('.mm-card[data-id="root"]').click();
-    assert.equal(await page.locator('#mindmap-fork-btn').isVisible(), true);
-    await page.locator('#mindmap-fork-btn').click();
+    assert.equal(await page.locator('#mm-dock-fork').isVisible(), true);
+    await page.locator('#mm-dock-fork').click();
     await page.waitForSelector('.mm-inline-editor');
     await page.keyboard.press('Escape');
     assert.deepEqual(await page.evaluate(() => ({ chains: state.annotations.mindmap.nodes.length,

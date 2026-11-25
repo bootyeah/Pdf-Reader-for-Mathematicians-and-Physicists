@@ -4126,19 +4126,30 @@ body.eye-protection-mode .cp-outline-item:hover {
     flex-shrink: 0;
     flex-wrap: nowrap;
     overflow: hidden;
-    border-bottom: 1px solid #e2e8f0;
-    background: #f8fafc;
-    min-height: 42px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #ffffff;
+    min-height: 40px;
 }
 
-#mindmap-node-count {
-    font-size: 11px;
+.mm-node-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 9999px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    color: #64748b;
+    font-size: 10.5px;
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
+    line-height: 1;
 }
 
 #mindmap-selection-label {
     font-size: 11px;
-    color: #3b82f6;
+    color: #2563eb;
     background: #eff6ff;
     border: 1px solid #dbeafe;
     padding: 1px 7px;
@@ -4151,21 +4162,41 @@ body.eye-protection-mode #mindmap-selection-label {
     color: #2563eb;
 }
 
-/* 工具栏图标按钮：统一 24px 触控尺寸，轻量悬停底色 */
+/* 右侧视图控制胶囊（与主阅读器顶部 #toolbar-view-group 语言完全统一） */
+.mm-view-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    padding: 2px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    flex-shrink: 0;
+}
+
+.mm-view-divider {
+    width: 1px;
+    height: 13px;
+    background: #e2e8f0;
+    margin: 0 2px;
+    flex-shrink: 0;
+}
+
 .mm-tool-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 24px;
+    width: 22px;
+    height: 22px;
     border-radius: 6px;
     color: #64748b;
-    font-size: 15px;
-    transition: background-color 0.14s ease, color 0.14s ease;
+    font-size: 14px;
+    transition: background-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
 }
 
 .mm-tool-btn:hover {
     background: #ffffff;
+    color: #1e293b;
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
@@ -4186,24 +4217,26 @@ body.eye-protection-mode #mindmap-selection-label {
 }
 
 .mm-tool-btn.mm-tool-close {
+    width: 24px;
+    height: 24px;
     color: #94a3b8;
-    margin-left: 2px;
+    margin-left: 1px;
 }
 
 .mm-tool-btn.mm-tool-close:hover {
     background: #fef2f2;
-    color: #ef4444;
+    color: #dc2626;
+    box-shadow: none;
 }
 
-/* 缩放胶囊 */
+/* 缩放控制（嵌入 .mm-view-group 胶囊内部，消除双重外框杂乱感） */
 .mm-zoom-pill {
     display: inline-flex;
     align-items: center;
-    height: 24px;
-    margin: 0 2px;
-    padding: 0 1px;
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
+    height: 22px;
+    padding: 0;
+    background: transparent;
+    border: none;
     border-radius: 6px;
     color: #475569;
 }
@@ -4212,88 +4245,37 @@ body.eye-protection-mode #mindmap-selection-label {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 18px;
-    height: 18px;
-    border-radius: 4px;
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
     font-size: 11px;
     color: #64748b;
     transition: background-color 0.14s ease, color 0.14s ease;
 }
 
 .mm-zoom-pill button:hover {
-    background: #f1f5f9;
+    background: #ffffff;
     color: #0f172a;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
 }
 
 #mindmap-zoom-val {
-    min-width: 32px;
+    min-width: 33px;
     text-align: center;
     font-size: 10.5px;
+    font-weight: 500;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     cursor: pointer;
     user-select: none;
+    color: #475569;
 }
 
 #mindmap-zoom-val:hover {
     color: #2563eb;
 }
 
-/* 窄面板（<=368px）自动折行，保证 280px 最小宽度下全部按钮完整可达。 */
-@container (max-width: 368px) {
-    #mindmap-toolbar {
-        flex-wrap: wrap;
-        row-gap: 4px;
-        padding-left: 8px;
-        padding-right: 8px;
-        gap: 4px;
-    }
-    #mindmap-toolbar .mm-toolbar-brand,
-    #mindmap-toolbar .mm-toolbar-title {
-        gap: 4px;
-    }
-    #mindmap-toolbar .mm-toolbar-brand {
-        flex: 0 0 auto;
-    }
-    #mindmap-pages-bar {
-        flex: 1 1 0%;
-        min-width: 0;
-        padding: 0;
-    }
-    #mindmap-node-count {
-        padding: 1px 5px;
-    }
-    #mindmap-toolbar .mm-toolbar-actions {
-        flex: 1 0 100%;
-        justify-content: space-between;
-        gap: 2px;
-    }
-    #mindmap-toolbar .mm-toolbar-actions > button:not([hidden]) {
-        width: 24px;
-        height: 24px;
-        padding: 0;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-    }
-    #mindmap-toolbar .mm-toolbar-divider {
-        margin: 0 1px;
-    }
-    #mindmap-toolbar .mm-toolbar-zoom {
-        padding: 1px;
-    }
-    #mindmap-toolbar .mm-toolbar-zoom button {
-        width: 18px;
-        height: 18px;
-    }
-    #mindmap-zoom-val {
-        min-width: 30px;
-        padding: 0 2px;
-        font-size: 10.5px;
-    }
-}
-
 /* ==========================================
-   思维导图多页签与 PDF 页码绑定栏（并入 #mindmap-toolbar 中间区域）
+   思维导图多页签与 PDF 页码绑定栏
    ========================================== */
 #mindmap-pages-bar {
     display: flex;
@@ -4310,9 +4292,10 @@ body.eye-protection-mode #mindmap-selection-label {
 }
 
 .mm-pages-list {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 3px;
     flex: 1 1 0%;
     min-width: 0;
     overflow-x: auto;
@@ -4328,25 +4311,24 @@ body.eye-protection-mode #mindmap-selection-label {
 .mm-page-tab {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 3.5px;
     height: 24px;
     padding: 0 7px;
     border-radius: 6px;
     font-size: 11px;
     font-weight: 500;
-    color: #475569;
-    background: #ffffff;
+    color: #64748b;
+    background: #f8fafc;
     border: 1px solid #e2e8f0;
     cursor: pointer;
     flex-shrink: 0;
-    max-width: 170px;
-    transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+    transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
 }
 
 .mm-page-tab:hover {
     background: #f1f5f9;
     border-color: #cbd5e1;
-    color: #0f172a;
+    color: #1e293b;
 }
 
 .mm-page-tab.is-active {
@@ -4354,7 +4336,6 @@ body.eye-protection-mode #mindmap-selection-label {
     border-color: #93c5fd;
     color: #1d4ed8;
     font-weight: 600;
-    box-shadow: 0 1px 2px rgba(37, 99, 235, 0.08);
 }
 
 .mm-page-tab.is-reading-page:not(.is-active) {
@@ -4363,7 +4344,7 @@ body.eye-protection-mode #mindmap-selection-label {
 }
 
 .mm-page-tab-title {
-    max-width: 84px;
+    max-width: 82px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -4410,7 +4391,7 @@ body.eye-protection-mode #mindmap-selection-label {
 .mm-pages-actions {
     display: inline-flex;
     align-items: center;
-    gap: 3px;
+    gap: 2px;
     flex-shrink: 0;
     margin-left: auto;
 }
@@ -4420,17 +4401,27 @@ body.eye-protection-mode #mindmap-selection-label {
     align-items: center;
     justify-content: center;
     gap: 3px;
+    min-width: 24px;
     height: 24px;
-    padding: 0 6px;
+    padding: 0 5px;
     border-radius: 6px;
     font-size: 11px;
     font-weight: 500;
-    color: #475569;
-    background: #ffffff;
+    color: #64748b;
+    background: #f8fafc;
     border: 1px solid #e2e8f0;
     cursor: pointer;
     white-space: nowrap;
     transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.mm-page-action-btn:not(.is-bound) {
+    width: 24px;
+    padding: 0;
+}
+
+.mm-page-action-btn:not(.is-bound) #mindmap-bind-page-text:empty {
+    display: none;
 }
 
 .mm-page-action-btn:hover {
@@ -4453,50 +4444,64 @@ body.eye-protection-mode #mindmap-selection-label {
 }
 
 .mm-page-action-btn.mm-page-add-btn {
-    color: #2563eb;
-    border-color: #dbeafe;
-    background: #f8fbff;
+    width: 24px;
+    padding: 0;
+    color: #64748b;
 }
 
 .mm-page-action-btn.mm-page-add-btn:hover {
     background: #eff6ff;
     border-color: #93c5fd;
+    color: #2563eb;
 }
 
-/* 中等宽度（<=540px）精简标题与操作按钮文案，保证单栏左中右紧凑对齐 */
-@container (max-width: 540px) {
+/* 中窄面板响应式适配 */
+@container (max-width: 480px) {
     #mindmap-toolbar {
         padding-left: 8px;
         padding-right: 8px;
         gap: 4px;
     }
-    #mindmap-toolbar .mm-toolbar-title-text {
+    .mm-shortcut-btn .ws-action {
         display: none;
-    }
-    .mm-page-action-btn:not(.is-bound) #mindmap-bind-page-text,
-    #mindmap-add-page-btn span {
-        display: none;
-    }
-    .mm-page-action-btn:not(.is-bound),
-    #mindmap-add-page-btn {
-        width: 24px;
-        padding: 0;
     }
     .mm-page-tab {
         padding: 0 6px;
-        max-width: 135px;
+        max-width: 132px;
     }
     .mm-page-tab-title {
         max-width: 64px;
     }
 }
 
-@container (max-width: 440px) {
+/* 超窄面板（<=368px）自动折行，保证 280px 最小宽度下全部按钮无裁切重叠 */
+@container (max-width: 368px) {
+    #mindmap-toolbar {
+        flex-wrap: wrap;
+        row-gap: 4px;
+        padding: 5px 8px;
+        gap: 4px;
+    }
+    #mindmap-toolbar .mm-toolbar-brand {
+        flex: 0 0 auto;
+        gap: 4px;
+    }
     #mindmap-pages-bar {
         flex: 1 1 0%;
         min-width: 0;
-        overflow: hidden;
         padding: 0;
+    }
+    .mm-node-count {
+        padding: 0 5px;
+    }
+    #mindmap-toolbar .mm-toolbar-actions {
+        flex: 1 0 100%;
+        justify-content: flex-end;
+        gap: 4px;
+    }
+    #mindmap-zoom-val {
+        min-width: 30px;
+        padding: 0 2px;
     }
 }
 
@@ -4506,14 +4511,14 @@ body.eye-protection-mode #mindmap-pages-bar {
 
 body.eye-protection-mode .mm-page-tab,
 body.eye-protection-mode .mm-page-action-btn {
-    background: #F5F2E9;
-    border-color: #DCD8C8;
-    color: #4A4842;
+    background: #F4EFE6;
+    border-color: #E6E2D6;
+    color: #57534E;
 }
 
 body.eye-protection-mode .mm-page-tab:hover,
 body.eye-protection-mode .mm-page-action-btn:hover {
-    background: #EAE6DB;
+    background: #ECE5D8;
     color: #1d4ed8;
 }
 
@@ -4523,13 +4528,13 @@ body.eye-protection-mode .mm-page-tab.is-active {
     color: #1d4ed8;
 }
 
-/* 空导图引导：仅有一个根节点时，在根节点下方给出最常用的三个入口 */
+/* 空导图轻提示：仅单根节点时安静提示核心方式 */
 .mm-empty-guide {
-    margin-top: 6px;
+    margin-top: 4px;
     width: 224px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
     color: #94a3b8;
     font-size: 11px;
     line-height: 1.5;
@@ -4550,7 +4555,7 @@ body.eye-protection-mode .mm-page-tab.is-active {
 .mm-empty-guide kbd {
     display: inline-flex;
     justify-content: center;
-    min-width: 48px;
+    min-width: 44px;
     padding: 0 5px;
     border: 1px solid #e2e8f0;
     border-bottom-width: 2px;
@@ -4834,35 +4839,14 @@ body.eye-protection-mode .mm-page-tab.is-active {
     box-sizing: border-box;
 }
 
-/* 连续悬浮桥接层：无缝覆盖卡片与上方操作栏、下方/右侧快捷添加按钮之间的空隙，防止鼠标滑动丢焦
-   注意：桥接层必须位于卡片“下方”(z-index 1 < 卡片 2)，绝不遮挡卡片点击 */
-.mm-card-wrapper::after {
-    content: '';
-    position: absolute;
-    top: -14px;
-    left: -12px;
-    right: -16px;
-    bottom: -15px;
-    pointer-events: none;
-    z-index: 1;
-}
-
-.mm-card-wrapper.has-children::after {
-    bottom: -15px;
-}
-
-.mm-card-wrapper:hover::after {
-    pointer-events: auto;
-}
-
-/* 节点卡片本体 (与阅读器侧边栏、笔记卡片、HUD 统一的设计语言) */
+/* 节点卡片本体 (纯粹静谧，与阅读器侧边栏、笔记卡片、HUD 完全统一的设计语言) */
 .mm-card {
     background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 9px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
     padding: 8px 12px;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035);
-    transition: border-color 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease, transform 0.16s ease;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
     cursor: pointer;
     position: relative;
     z-index: 2;
@@ -4874,18 +4858,18 @@ body.eye-protection-mode .mm-page-tab.is-active {
 
 .mm-card:hover {
     border-color: #93c5fd;
-    box-shadow: 0 6px 16px -4px rgba(37, 99, 235, 0.11), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
+    box-shadow: 0 4px 12px -3px rgba(15, 23, 42, 0.06);
 }
 
 .mm-card.selected {
-    border-color: var(--mm-chain-color, #3b82f6) !important;
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.18), 0 6px 16px -4px rgba(37, 99, 235, 0.14) !important;
+    border-color: var(--mm-chain-color, #2563eb) !important;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15), 0 4px 12px -3px rgba(37, 99, 235, 0.09) !important;
 }
 
 .mm-card.selected.is-multi-selected {
-    border-color: #6366f1 !important;
-    box-shadow: 0 0 0 2.5px rgba(99, 102, 241, 0.28), 0 6px 16px -4px rgba(79, 70, 229, 0.18) !important;
-    background-color: #faf5ff;
+    border-color: #2563eb !important;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.24), 0 4px 12px -3px rgba(37, 99, 235, 0.12) !important;
+    background-color: #f8fbff;
 }
 
 .mm-card.is-editing {
@@ -4900,23 +4884,24 @@ body.eye-protection-mode .mm-page-tab.is-active {
 }
 
 .mm-card.drag-over-top {
-    box-shadow: 0 -3px 0 0 #2563eb, 0 4px 12px rgba(37, 99, 235, 0.12) !important;
+    box-shadow: 0 -3px 0 0 #2563eb, 0 4px 12px rgba(37, 99, 235, 0.10) !important;
 }
 
 .mm-card.drag-over-bottom {
-    box-shadow: 0 3px 0 0 #2563eb, 0 4px 12px rgba(37, 99, 235, 0.12) !important;
+    box-shadow: 0 3px 0 0 #2563eb, 0 4px 12px rgba(37, 99, 235, 0.10) !important;
 }
 
 .mm-card.drag-over-child {
     border-color: #2563eb !important;
     background-color: #eff6ff !important;
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25) !important;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.22) !important;
 }
 
 .mm-card.drag-over-merge,
 .mm-card.mm-merge-target {
-    border-color: #818cf8;
-    box-shadow: 0 0 0 3px #e0e7ff;
+    border-color: #2563eb !important;
+    background-color: #eff6ff !important;
+    box-shadow: 0 0 0 2.5px rgba(37, 99, 235, 0.20) !important;
 }
 
 .mm-card[data-drop-hint]::before {
@@ -4934,55 +4919,46 @@ body.eye-protection-mode .mm-page-tab.is-active {
     pointer-events: none;
 }
 
-/* 交互式合并模式与挂载切换模式下的源节点与候选目标节点高亮 */
-.mm-card.mm-merge-source {
-    border-color: #4f46e5 !important;
-    box-shadow: 0 0 0 2.5px rgba(99, 102, 241, 0.3), 0 4px 14px rgba(79, 70, 229, 0.18) !important;
-}
-
+/* 交互式连线模式与挂载切换模式下的源节点与候选目标节点高亮 */
+.mm-card.mm-merge-source,
 .mm-card.mm-reparent-source {
-    border-color: #7c3aed !important;
-    box-shadow: 0 0 0 2.5px rgba(124, 58, 237, 0.28), 0 4px 14px rgba(124, 58, 237, 0.16) !important;
+    border-color: #2563eb !important;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.26), 0 4px 12px rgba(37, 99, 235, 0.12) !important;
 }
 
 .mm-card.mm-reparent-target {
     border-color: #2563eb !important;
     background-color: #eff6ff !important;
-    box-shadow: 0 0 0 3px #dbeafe !important;
+    box-shadow: 0 0 0 2.5px #bfdbfe !important;
 }
 
-#mindmap-viewport.is-merging-mode .mm-card:not(.mm-merge-source):hover {
-    border-color: #4f46e5 !important;
-    background-color: #f5f3ff;
-    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.28), 0 6px 16px -2px rgba(79, 70, 229, 0.18) !important;
-}
-
+#mindmap-viewport.is-merging-mode .mm-card:not(.mm-merge-source):hover,
 #mindmap-viewport.is-reparenting-mode .mm-card:not(.mm-reparent-source):hover {
     border-color: #2563eb !important;
     background-color: #eff6ff;
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.26), 0 6px 16px -2px rgba(37, 99, 235, 0.16) !important;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.22), 0 4px 12px -2px rgba(37, 99, 235, 0.12) !important;
 }
 
-/* 根节点专属视觉层级 (主链顶栏展牌) */
+/* 根节点专属视觉层级 (与左侧边栏激活条同源的简洁左饰线卡片) */
 .mm-card.mm-root-card {
-    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    background: #ffffff;
     border: 1px solid #cbd5e1;
-    border-top: 3px solid var(--mm-chain-color, #3b82f6);
-    border-radius: 10px;
+    border-left: 3px solid var(--mm-chain-color, #2563eb);
+    border-radius: 9px;
     padding: 9px 13px;
-    box-shadow: 0 2px 6px -1px rgba(15, 23, 42, 0.06);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.045);
 }
 
 .mm-card.mm-root-card:hover {
     border-color: #93c5fd;
-    border-top-color: var(--mm-chain-accent, #2563eb);
-    box-shadow: 0 6px 18px -3px rgba(37, 99, 235, 0.15);
+    border-left-color: var(--mm-chain-accent, #2563eb);
+    box-shadow: 0 4px 14px -3px rgba(37, 99, 235, 0.11);
 }
 
 .mm-card.mm-root-card .mm-card-body {
     font-weight: 600;
     color: #0f172a;
-    font-size: 13.5px;
+    font-size: 13.2px;
 }
 
 /* 根节点专属身份微标 */
@@ -4991,31 +4967,30 @@ body.eye-protection-mode .mm-page-tab.is-active {
     align-items: center;
     gap: 3px;
     font-size: 10px;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--mm-chain-accent, #2563eb);
     background: var(--mm-chain-bg, #eff6ff);
     border: 1px solid var(--mm-chain-border, #dbeafe);
-    border-radius: 5px;
-    padding: 0.5px 5.5px;
+    border-radius: 4px;
+    padding: 0 5px;
     line-height: 15px;
     flex-shrink: 0;
 }
 
 /* 主干里程碑专属视觉层级 */
 .mm-card.mm-spine-card {
-    border-left: 3px solid var(--mm-chain-color, #3b82f6) !important;
+    border-left: 2.5px solid var(--mm-chain-color, #3b82f6) !important;
     background: #ffffff;
 }
 
 .mm-card.mm-spine-card:hover {
     border-left-color: var(--mm-chain-accent, #2563eb) !important;
     border-color: #93c5fd;
-    box-shadow: 0 6px 16px -4px rgba(37, 99, 235, 0.13);
 }
 
 /* 并行分支子链中的主节点微调 */
 .mm-card.mm-fork-card {
-    border-left-width: 2.5px !important;
+    border-left-width: 2px !important;
 }
 
 /* 主干里程碑序号徽标 */
@@ -5024,57 +4999,50 @@ body.eye-protection-mode .mm-page-tab.is-active {
     align-items: center;
     justify-content: center;
     font-size: 10px;
-    font-weight: 700;
+    font-weight: 600;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     color: var(--mm-chain-accent, #1d4ed8);
     background: var(--mm-chain-bg, #eff6ff);
-    border: 1px solid var(--mm-chain-border, #bfdbfe);
+    border: 1px solid var(--mm-chain-border, #dbeafe);
     border-radius: 4px;
     padding: 0 4.5px;
     line-height: 15px;
-    letter-spacing: 0.2px;
+    letter-spacing: 0.1px;
     flex-shrink: 0;
 }
 
-/* 汇合节点专属微标 (点击可查看或解除汇入连线) */
+/* 兼容历史汇合微标样式 */
 .mm-merge-badge {
     display: inline-flex;
     align-items: center;
     gap: 2.5px;
     font-size: 10px;
     font-weight: 600;
-    color: #4f46e5;
-    background: #eef2ff;
-    border: 1px solid #c7d2fe;
+    color: #2563eb;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
     border-radius: 9999px;
     padding: 0.5px 5.5px;
     line-height: 14px;
     cursor: pointer;
     flex-shrink: 0;
-    transition: all 0.15s ease;
 }
 
-.mm-merge-badge:hover {
-    background: #e0e7ff;
-    border-color: #818cf8;
-    color: #3730a3;
-}
-
-/* 数学理论角色标签徽标 (公理/定义/引理/定理/证明/动机/推论/反例) */
+/* 数学理论角色标签徽标 (低饱和雅致学术微标) */
 .mm-math-tag {
     display: inline-flex;
     align-items: center;
     gap: 3px;
     font-size: 10px;
     font-weight: 600;
-    border-radius: 5px;
-    padding: 0.5px 5.5px;
+    border-radius: 4px;
+    padding: 0 5px;
     line-height: 15px;
     border: 1px solid transparent;
     cursor: pointer;
     flex-shrink: 0;
     user-select: none;
-    transition: all 0.15s ease;
+    transition: filter 0.14s ease;
 }
 
 .mm-math-tag:hover {
@@ -5083,47 +5051,53 @@ body.eye-protection-mode .mm-page-tab.is-active {
 
 .mm-math-tag.mm-tag-axiom, .mm-tag-pick-btn.mm-tag-axiom { background: #fffbeb; color: #b45309; border-color: #fde68a; }
 .mm-math-tag.mm-tag-def, .mm-tag-pick-btn.mm-tag-def { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
-.mm-math-tag.mm-tag-lemma, .mm-tag-pick-btn.mm-tag-lemma { background: #ecfeff; color: #0e7490; border-color: #a5f3fc; }
-.mm-math-tag.mm-tag-thm, .mm-tag-pick-btn.mm-tag-thm { background: #f5f3ff; color: #6d28d9; border-color: #ddd6fe; }
-.mm-math-tag.mm-tag-prop, .mm-tag-pick-btn.mm-tag-prop { background: #fdf4ff; color: #a21caf; border-color: #f5d0fe; }
-.mm-math-tag.mm-tag-proof, .mm-tag-pick-btn.mm-tag-proof { background: #fffbeb; color: #92400e; border-color: #fde68a; }
+.mm-math-tag.mm-tag-lemma, .mm-tag-pick-btn.mm-tag-lemma { background: #f0f9ff; color: #0369a1; border-color: #bae6fd; }
+.mm-math-tag.mm-tag-thm, .mm-tag-pick-btn.mm-tag-thm { background: #eef2ff; color: #4338ca; border-color: #c7d2fe; }
+.mm-math-tag.mm-tag-prop, .mm-tag-pick-btn.mm-tag-prop { background: #f5f3ff; color: #6d28d9; border-color: #ddd6fe; }
+.mm-math-tag.mm-tag-proof, .mm-tag-pick-btn.mm-tag-proof { background: #f8fafc; color: #475569; border-color: #cbd5e1; }
 .mm-math-tag.mm-tag-idea, .mm-tag-pick-btn.mm-tag-idea { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
-.mm-math-tag.mm-tag-cor, .mm-tag-pick-btn.mm-tag-cor { background: #eef2ff; color: #4338ca; border-color: #c7d2fe; }
+.mm-math-tag.mm-tag-cor, .mm-tag-pick-btn.mm-tag-cor { background: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
 .mm-math-tag.mm-tag-counter, .mm-tag-pick-btn.mm-tag-counter { background: #fff1f2; color: #be123c; border-color: #fecdd3; }
 .mm-math-tag.mm-tag-algo, .mm-tag-pick-btn.mm-tag-algo { background: #f0fdfa; color: #0f766e; border-color: #99f6e4; }
 
 .mm-tag-pick-btn {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    justify-content: center;
+    gap: 4px;
     font-size: 11px;
     font-weight: 500;
     border-radius: 6px;
-    padding: 5px 8px;
+    padding: 5px 6px;
     cursor: pointer;
     border: 1px solid transparent;
-    transition: all 0.15s;
-    text-align: left;
+    transition: all 0.14s ease;
+    text-align: center;
+}
+
+.mm-tag-pick-btn:hover {
+    filter: brightness(0.97);
 }
 
 .mm-tag-pick-btn.is-active {
-    box-shadow: 0 0 0 2px #2563eb;
-    font-weight: 700;
+    box-shadow: 0 0 0 1.5px #2563eb;
+    font-weight: 600;
 }
 
-/* 卡片顶部徽标栏：有徽标时紧凑排列，无徽标时不占高度（消除旧版空白顶栏与生硬分割线） */
+/* 卡片顶部徽标栏：有徽标时紧凑排列，无徽标时不占高度 */
 .mm-card-head {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 4px;
-    margin-bottom: 5px;
+    margin-bottom: 4px;
 }
 
 .mm-card-head.is-empty-head {
     margin-bottom: 0;
     padding-bottom: 0;
     min-height: 0;
+    display: none;
 }
 
 .mm-card-left {
@@ -5138,108 +5112,7 @@ body.eye-protection-mode .mm-page-tab.is-active {
     display: none;
 }
 
-/* 卡片右上角悬浮胶囊工具栏：骑在卡片上边框之上，不遮挡徽标；选中即现，悬停稍作延迟避免扫过时闪烁 */
-.mm-card-actions {
-    position: absolute;
-    top: -19px;
-    right: 8px;
-    display: inline-flex;
-    align-items: center;
-    gap: 1px;
-    background: rgba(255, 255, 255, 0.96);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    border: 1px solid #e2e8f0;
-    border-radius: 7px;
-    padding: 1.5px 2.5px;
-    box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.1), 0 1px 3px rgba(15, 23, 42, 0.05);
-    opacity: 0;
-    pointer-events: none;
-    transform: translateY(3px);
-    transition: opacity 0.14s ease, transform 0.14s ease;
-    z-index: 30;
-}
-
-.mm-card:hover .mm-card-actions {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateY(0);
-    transition-delay: 0.28s;
-}
-
-.mm-card.selected .mm-card-actions,
-.mm-card:focus-within .mm-card-actions,
-.mm-card-actions:hover {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateY(0);
-    transition-delay: 0s;
-}
-
-.mm-card.is-editing .mm-card-actions,
-#mindmap-viewport.is-merging-mode .mm-card-actions,
-#mindmap-viewport.is-reparenting-mode .mm-card-actions,
-.mm-card.dragging .mm-card-actions {
-    opacity: 0 !important;
-    pointer-events: none !important;
-}
-
-.mm-act-divider {
-    width: 1px;
-    height: 12px;
-    margin: 0 2px;
-    background: #e2e8f0;
-}
-
-.mm-act-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    border-radius: 5px;
-    color: #64748b;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    font-size: 12px;
-    transition: all 0.14s ease;
-}
-
-.mm-act-btn:hover {
-    background: #f1f5f9;
-    color: #0f172a;
-}
-
-.mm-act-btn:disabled {
-    opacity: 0.32;
-    cursor: default;
-    pointer-events: none;
-}
-
-.mm-act-btn.mm-act-move-up:hover,
-.mm-act-btn.mm-act-move-down:hover,
-.mm-act-btn.mm-act-fork:hover {
-    background: #eff6ff;
-    color: #2563eb;
-}
-
-.mm-act-btn.mm-act-reparent:hover {
-    background: #f3e8ff;
-    color: #7c3aed;
-}
-
-.mm-act-btn.mm-act-merge:hover {
-    background: #eef2ff;
-    color: #4f46e5;
-}
-
-.mm-act-btn.mm-act-delete:hover {
-    background: #fef2f2;
-    color: #ef4444;
-}
-
-/* 页面 Badge (与阅读器右上角 HUD 视觉统一) */
+/* 页面 Badge (与阅读器右上角 HUD 视觉统一，干净无悬停关闭叉号干扰) */
 .mm-page-badge {
     display: inline-flex;
     align-items: center;
@@ -5247,12 +5120,12 @@ body.eye-protection-mode .mm-page-tab.is-active {
     font-size: 10px;
     font-weight: 600;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    color: #475569;
+    color: #64748b;
     background: transparent;
     border: none;
     padding: 0;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: color 0.14s ease;
     flex-shrink: 0;
     user-select: none;
 }
@@ -5266,11 +5139,11 @@ body.eye-protection-mode .mm-page-tab.is-active {
     align-items: center;
     background: #f8fafc;
     border: 1px solid #e2e8f0;
-    border-radius: 9999px;
-    padding: 0.5px 3px 0.5px 5.5px;
+    border-radius: 4px;
+    padding: 0 5px;
     gap: 2px;
-    line-height: 14px;
-    transition: all 0.15s ease;
+    line-height: 15px;
+    transition: background-color 0.14s ease, border-color 0.14s ease;
 }
 
 .mm-page-badge-group:hover {
@@ -5281,7 +5154,6 @@ body.eye-protection-mode .mm-page-tab.is-active {
 .mm-page-badge-group.is-active-page {
     background: #eff6ff;
     border-color: #93c5fd;
-    box-shadow: 0 0 0 1.5px rgba(59, 130, 246, 0.15);
 }
 
 .mm-page-badge-group.is-active-page .mm-page-badge {
@@ -5293,22 +5165,16 @@ body.eye-protection-mode .mm-page-tab.is-active {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 13px;
-    height: 13px;
+    width: 12px;
+    height: 12px;
     border-radius: 9999px;
     font-size: 9px;
     color: #94a3b8;
     background: transparent;
     border: none;
     cursor: pointer;
-    transition: all 0.15s ease;
     padding: 0;
-    opacity: 0;
-}
-
-.mm-card:hover .mm-page-clear-btn,
-.mm-card.selected .mm-page-clear-btn {
-    opacity: 1;
+    transition: background-color 0.12s ease, color 0.12s ease;
 }
 
 .mm-page-badge-group .mm-page-clear-btn:hover {
@@ -5461,7 +5327,7 @@ body.eye-protection-mode .mm-page-tab.is-active {
     cursor: help;
 }
 
-/* 折叠/展开胶囊按钮 */
+/* 折叠/展开胶囊按钮（仅在节点确有子分支时显现，安静内敛） */
 .mm-branch-toggle {
     position: absolute;
     bottom: -11px;
@@ -5470,7 +5336,7 @@ body.eye-protection-mode .mm-page-tab.is-active {
     background: #ffffff;
     border: 1px solid #cbd5e1;
     border-radius: 9999px;
-    padding: 1px 6.5px;
+    padding: 1px 6px;
     font-size: 10px;
     font-weight: 600;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -5478,11 +5344,11 @@ body.eye-protection-mode .mm-page-tab.is-active {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 2.5px;
+    gap: 2px;
     cursor: pointer;
     z-index: 25;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
-    transition: all 0.15s ease;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+    transition: opacity 0.14s ease, background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.14s ease;
     user-select: none;
     line-height: 1.2;
     opacity: 0;
@@ -5500,19 +5366,15 @@ body.eye-protection-mode .mm-page-tab.is-active {
 .mm-branch-toggle::before {
     content: '';
     position: absolute;
-    top: -6px;
-    bottom: -6px;
-    left: -8px;
-    right: -8px;
+    inset: -5px -7px;
     cursor: pointer;
 }
 
 .mm-branch-toggle:hover {
     background: #eff6ff;
-    border-color: #3b82f6;
+    border-color: #60a5fa;
     color: #2563eb;
-    transform: translateX(-50%) scale(1.08);
-    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.18);
+    transform: translateX(-50%) scale(1.06);
 }
 
 /* 侧向展开分支折叠胶囊 (位于卡片右边缘中心) */
@@ -5527,149 +5389,7 @@ body.eye-protection-mode .mm-page-tab.is-active {
 
 .mm-spine-wrapper.has-toggle .mm-branch-toggle:hover,
 .mm-lateral-branch > .mm-card-wrapper.has-toggle .mm-branch-toggle:hover {
-    transform: translateY(-50%) scale(1.08);
-}
-
-/* 当卡片已有右侧折叠胶囊 (< / > N) 时，隐藏右侧 + 微按钮，避免右侧双圆按钮上下堆叠越界 */
-.mm-card-wrapper.has-toggle > .mm-quick-add-sibling {
-    display: none !important;
-}
-
-/* 悬浮快捷微按钮：下方顺延 (+)、下方并行分叉 (⑂)、下方分支合流 (⑃)、右侧侧支 (+) */
-.mm-quick-add-child,
-.mm-quick-add-sibling,
-.mm-quick-fork-down,
-.mm-quick-converge-down {
-    position: absolute;
-    width: 20px;
-    height: 20px;
-    border-radius: 9999px;
-    background: #ffffff;
-    border: 1px solid #cbd5e1;
-    color: #475569;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 11px;
-    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
-    cursor: pointer;
-    z-index: 18;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.16s cubic-bezier(0.16, 1, 0.3, 1) 0.1s,
-                transform 0.15s cubic-bezier(0.16, 1, 0.3, 1),
-                background-color 0.15s,
-                border-color 0.15s,
-                box-shadow 0.15s;
-}
-
-.mm-quick-add-child::before,
-.mm-quick-fork-down::before,
-.mm-quick-converge-down::before {
-    content: '';
-    position: absolute;
-    top: -4px;
-    bottom: -6px;
-    left: -6px;
-    right: -6px;
-}
-
-.mm-quick-add-sibling::before {
-    content: '';
-    position: absolute;
-    top: -8px;
-    bottom: -8px;
-    left: 0;
-    right: -8px;
-}
-
-/* 底部微按钮排布：单按钮居中，带分叉/合流按钮时优雅并排 */
-.mm-quick-add-child {
-    bottom: -11px;
-    left: 50%;
-    transform: translateX(-50%);
-}
-
-.mm-card-wrapper.has-fork-action .mm-quick-add-child {
-    left: calc(50% - 12px);
-}
-
-.mm-card-wrapper.has-converge-action:not(.has-fork-action) .mm-quick-add-child {
-    left: calc(50% - 12px);
-}
-
-.mm-card-wrapper.has-fork-action.has-converge-action .mm-quick-add-child {
-    left: calc(50% - 23px);
-}
-
-.mm-quick-fork-down {
-    bottom: -11px;
-    left: calc(50% + 12px);
-    transform: translateX(-50%);
-}
-
-.mm-card-wrapper.has-fork-action.has-converge-action .mm-quick-fork-down {
-    left: 50%;
-}
-
-.mm-quick-converge-down {
-    bottom: -11px;
-    left: calc(50% + 12px);
-    transform: translateX(-50%);
-    color: #4f46e5;
-    border-color: #c7d2fe;
-}
-
-.mm-card-wrapper.has-fork-action.has-converge-action .mm-quick-converge-down {
-    left: calc(50% + 23px);
-}
-
-.mm-quick-add-sibling {
-    right: -10px;
-    top: 50%;
-    transform: translateY(-50%);
-}
-
-.mm-card-wrapper:hover .mm-quick-add-child,
-.mm-card.selected ~ .mm-quick-add-child,
-.mm-card-wrapper:hover .mm-quick-add-sibling,
-.mm-card.selected ~ .mm-quick-add-sibling,
-.mm-card-wrapper:hover .mm-quick-fork-down,
-.mm-card.selected ~ .mm-quick-fork-down,
-.mm-card-wrapper:hover .mm-quick-converge-down,
-.mm-card.selected ~ .mm-quick-converge-down,
-.mm-quick-add-child:hover,
-.mm-quick-add-sibling:hover,
-.mm-quick-fork-down:hover,
-.mm-quick-converge-down:hover {
-    opacity: 1;
-    pointer-events: auto;
-    transition-delay: 0s;
-}
-
-.mm-quick-add-child:hover,
-.mm-quick-fork-down:hover {
-    background: #2563eb !important;
-    color: #ffffff !important;
-    border-color: #2563eb !important;
-    transform: translateX(-50%) scale(1.14) !important;
-    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.26) !important;
-}
-
-.mm-quick-converge-down:hover {
-    background: #4f46e5 !important;
-    color: #ffffff !important;
-    border-color: #4f46e5 !important;
-    transform: translateX(-50%) scale(1.14) !important;
-    box-shadow: 0 4px 10px rgba(79, 70, 229, 0.26) !important;
-}
-
-.mm-quick-add-sibling:hover {
-    background: #2563eb !important;
-    color: #ffffff !important;
-    border-color: #2563eb !important;
-    transform: translateY(-50%) scale(1.14) !important;
-    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.26) !important;
+    transform: translateY(-50%) scale(1.06);
 }
 
 /* 子节点行与主干推演容器 */
@@ -5688,7 +5408,7 @@ body.eye-protection-mode .mm-page-tab.is-active {
     padding-left: 0;
 }
 
-/* 横向侧向展开分支容器：间距适度加大，确保向下添加按钮悬浮时完全不遮挡下方卡片 */
+/* 横向侧向展开分支容器 */
 .mm-children-row.mm-lateral-column {
     flex-direction: column;
     align-items: flex-start;
@@ -5700,101 +5420,441 @@ body.eye-protection-mode .mm-page-tab.is-active {
 .mm-children-row.mm-convergence-layout { display: block; }
 .mm-convergence-layout > .mm-tree-branch { position: absolute; }
 
-/* 弹窗升级：对齐浏览器弹窗体系（宽裕呼吸感、精致毛玻璃与阴影、护眼联动） */
-/* 弹窗升级：极简清爽、紧凑轻巧、对齐阅读器视窗风格 */
-#mm-popover-dialog {
-    position: fixed;
-    z-index: 60;
-    width: 275px;
-    max-width: calc(100vw - 20px);
-    max-height: min(480px, calc(100vh - 30px));
+/* 兼容历史结构与测试套件校验 */
+.mm-stem-down {
+    display: none;
+}
+
+/* =========================================================================
+   底部统一悬浮操作台 (#mm-command-dock)
+   收敛全部增建、编辑、角色、页码、连线合流、顺序挂载与导图页管理，零套娃弹窗
+   ========================================================================= */
+.mm-command-dock {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 35;
+    width: max-content;
+    max-width: calc(100% - 14px);
     display: flex;
     flex-direction: column;
-    border: 1px solid rgba(226, 232, 240, 0.95);
-    border-radius: 10px;
-    background: #ffffff;
+    align-items: stretch;
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid #e2e8f0;
+    border-radius: 11px;
+    box-shadow: 0 8px 24px -6px rgba(15, 23, 42, 0.10), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
     color: #334155;
-    font-size: 12px;
-    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.06);
-    overflow: hidden;
-    animation: mmPopScaleIn 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+    user-select: none;
+    transition: opacity 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
-@keyframes mmPopScaleIn {
-    0% { opacity: 0; transform: scale(0.97) translateY(-3px); }
-    100% { opacity: 1; transform: scale(1) translateY(0); }
+.mm-command-dock.is-idle {
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 4px 14px -4px rgba(15, 23, 42, 0.07), 0 1px 3px rgba(15, 23, 42, 0.03);
 }
 
-.mm-pop-header {
+.mm-command-dock.is-editing-dim {
+    opacity: 0.45;
+    pointer-events: none;
+}
+
+.mm-dock-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 4px 5px;
+    min-height: 34px;
+    box-sizing: border-box;
+}
+
+.mm-command-dock.is-idle .mm-dock-bar {
+    min-height: 30px;
+    padding: 3px 5px;
+    gap: 3px;
+}
+
+.mm-dock-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    color: #475569;
+    font-size: 15px;
+    font-family: inherit;
+    cursor: pointer;
+    flex-shrink: 0;
+    white-space: nowrap;
+    transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.mm-dock-btn:hover:not(:disabled) {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+
+.mm-dock-btn:active:not(:disabled) {
+    transform: scale(0.95);
+}
+
+.mm-dock-btn:disabled {
+    opacity: 0.34;
+    cursor: default;
+    pointer-events: none;
+}
+
+.mm-dock-btn.is-active {
+    background: #eff6ff;
+    color: #2563eb;
+    border-color: #bfdbfe;
+}
+
+.mm-dock-btn.has-value:not(.is-active) {
+    color: #2563eb;
+}
+
+.mm-dock-btn.has-value::after {
+    content: '';
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 4px;
+    height: 4px;
+    border-radius: 9999px;
+    background: #2563eb;
+    pointer-events: none;
+}
+
+.mm-dock-btn.mm-dock-danger:hover:not(:disabled) {
+    background: #fef2f2;
+    color: #dc2626;
+}
+
+.mm-dock-btn.mm-dock-pill {
+    width: auto;
+    height: 24px;
+    padding: 0 7px;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 6px;
+}
+
+.mm-dock-btn.mm-dock-pill > i {
+    font-size: 13px;
+}
+
+.mm-dock-btn.mm-dock-primary {
+    background: #2563eb;
+    color: #ffffff;
+    border-color: #2563eb;
+    font-weight: 600;
+}
+
+.mm-dock-btn.mm-dock-primary:hover:not(:disabled) {
+    background: #1d4ed8;
+    border-color: #1d4ed8;
+    color: #ffffff;
+}
+
+.mm-dock-sep {
+    width: 1px;
+    height: 15px;
+    background: #e2e8f0;
+    margin: 0 2px;
+    flex-shrink: 0;
+}
+
+.mm-dock-sel-badge {
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 7px;
+    border-radius: 6px;
+    background: #eff6ff;
+    border: 1px solid #dbeafe;
+    color: #1d4ed8;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* 窄面板（<=340px）自动收紧操作坞按钮尺寸，确保 280px 下单行完整显示不裁切 */
+@container (max-width: 340px) {
+    .mm-command-dock {
+        max-width: calc(100% - 10px);
+        bottom: 8px;
+    }
+    .mm-dock-bar {
+        gap: 1px;
+        padding: 3px 4px;
+        min-height: 30px;
+    }
+    .mm-dock-btn:not(.mm-dock-pill) {
+        width: 23px;
+        height: 24px;
+        font-size: 13.5px;
+        border-radius: 6px;
+    }
+    .mm-dock-btn.has-value::after {
+        top: 3px;
+        right: 3px;
+        width: 3.5px;
+        height: 3.5px;
+    }
+    .mm-dock-sep {
+        margin: 0 1px;
+        height: 13px;
+    }
+    .mm-dock-btn.mm-dock-pill {
+        padding: 0 5.5px;
+        font-size: 10.5px;
+    }
+    .mm-dock-sel-badge {
+        padding: 0 5px;
+        font-size: 10.5px;
+    }
+}
+
+/* 操作坞上层原地展开抽屉 (#mm-dock-tray) —— 单层直达，不跳二级浮窗 */
+.mm-dock-tray {
+    width: min(304px, calc(100cqw - 14px));
+    max-width: 100%;
+    padding: 9px 11px;
+    border-bottom: 1px solid #f1f5f9;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    font-size: 11.5px;
+    animation: mmTraySlideIn 0.13s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.mm-dock-tray[hidden] {
+    display: none !important;
+}
+
+@keyframes mmTraySlideIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.mm-tray-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
-    padding: 8px 12px;
-    border-bottom: 1px solid #f1f5f9;
-    background: #f8fafc;
-    user-select: none;
-    flex-shrink: 0;
-}
-.mm-pop-title-wrap {
-    display: flex;
-    align-items: center;
     gap: 6px;
     min-width: 0;
 }
-.mm-pop-title {
-    font-size: 12px;
+
+.mm-tray-title {
+    font-size: 11.5px;
     font-weight: 600;
     color: #1e293b;
-    margin: 0;
-    line-height: 1.2;
-}
-.mm-pop-node-chip {
-    font-size: 10px;
-    color: #64748b;
-    background: #e2e8f0;
-    padding: 1px 6px;
-    border-radius: 4px;
-    max-width: 120px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.mm-pop-subtitle {
-    font-size: 10.5px;
-    color: #94a3b8;
-    margin: 1px 0 0;
-    line-height: 1.2;
+
+.mm-tray-title > i {
+    color: #2563eb;
+    font-size: 13px;
+    flex-shrink: 0;
 }
-.mm-pop-close-btn {
+
+.mm-tray-head-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.mm-tray-link-danger {
+    border: none;
+    background: transparent;
+    color: #ef4444;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 5px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+}
+
+.mm-tray-link-danger:hover {
+    background: #fef2f2;
+}
+
+.mm-tray-close {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 20px;
     height: 20px;
-    border-radius: 4px;
     border: none;
+    border-radius: 5px;
     background: transparent;
     color: #94a3b8;
-    cursor: pointer;
     font-size: 12px;
-    transition: all 0.12s ease;
+    cursor: pointer;
     flex-shrink: 0;
-}
-.mm-pop-close-btn:hover {
-    background: #fee2e2;
-    color: #ef4444;
+    transition: background-color 0.12s ease, color 0.12s ease;
 }
 
+.mm-tray-close:hover {
+    background: #f1f5f9;
+    color: #334155;
+}
+
+.mm-tray-hint {
+    font-size: 10.5px;
+    color: #64748b;
+    line-height: 1.35;
+    margin: -2px 0 0;
+    overflow-wrap: anywhere;
+}
+
+.mm-tray-hint.is-live {
+    color: #2563eb;
+    font-weight: 500;
+}
+
+/* 数学角色网格 */
+.mm-tray-tag-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+}
+
+/* 页码与导图页管理行 */
+.mm-tray-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.mm-tray-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 26px;
+    padding: 0 8px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: #f8fafc;
+    color: #334155;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.mm-tray-btn:hover:not(:disabled) {
+    background: #eff6ff;
+    border-color: #bfdbfe;
+    color: #2563eb;
+}
+
+.mm-tray-btn.is-active {
+    background: #eff6ff;
+    border-color: #93c5fd;
+    color: #1d4ed8;
+    font-weight: 600;
+}
+
+.mm-tray-btn.is-primary {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #ffffff;
+    font-weight: 500;
+}
+
+.mm-tray-btn.is-primary:hover:not(:disabled) {
+    background: #1d4ed8;
+    border-color: #1d4ed8;
+    color: #ffffff;
+}
+
+.mm-tray-btn.is-danger:hover:not(:disabled) {
+    background: #fef2f2;
+    border-color: #fecaca;
+    color: #dc2626;
+}
+
+.mm-tray-btn:disabled {
+    opacity: 0.36;
+    cursor: default;
+    pointer-events: none;
+}
+
+.mm-tray-input {
+    flex: 1 1 68px;
+    min-width: 0;
+    height: 26px;
+    padding: 0 8px;
+    font-size: 11px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: #f8fafc;
+    color: #1e293b;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.mm-tray-input:focus {
+    background: #ffffff;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.12);
+}
+
+.mm-tray-divider {
+    height: 1px;
+    background: #f1f5f9;
+    margin: 1px 0;
+}
+
+/* 顺序与层级方向按钮组 */
+.mm-tray-move-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+}
+
+.mm-tray-move-grid .mm-tray-btn {
+    padding: 0 4px;
+    font-size: 10.5px;
+}
+
+/* 连接/合流/融合分段栏与候选列表 */
 .mm-pop-tabs {
     display: flex;
     gap: 2px;
     padding: 2px;
-    margin: 6px 12px 6px;
+    margin: 0;
     background: #f1f5f9;
-    border-radius: 6px;
+    border-radius: 7px;
     flex-shrink: 0;
 }
+
 .mm-pop-tab {
     flex: 1;
     display: inline-flex;
@@ -5802,7 +5862,7 @@ body.eye-protection-mode .mm-page-tab.is-active {
     justify-content: center;
     padding: 3px 6px;
     border: none;
-    border-radius: 4px;
+    border-radius: 5px;
     background: transparent;
     color: #64748b;
     font-size: 11px;
@@ -5810,33 +5870,33 @@ body.eye-protection-mode .mm-page-tab.is-active {
     cursor: pointer;
     transition: all 0.12s ease;
 }
+
 .mm-pop-tab:hover {
     color: #1e293b;
 }
+
 .mm-pop-tab.is-active,
 .mm-pop-tab[aria-selected="true"] {
     background: #ffffff;
     color: #2563eb;
     font-weight: 600;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
-}
-
-.mm-pop-desc {
-    display: none;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.07);
 }
 
 .mm-pop-search-wrap {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin: 0 12px 6px;
+    gap: 5px;
+    margin: 0;
     flex-shrink: 0;
 }
+
 .mm-pop-search-field {
     position: relative;
     flex: 1;
     min-width: 0;
 }
+
 .mm-pop-search-icon {
     position: absolute;
     left: 8px;
@@ -5846,10 +5906,11 @@ body.eye-protection-mode .mm-page-tab.is-active {
     font-size: 11.5px;
     pointer-events: none;
 }
+
 .mm-pop-search-input {
     width: 100%;
     height: 26px;
-    padding: 0 6px 0 24px;
+    padding: 0 7px 0 24px;
     font-size: 11px;
     border: 1px solid #e2e8f0;
     border-radius: 6px;
@@ -5859,6 +5920,7 @@ body.eye-protection-mode .mm-page-tab.is-active {
     box-sizing: border-box;
     transition: all 0.12s ease;
 }
+
 .mm-pop-search-input:focus {
     background: #ffffff;
     border-color: #3b82f6;
@@ -5867,29 +5929,39 @@ body.eye-protection-mode .mm-page-tab.is-active {
 
 .mm-pop-canvas-btn {
     height: 26px;
-    padding: 0 8px;
+    padding: 0 7px;
     font-size: 10.5px;
+    font-weight: 500;
     border-radius: 6px;
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
-    color: #2563eb;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    color: #475569;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 3.5px;
     white-space: nowrap;
     transition: all 0.12s ease;
     flex-shrink: 0;
 }
+
 .mm-pop-canvas-btn:hover {
-    background: #dbeafe;
-    border-color: #93c5fd;
+    background: #eff6ff;
+    border-color: #bfdbfe;
+    color: #2563eb;
+}
+
+.mm-pop-canvas-btn.is-active {
+    background: #eff6ff;
+    border-color: #60a5fa;
+    color: #1d4ed8;
+    font-weight: 600;
 }
 
 .mm-connect-list {
-    margin: 0 12px;
-    min-height: 40px;
-    max-height: 160px;
+    margin: 0;
+    min-height: 36px;
+    max-height: 136px;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
@@ -5897,6 +5969,7 @@ body.eye-protection-mode .mm-page-tab.is-active {
     padding-right: 2px;
     flex: 1 1 auto;
 }
+
 .mm-connect-row {
     display: flex;
     align-items: center;
@@ -5910,23 +5983,28 @@ body.eye-protection-mode .mm-page-tab.is-active {
     font-size: 11px;
     color: #334155;
     text-align: left;
-    transition: all 0.1s ease;
+    transition: background-color 0.1s ease;
     width: 100%;
     box-sizing: border-box;
 }
+
 .mm-connect-row:hover {
     background: #f1f5f9;
 }
+
 .mm-connect-row input[type="checkbox"] {
     accent-color: #2563eb;
     cursor: pointer;
 }
-.mm-connect-row span {
+
+.mm-connect-row > span:first-of-type {
     flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
 .mm-connect-row small {
     font-size: 9.5px;
     color: #94a3b8;
@@ -5935,43 +6013,50 @@ body.eye-protection-mode .mm-page-tab.is-active {
     border-radius: 3px;
     flex-shrink: 0;
 }
+
 .mm-pop-link-action {
     font-size: 10px;
     font-weight: 500;
     color: #2563eb;
     padding: 1px 5px;
     background: #eff6ff;
-    border-radius: 3px;
+    border: none;
+    border-radius: 4px;
     flex-shrink: 0;
+    cursor: pointer;
     transition: all 0.1s ease;
 }
-.mm-connect-row:hover .mm-pop-link-action {
+
+.mm-connect-row:hover .mm-pop-link-action,
+.mm-pop-link-action:hover {
     background: #2563eb;
     color: #ffffff;
 }
+
 .mm-pop-linked-tag {
     font-size: 10px;
     font-weight: 500;
-    color: #059669;
-    background: #ecfdf5;
-    border: 1px solid #a7f3d0;
+    color: #2563eb;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
     padding: 1px 5px;
-    border-radius: 3px;
+    border-radius: 4px;
     flex-shrink: 0;
     display: inline-flex;
     align-items: center;
     gap: 2px;
     transition: all 0.1s ease;
 }
+
 .mm-connect-row:hover .mm-pop-linked-tag {
-    background: #fee2e2;
-    border-color: #fca5a5;
+    background: #fef2f2;
+    border-color: #fecaca;
     color: #dc2626;
 }
 
 .mm-connect-primary {
-    margin: 6px 12px 8px;
-    height: 28px;
+    margin: 0;
+    height: 27px;
     padding: 0 10px;
     display: flex;
     align-items: center;
@@ -5984,38 +6069,40 @@ body.eye-protection-mode .mm-page-tab.is-active {
     border: none;
     border-radius: 6px;
     cursor: pointer;
-    box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2);
-    transition: all 0.12s ease;
+    transition: background-color 0.12s ease;
     flex-shrink: 0;
 }
+
 .mm-connect-primary:hover {
     background: #1d4ed8;
 }
 
 .mm-connect-secondary {
-    margin: 0 12px 6px;
-    height: 24px;
+    margin: 0;
+    height: 25px;
     padding: 0 8px;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 4px;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 5px;
-    color: #475569;
-    font-size: 10.5px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 6px;
+    color: #1d4ed8;
+    font-size: 11px;
+    font-weight: 500;
     cursor: pointer;
     transition: all 0.12s ease;
     flex-shrink: 0;
 }
+
 .mm-connect-secondary:hover {
-    background: #f1f5f9;
-    color: #2563eb;
+    background: #dbeafe;
+    border-color: #93c5fd;
 }
 
 .mm-pop-links-bar {
-    margin: 4px 12px 6px;
+    margin: 0;
     padding-top: 5px;
     border-top: 1px solid #f1f5f9;
     font-size: 10px;
@@ -6025,21 +6112,24 @@ body.eye-protection-mode .mm-page-tab.is-active {
     align-items: center;
     flex-shrink: 0;
 }
+
 .mm-pop-links-label {
     color: #94a3b8;
     font-size: 10px;
     margin-right: 2px;
 }
+
 .mm-pop-chip {
     display: inline-flex;
     align-items: center;
     gap: 3px;
     background: #f1f5f9;
-    border-radius: 3px;
+    border-radius: 4px;
     padding: 1px 5px;
     font-size: 10px;
     color: #475569;
 }
+
 .mm-pop-chip button {
     border: none;
     background: transparent;
@@ -6049,82 +6139,23 @@ body.eye-protection-mode .mm-page-tab.is-active {
     line-height: 1;
     font-size: 11px;
 }
+
 .mm-pop-chip button:hover {
     color: #ef4444;
 }
+
 .mm-pop-empty-text {
-    padding: 12px 0;
+    padding: 10px 0;
     text-align: center;
     color: #94a3b8;
     font-size: 11px;
     margin: 0;
 }
 
-/* 弹窗护眼模式适配 */
-body.eye-protection-mode #mm-popover-dialog {
-    background: #FAF7F2;
-    border-color: #E6E2D6;
-    color: #57534E;
-    box-shadow: 0 10px 25px -5px rgba(60, 50, 30, 0.12), 0 8px 10px -6px rgba(60, 50, 30, 0.06);
-}
-body.eye-protection-mode .mm-pop-header {
-    background: #F4EFE6;
-    border-color: #E6E2D6;
-}
-body.eye-protection-mode .mm-pop-title {
-    color: #292524;
-}
-body.eye-protection-mode .mm-pop-node-chip {
-    background: #EAE6DB;
-    color: #57534E;
-}
-body.eye-protection-mode .mm-pop-tabs {
-    background: #EAE6DB;
-}
-body.eye-protection-mode .mm-pop-tab.is-active,
-body.eye-protection-mode .mm-pop-tab[aria-selected="true"] {
-    background: #FAF7F2;
-    color: #2563eb;
-}
-body.eye-protection-mode .mm-pop-canvas-btn {
-    background: #EAE6DB;
-    border-color: #B2AFA6;
-    color: #2563eb;
-}
-body.eye-protection-mode .mm-pop-search-input {
-    background: #F4EFE6;
-    border-color: #D9DDCF;
-    color: #1C1917;
-}
-body.eye-protection-mode .mm-pop-search-input:focus {
-    background: #FAF7F2;
-    border-color: #3b82f6;
-}
-body.eye-protection-mode .mm-connect-row:hover {
-    background: #F0EBE1;
-    border-color: #E6E2D6;
-    color: #1C1917;
-}
-body.eye-protection-mode .mm-connect-row small {
-    background: #EAE6DB;
-    color: #78716C;
-}
-body.eye-protection-mode .mm-connect-secondary {
-    background: #F4EFE6;
-    border-color: #D9DDCF;
-    color: #57534E;
-}
-body.eye-protection-mode .mm-pop-links-bar {
-    border-color: #E6E2D6;
-}
-body.eye-protection-mode .mm-pop-chip {
-    background: #EAE6DB;
-    color: #57534E;
-}
-
-/* 兼容历史结构与测试套件校验 */
-.mm-stem-down {
-    display: none;
+#mindmap-panel button:focus-visible,
+.mm-card:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
 }
 
 /* SVG 贝塞尔曲线连接体系 */
@@ -6158,10 +6189,10 @@ body.eye-protection-mode .mm-pop-chip {
     pointer-events: none;
 }
 
-/* 跨分支 / 跨主链自由汇合连线（虚线引用） */
+/* 跨分支 / 跨主链自由汇合连线（虚线引用，统一使用阅读器蓝灰调） */
 .mm-connector-merge {
     fill: none;
-    stroke: #818cf8;
+    stroke: #60a5fa;
     stroke-width: 1.5px;
     stroke-dasharray: 5 4;
     stroke-linecap: round;
@@ -6170,7 +6201,7 @@ body.eye-protection-mode .mm-pop-chip {
 }
 
 .mm-connector-merge.highlighted {
-    stroke: #4f46e5;
+    stroke: #2563eb;
     stroke-width: 1.8px;
     stroke-dasharray: none;
 }
@@ -6178,8 +6209,8 @@ body.eye-protection-mode .mm-pop-chip {
 /* 自由合并模式下的实时跟随预览线 */
 .mm-connector-merge-preview {
     fill: none;
-    stroke: #4f46e5;
-    stroke-width: 2px;
+    stroke: #2563eb;
+    stroke-width: 1.8px;
     stroke-dasharray: 4 4;
     stroke-linecap: round;
     pointer-events: none;
@@ -6188,278 +6219,16 @@ body.eye-protection-mode .mm-pop-chip {
 /* 交互式挂载模式下的实时跟随预览线 */
 .mm-connector-reparent-preview {
     fill: none;
-    stroke: #d97706;
+    stroke: #2563eb;
     stroke-width: 1.8px;
     stroke-dasharray: 5 4;
     stroke-linecap: round;
     pointer-events: none;
 }
 
-/* 交互式合并模式与挂载切换模式顶部悬浮提示条 */
-#mm-merge-banner,
-#mm-reparent-banner {
-    position: absolute;
-    top: 10px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 40;
-    background: rgba(255, 255, 255, 0.96);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
-    padding: 6px 10px;
-    display: flex;
-    flex-wrap: wrap;
-    width: max-content;
-    max-width: calc(100% - 24px);
-    align-items: center;
-    gap: 5px;
-    font-size: 11.5px;
-    color: #475569;
-    white-space: normal;
-    animation: mmMergeFadeIn 0.15s ease-out;
-}
-
-.mm-text-tool {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 3px;
-    height: 22px;
-    padding: 0 7px;
-    border-radius: 5px;
-    border: 1px solid #e2e8f0;
-    background: #f8fafc;
-    color: #334155;
-    font-size: 11px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.12s ease;
-    white-space: nowrap;
-}
-
-.mm-text-tool:hover:not(:disabled) {
-    background: #eff6ff;
-    border-color: #bfdbfe;
-    color: #2563eb;
-}
-
-.mm-text-tool:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-}
-
-.mm-pop-quick-bar {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin: 4px 12px 6px;
-    flex-wrap: wrap;
-}
-
-.mm-pop-quick-btn {
-    flex: 1 1 auto;
-    height: 24px;
-    padding: 0 6px;
-    border-radius: 5px;
-    border: 1px solid #e2e8f0;
-    background: #f8fafc;
-    color: #334155;
-    font-size: 10.5px;
-    font-weight: 500;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 3px;
-    cursor: pointer;
-    transition: all 0.12s ease;
-    white-space: nowrap;
-}
-
-.mm-pop-quick-btn:hover:not(:disabled) {
-    background: #eff6ff;
-    border-color: #bfdbfe;
-    color: #2563eb;
-}
-
-.mm-pop-quick-btn:disabled {
-    opacity: 0.38;
-    cursor: not-allowed;
-}
-
-@keyframes mmMergeFadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-.mm-merge-instruction {
-    flex: 1 1 120px;
-    min-width: 0;
-    overflow-wrap: anywhere;
-}
-
-#mm-merge-target-hint {
-    flex-basis: 100%;
-    color: #64748b;
-    font-size: 10px;
-    overflow-wrap: anywhere;
-}
-
-#mindmap-panel button:focus-visible,
-#mm-popover-dialog button:focus-visible,
-#mm-context-menu .mm-menu-item:focus-visible,
-.mm-card:focus-visible {
-    outline: 2px solid #2563eb;
-    outline-offset: 3px;
-}
-
-/* 右键自定义上下文菜单 */
-#mm-context-menu {
-    position: fixed;
-    z-index: 100;
-    background: rgba(255, 255, 255, 0.98);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    box-shadow: 0 12px 28px -6px rgba(15, 23, 42, 0.12), 0 4px 10px -3px rgba(15, 23, 42, 0.05);
-    padding: 5px;
-    min-width: 196px;
-    max-height: calc(100vh - 20px);
-    overflow-y: auto;
-    font-size: 12px;
-    user-select: none;
-    animation: mmFadeScaleIn 0.14s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.mm-ctx-icon-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 2px;
-    padding: 2px 3px 4px;
-    border-bottom: 1px solid #f1f5f9;
-    margin-bottom: 3px;
-}
-
-.mm-ctx-icon-btn {
-    flex: 1;
-    height: 25px;
-    border: none;
-    border-radius: 5px;
-    background: transparent;
-    color: #475569;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 13px;
-    cursor: pointer;
-    transition: all 0.12s ease;
-}
-
-.mm-ctx-icon-btn:hover:not(:disabled) {
-    background: #eff6ff;
-    color: #2563eb;
-}
-
-.mm-ctx-icon-btn:disabled {
-    opacity: 0.32;
-    cursor: not-allowed;
-}
-
-.mm-ctx-tag-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 3px;
-    padding: 2px 3px 4px;
-    border-bottom: 1px solid #f1f5f9;
-    margin-bottom: 3px;
-}
-
-.mm-ctx-tag-chip {
-    height: 21px;
-    padding: 0 4px;
-    border-radius: 4px;
-    border: 1px solid #e2e8f0;
-    background: #f8fafc;
-    color: #475569;
-    font-size: 10px;
-    font-weight: 500;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.12s ease;
-    white-space: nowrap;
-}
-
-.mm-ctx-tag-chip:hover {
-    background: #f1f5f9;
-    border-color: #cbd5e1;
-    color: #0f172a;
-}
-
-.mm-ctx-tag-chip.is-active {
-    background: #eff6ff;
-    border-color: #60a5fa;
-    color: #1d4ed8;
-    font-weight: 600;
-}
-
-@keyframes mmFadeScaleIn {
-    0% {
-        opacity: 0;
-        transform: scale(0.96);
-    }
-    100% {
-        opacity: 1;
-        transform: scale(1);
-    }
-}
-
-.mm-menu-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 6px 9px;
-    border-radius: 6px;
-    color: #334155;
-    cursor: pointer;
-    transition: background-color 0.12s, color 0.12s;
-    gap: 10px;
-}
-
-.mm-menu-item:hover {
-    background-color: #f1f5f9;
-    color: #0f172a;
-}
-
-.mm-menu-item.danger:hover {
-    background-color: #fef2f2;
-    color: #ef4444;
-}
-
-.mm-menu-item .menu-left {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-}
-
-.mm-menu-shortcut {
-    font-size: 10px;
-    color: #94a3b8;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-
-.mm-menu-divider {
-    height: 1px;
-    background-color: #f1f5f9;
-    margin: 4px 2px;
-}
-
-/* 护眼模式双向联动 */
+/* =========================================================================
+   护眼模式双向联动（暖纸质感，与主阅读器、AI 对话及草稿白板完全统一）
+   ========================================================================= */
 body.eye-protection-mode #mindmap-panel {
     --mm-flow-color: #b4a491;
     --mm-flow-active-color: #b45309;
@@ -6476,12 +6245,27 @@ body.eye-protection-mode #mindmap-panel .border-b {
     border-color: #E6E2D6 !important;
 }
 
+body.eye-protection-mode .mm-view-group,
+body.eye-protection-mode .mm-node-count {
+    background-color: #F4EFE6 !important;
+    border-color: #E6E2D6 !important;
+    color: #57534E !important;
+}
+
+body.eye-protection-mode .mm-view-divider {
+    background-color: #E6E2D6 !important;
+}
+
 body.eye-protection-mode #mindmap-panel .bg-white,
 body.eye-protection-mode .mm-zoom-pill,
 body.eye-protection-mode .mm-tool-btn:not(.mm-tool-close):hover,
 body.eye-protection-mode .mm-empty-guide kbd {
     background-color: #FAF7F2 !important;
     border-color: #E6E2D6 !important;
+}
+
+body.eye-protection-mode .mm-zoom-pill button:hover {
+    background-color: #ECE5D8 !important;
 }
 
 body.eye-protection-mode #mindmap-viewport {
@@ -6495,9 +6279,9 @@ body.eye-protection-mode .mm-card {
 }
 
 body.eye-protection-mode .mm-card.mm-root-card {
-    background: linear-gradient(180deg, #FAF7F2 0%, #EFE9DD 100%);
+    background: #FAF7F2;
     border-color: #DCD3BF;
-    border-top-color: #B45309;
+    border-left-color: #B45309;
 }
 
 body.eye-protection-mode .mm-card:hover {
@@ -6506,88 +6290,13 @@ body.eye-protection-mode .mm-card:hover {
 
 body.eye-protection-mode .mm-card.selected {
     border-color: #B45309 !important;
-    box-shadow: 0 0 0 2.5px rgba(180, 83, 9, 0.2) !important;
+    box-shadow: 0 0 0 2px rgba(180, 83, 9, 0.2) !important;
 }
 
 body.eye-protection-mode .mm-card.selected.is-multi-selected {
-    border-color: #7c3aed !important;
-    box-shadow: 0 0 0 2.5px rgba(124, 58, 237, 0.22) !important;
-    background-color: #fdfaf6;
-}
-
-body.eye-protection-mode .mm-card-actions {
-    background: rgba(250, 247, 242, 0.96);
-    border-color: #DCD3BF;
-}
-
-body.eye-protection-mode .mm-branch-toggle {
-    background-color: #FAF7F2;
-    border-color: #DCD3BF;
-    color: #8C8273;
-}
-
-body.eye-protection-mode .mm-quick-add-child,
-body.eye-protection-mode .mm-quick-add-sibling,
-body.eye-protection-mode .mm-quick-fork-down,
-body.eye-protection-mode .mm-quick-converge-down {
-    background: #FAF7F2;
-    border-color: #DCD3BF;
-    color: #8C8273;
-}
-
-body.eye-protection-mode .mm-quick-add-child:hover,
-body.eye-protection-mode .mm-quick-add-sibling:hover,
-body.eye-protection-mode .mm-quick-fork-down:hover,
-body.eye-protection-mode .mm-quick-converge-down:hover {
-    background: #B45309 !important;
     border-color: #B45309 !important;
-    color: #ffffff !important;
-    box-shadow: 0 4px 12px rgba(180, 83, 9, 0.32) !important;
-}
-
-body.eye-protection-mode #mm-context-menu,
-body.eye-protection-mode #mm-merge-banner,
-body.eye-protection-mode #mm-reparent-banner {
-    background: #FAF7F2;
-    border-color: #E6E2D6;
-}
-
-body.eye-protection-mode .mm-text-tool,
-body.eye-protection-mode .mm-pop-quick-btn,
-body.eye-protection-mode .mm-ctx-tag-chip {
-    background: #F4EFE6;
-    border-color: #DCD3BF;
-    color: #57534E;
-}
-
-body.eye-protection-mode .mm-text-tool:hover:not(:disabled),
-body.eye-protection-mode .mm-pop-quick-btn:hover:not(:disabled),
-body.eye-protection-mode .mm-ctx-tag-chip:hover,
-body.eye-protection-mode .mm-ctx-icon-btn:hover:not(:disabled) {
-    background: #ECE5D8;
-    border-color: #CBBFA8;
-    color: #B45309;
-}
-
-body.eye-protection-mode .mm-ctx-tag-chip.is-active {
-    background: #FEF3C7;
-    border-color: #D97706;
-    color: #92400E;
-}
-
-body.eye-protection-mode .mm-menu-item:hover {
-    background-color: #ECE5D8;
-    color: #38332B;
-}
-
-body.eye-protection-mode .mm-menu-divider,
-body.eye-protection-mode .mm-ctx-icon-bar,
-body.eye-protection-mode .mm-ctx-tag-grid {
-    background-color: transparent;
-    border-color: #E6E2D6;
-}
-body.eye-protection-mode .mm-menu-divider {
-    background-color: #E6E2D6;
+    box-shadow: 0 0 0 2.5px rgba(180, 83, 9, 0.24) !important;
+    background-color: #F6F1E6;
 }
 
 body.eye-protection-mode .mm-card.mm-spine-card {
@@ -6595,16 +6304,118 @@ body.eye-protection-mode .mm-card.mm-spine-card {
     background: #FAF7F2;
 }
 
-body.eye-protection-mode .mm-spine-index {
+body.eye-protection-mode .mm-spine-index,
+body.eye-protection-mode .mm-root-badge {
     background: #ECE5D8;
     border-color: #DCD3BF;
     color: #78350F;
 }
 
-body.eye-protection-mode .mm-root-badge {
-    background: #ECE5D8;
+body.eye-protection-mode .mm-branch-toggle {
+    background-color: #FAF7F2;
     border-color: #DCD3BF;
-    color: #78350F;
+    color: #78716C;
+}
+
+body.eye-protection-mode .mm-command-dock {
+    background: rgba(250, 247, 242, 0.96);
+    border-color: #E6E2D6;
+    box-shadow: 0 8px 24px -6px rgba(63, 58, 51, 0.14), 0 2px 6px -1px rgba(63, 58, 51, 0.05);
+    color: #3F3A33;
+}
+
+body.eye-protection-mode .mm-dock-tray {
+    border-bottom-color: #E6E2D6;
+}
+
+body.eye-protection-mode .mm-tray-title {
+    color: #292524;
+}
+
+body.eye-protection-mode .mm-dock-sep,
+body.eye-protection-mode .mm-tray-divider {
+    background: #E6E2D6;
+}
+
+body.eye-protection-mode .mm-dock-btn {
+    color: #57534E;
+}
+
+body.eye-protection-mode .mm-dock-btn:hover:not(:disabled),
+body.eye-protection-mode .mm-tray-close:hover {
+    background: #ECE5D8;
+    color: #1C1917;
+}
+
+body.eye-protection-mode .mm-dock-btn.is-active,
+body.eye-protection-mode .mm-dock-sel-badge {
+    background: #EFE9DD;
+    border-color: #C9C2B2;
+    color: #1d4ed8;
+}
+
+body.eye-protection-mode .mm-dock-btn.mm-dock-primary {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #ffffff;
+}
+
+body.eye-protection-mode .mm-pop-tabs {
+    background: #ECE5D8;
+}
+
+body.eye-protection-mode .mm-pop-tab.is-active,
+body.eye-protection-mode .mm-pop-tab[aria-selected="true"] {
+    background: #FAF7F2;
+    color: #2563eb;
+}
+
+body.eye-protection-mode .mm-tray-btn:not(.is-primary),
+body.eye-protection-mode .mm-pop-canvas-btn {
+    background: #F4EFE6;
+    border-color: #DCD3BF;
+    color: #44403C;
+}
+
+body.eye-protection-mode .mm-tray-btn:not(.is-primary):hover:not(:disabled),
+body.eye-protection-mode .mm-pop-canvas-btn:hover {
+    background: #ECE5D8;
+    border-color: #CBBFA8;
+    color: #1d4ed8;
+}
+
+body.eye-protection-mode .mm-tray-input,
+body.eye-protection-mode .mm-pop-search-input {
+    background: #F4EFE6;
+    border-color: #DCD3BF;
+    color: #1C1917;
+}
+
+body.eye-protection-mode .mm-tray-input:focus,
+body.eye-protection-mode .mm-pop-search-input:focus {
+    background: #FAF7F2;
+    border-color: #3b82f6;
+}
+
+body.eye-protection-mode .mm-connect-row:hover {
+    background: #F0EBE1;
+    color: #1C1917;
+}
+
+body.eye-protection-mode .mm-connect-row small,
+body.eye-protection-mode .mm-pop-chip {
+    background: #EAE6DB;
+    color: #57534E;
+}
+
+body.eye-protection-mode .mm-pop-links-bar {
+    border-color: #E6E2D6;
+}
+
+body.eye-protection-mode .mm-connect-secondary {
+    background: #EFE9DD;
+    border-color: #C9C2B2;
+    color: #1d4ed8;
 }
 
 /* =========================================================================
@@ -7024,43 +6835,6 @@ body.toolbar-collapsed #page-hud {
 body.toolbar-collapsed #search-bar {
     top: calc(100% + 8px) !important;
     transform: translateX(-50%) !important;
-}
-
-/* =========================================================================
-   思维导图并行分支一键合流优化（卡片操作栏快捷图标 + 面板置顶入口）
-   ========================================================================= */
-.mm-act-btn.mm-act-converge-fork {
-    color: #4f46e5;
-}
-
-.mm-act-btn.mm-act-converge-fork:hover {
-    background: #eef2ff;
-    color: #4338ca;
-}
-
-.mm-connect-secondary.mm-connect-fork-quick {
-    margin: 2px 0 8px;
-    background: #f5f7ff;
-    border-color: #c7d2fe;
-    color: #4338ca;
-    font-weight: 600;
-}
-
-.mm-connect-secondary.mm-connect-fork-quick:hover {
-    background: #eef2ff;
-    border-color: #818cf8;
-    color: #3730a3;
-}
-
-body.eye-protection-mode .mm-connect-secondary.mm-connect-fork-quick {
-    background: #f4efe6;
-    border-color: #d6cebe;
-    color: #374151;
-}
-
-body.eye-protection-mode .mm-connect-secondary.mm-connect-fork-quick:hover {
-    background: #ebe4d6;
-    border-color: #b8ae9b;
 }
 
 /* =========================================================================

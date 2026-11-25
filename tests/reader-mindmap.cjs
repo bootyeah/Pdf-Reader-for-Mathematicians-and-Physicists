@@ -230,9 +230,18 @@ const server = http.createServer((req, res) => {
             if (Math.min(a.rect.right, b.rect.right) > Math.max(a.rect.left, b.rect.left) + 0.5 &&
                 Math.min(a.rect.bottom, b.rect.bottom) > Math.max(a.rect.top, b.rect.top) + 0.5) overlap.push(`${a.el.id}/${b.el.id}`);
           }));
-          return { clipped, blocked, overlap, overflow: toolbar.scrollWidth > toolbar.clientWidth + 1 };
+          const dock = document.getElementById('mm-command-dock');
+          const dockRect = dock.getBoundingClientRect();
+          const dockButtons = [...dock.querySelectorAll('#mm-dock-bar button')]
+            .map(el => ({ el, rect: el.getBoundingClientRect() })).filter(({ rect }) => rect.width && rect.height);
+          const dockClipped = dockButtons.filter(({ rect: r }) => r.left < panel.left || r.right > panel.right).map(({ el }) => el.id);
+          return {
+            clipped, blocked, overlap,
+            overflow: toolbar.scrollWidth > toolbar.clientWidth + 1,
+            dockFits: dockRect.left >= panel.left && dockRect.right <= panel.right && dockClipped.length === 0
+          };
         });
-        assert.deepEqual(layout, { clipped: [], blocked: [], overlap: [], overflow: false }, `toolbar at ${width}px, selected ${selectedId}`);
+        assert.deepEqual(layout, { clipped: [], blocked: [], overlap: [], overflow: false, dockFits: true }, `toolbar & dock at ${width}px, selected ${selectedId}`);
       }
     }
     console.log('PASS: toolbar fits 280–860px with all buttons reachable, long counts and both fork states');
@@ -267,21 +276,21 @@ const server = http.createServer((req, res) => {
       window.MindMap.center(false, true);
       document.querySelector('.mm-card[data-id="definition"]').click();
     });
-    await page.locator('.mm-card[data-id="definition"] .mm-act-merge').click({ force: true });
+    await page.locator('#mm-dock-connect').click();
     await page.locator('#mm-pop-pick-canvas').click();
-    await page.waitForSelector('#mm-merge-banner');
+    await page.waitForSelector('#mm-merge-target-hint');
     await settle();
     const contained = await page.evaluate(() => {
       const panel = document.getElementById('mindmap-panel').getBoundingClientRect();
       const brand = document.querySelector('#mindmap-toolbar .mm-toolbar-brand')?.getBoundingClientRect();
       const actions = document.querySelector('#mindmap-toolbar .mm-toolbar-actions')?.getBoundingClientRect();
       const noHeaderOverlap = Boolean(brand && actions && (brand.right <= actions.left || brand.bottom <= actions.top));
-      return noHeaderOverlap && [...document.querySelectorAll('#mindmap-toolbar button, #mm-merge-banner')].every(el => {
+      return noHeaderOverlap && [...document.querySelectorAll('#mindmap-toolbar button, #mm-command-dock, #mm-dock-tray, #mm-dock-bar button')].every(el => {
         const r = el.getBoundingClientRect();
         return !r.width || (r.left >= panel.left && r.right <= panel.right);
       });
     });
-    assert.equal(contained, true, 'toolbar and merge instruction must fit the minimum panel width without overlapping');
+    assert.equal(contained, true, 'toolbar and unified command dock tray must fit the minimum panel width without overlapping');
     await page.locator('#mindmap-panel').screenshot({ path: path.join(output, 'narrow-panel.png') });
     await page.keyboard.press('Escape');
     await page.evaluate(() => {
