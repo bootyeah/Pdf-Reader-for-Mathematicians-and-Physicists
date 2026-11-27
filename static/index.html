@@ -141,15 +141,22 @@
                     <i class="ph ph-video-camera text-[20px]"></i>
                 </button>
 
-                <div class="relative group flex items-center" id="fullscreen-dropdown-wrapper">
-                    <button id="fullscreen-btn" class="p-1.5 hover:bg-white hover:shadow-sm rounded-lg text-gray-600 transition" title="全屏">
-                        <i class="ph ph-corners-out text-[20px]"></i>
+                <div class="relative flex items-center self-stretch" id="fullscreen-control-col">
+                    <!-- 悬在全屏按钮上方（视图控制条顶边留白处），与右侧空格保存按钮同高同设计，不占横向空间。 -->
+                    <button type="button" id="backquote-fullscreen-toggle" class="backquote-fullscreen-toggle absolute left-1/2 -translate-x-1/2 w-6 h-[15px] p-0 rounded border flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500" aria-label="反引号全屏模式" aria-pressed="true" title="· 键：仅进入全屏；点击松开后在全屏下按 · 键可退出全屏">
+                        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12c2.2-4 5.8-4 8 0s5.8 4 8 0"/></svg>
                     </button>
-                    <!-- 下拉菜单：全屏置顶打开其他桌面窗口，桥接防滑落 -->
-                    <div id="fullscreen-window-dropdown" class="fullscreen-window-dropdown absolute top-full left-1/2 -translate-x-1/2 pt-1.5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
-                        <div id="fullscreen-window-card" class="fullscreen-window-card bg-white border border-gray-200 shadow-xl rounded-xl p-1.5 w-[210px]">
-                            <div id="fullscreen-window-list" class="max-h-[240px] overflow-y-auto custom-scrollbar space-y-0.5">
-                                <div class="fullscreen-window-empty px-2.5 py-2 text-center text-[11px] text-gray-400 select-none">暂无其他窗口</div>
+
+                    <div class="relative group flex items-center" id="fullscreen-dropdown-wrapper">
+                        <button id="fullscreen-btn" class="p-1.5 hover:bg-white hover:shadow-sm rounded-lg text-gray-600 transition" title="全屏">
+                            <i class="ph ph-corners-out text-[20px]"></i>
+                        </button>
+                        <!-- 下拉菜单：全屏置顶打开其他桌面窗口，桥接防滑落 -->
+                        <div id="fullscreen-window-dropdown" class="fullscreen-window-dropdown absolute top-full left-1/2 -translate-x-1/2 pt-1.5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+                            <div id="fullscreen-window-card" class="fullscreen-window-card bg-white border border-gray-200 shadow-xl rounded-xl p-1.5 w-[210px]">
+                                <div id="fullscreen-window-list" class="max-h-[240px] overflow-y-auto custom-scrollbar space-y-0.5">
+                                    <div class="fullscreen-window-empty px-2.5 py-2 text-center text-[11px] text-gray-400 select-none">暂无其他窗口</div>
+                                </div>
                             </div>
                         </div>
                     </div>

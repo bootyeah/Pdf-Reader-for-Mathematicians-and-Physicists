@@ -445,12 +445,17 @@
         .btn-saved { background-color: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
         .btn-unsaved { background-color: #fefce8; color: #a16207; border-color: #fde047; }
 
-        .space-save-toggle { background-color: transparent; color: #9ca3af; border-color: #e5e7eb; }
-        .space-save-toggle[aria-pressed="true"] {
+        .space-save-toggle,
+        .backquote-fullscreen-toggle { background-color: transparent; color: #9ca3af; border-color: #e5e7eb; }
+        .space-save-toggle[aria-pressed="true"],
+        .backquote-fullscreen-toggle[aria-pressed="true"] {
             background-color: #eff6ff;
             color: #2563eb;
             border-color: #93c5fd;
             box-shadow: inset 0 1px 2px rgba(37, 99, 235, 0.15);
+        }
+        .backquote-fullscreen-toggle {
+            bottom: calc(100% + 4px * var(--tb-scale, 1) + 3px);
         }
         .color-btn.selected { transform: scale(1.15); box-shadow: 0 0 0 2px white, 0 0 0 4px #9ca3af; }
         .anno-color-swatch.selected,
@@ -7364,6 +7369,7 @@ body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-3 #toolbar-view-group {
     row-gap: 4px;
     margin-left: 0;
     margin-right: 0;
+    margin-top: 12px;
 }
 
 body:not(.toolbar-collapsed) #main-toolbar.toolbar-wrap-3 #toolbar-anno-group {

@@ -1761,11 +1761,28 @@
                 } catch (_) {}
             }
         });
-        // Esc 下方的反引号/波浪号物理键进入全屏，Esc 仍交给浏览器退出。
+        const backquoteFullscreenToggle = document.getElementById('backquote-fullscreen-toggle');
+        backquoteFullscreenToggle?.addEventListener('click', (e) => {
+            const enterOnly = backquoteFullscreenToggle.getAttribute('aria-pressed') !== 'true';
+            backquoteFullscreenToggle.setAttribute('aria-pressed', String(enterOnly));
+            backquoteFullscreenToggle.title = enterOnly
+                ? '· 键：仅进入全屏；点击松开后在全屏下按 · 键可退出全屏'
+                : '· 键：进入/退出全屏；点击按下恢复仅进入全屏';
+            if (e.detail > 0) backquoteFullscreenToggle.blur();
+        });
+
+        // Esc 下方的反引号/波浪号物理键（数字 1 左侧 · 键）：默认按下时仅进入全屏；松开切换钮后在全屏下再按可退出全屏。
         window.addEventListener('keydown', e => {
             if (e.code !== 'Backquote' || e.repeat || e.defaultPrevented || e.isComposing ||
-                e.ctrlKey || e.metaKey || e.altKey || document.fullscreenElement) return;
+                e.ctrlKey || e.metaKey || e.altKey) return;
             if (e.target && (e.target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName))) return;
+            const enterOnly = backquoteFullscreenToggle?.getAttribute('aria-pressed') !== 'false';
+            if (document.fullscreenElement) {
+                if (enterOnly) return;
+                e.preventDefault();
+                if (document.exitFullscreen) Promise.resolve(document.exitFullscreen()).catch(err => console.error(err));
+                return;
+            }
             e.preventDefault();
             document.documentElement.requestFullscreen().catch(err => console.error(err));
         });

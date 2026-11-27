@@ -60,6 +60,96 @@ async function recordFixture(page, width = 800, height = 450) {
         await page.keyboard.press('Backquote');
         assert.equal(await page.evaluate(() => readerFullscreenChanges), 1, 'Backquote must do nothing when already fullscreen');
 
+        // Verify #backquote-fullscreen-toggle above #fullscreen-btn matches #space-save-toggle and toggles Backquote fullscreen exit.
+        const toggleInfo = await page.evaluate(() => {
+            const btn = document.getElementById('backquote-fullscreen-toggle');
+            const spaceBtn = document.getElementById('space-save-toggle');
+            const fsBtn = document.getElementById('fullscreen-btn');
+            const viewGroup = document.getElementById('toolbar-view-group');
+            const toolbar = document.getElementById('main-toolbar');
+            if (!btn || !spaceBtn || !fsBtn || !viewGroup || !toolbar) return null;
+            const r = btn.getBoundingClientRect();
+            const sr = spaceBtn.getBoundingClientRect();
+            const fr = fsBtn.getBoundingClientRect();
+            const vr = viewGroup.getBoundingClientRect();
+            const tr = toolbar.getBoundingClientRect();
+            const cs = getComputedStyle(btn);
+            const scs = getComputedStyle(spaceBtn);
+            return {
+                pressed: btn.getAttribute('aria-pressed'),
+                rect: { top: r.top, bottom: r.bottom, left: r.left, width: r.width, height: r.height, cx: r.left + r.width / 2 },
+                spaceRect: { width: sr.width, height: sr.height },
+                fsCx: fr.left + fr.width / 2,
+                viewTop: vr.top,
+                toolbarTop: tr.top,
+                styles: { bg: cs.backgroundColor, color: cs.color, border: cs.borderColor },
+                spaceStyles: { bg: scs.backgroundColor, color: scs.color, border: scs.borderColor }
+            };
+        });
+        assert.ok(toggleInfo, '#backquote-fullscreen-toggle and toolbar elements must exist');
+        assert.equal(toggleInfo.pressed, 'true', '#backquote-fullscreen-toggle must be pressed by default');
+        assert.equal(toggleInfo.rect.width, toggleInfo.spaceRect.width, 'width must match #space-save-toggle');
+        assert.equal(toggleInfo.rect.height, toggleInfo.spaceRect.height, 'height must match #space-save-toggle');
+        assert.deepEqual(toggleInfo.styles, toggleInfo.spaceStyles, 'pressed styles must match #space-save-toggle');
+        assert.ok(Math.abs(toggleInfo.rect.cx - toggleInfo.fsCx) <= 1, 'toggle must be horizontally centered above #fullscreen-btn');
+        assert.ok(toggleInfo.rect.bottom <= toggleInfo.viewTop - 1, 'toggle must sit above #toolbar-view-group top border');
+        assert.ok(toggleInfo.rect.top >= toggleInfo.toolbarTop, 'toggle must stay inside #main-toolbar');
+
+        await page.locator('#backquote-fullscreen-toggle').hover();
+        await page.waitForTimeout(100);
+        assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('fullscreen-window-dropdown')).visibility), 'hidden',
+            'hovering #backquote-fullscreen-toggle must not open #fullscreen-window-dropdown');
+
+        // Unpress #backquote-fullscreen-toggle and compare unpressed style parity with #space-save-toggle.
+        await page.click('#backquote-fullscreen-toggle');
+        assert.equal(await page.locator('#backquote-fullscreen-toggle').getAttribute('aria-pressed'), 'false');
+        const unpressedParity = await page.evaluate(() => {
+            const btn = document.getElementById('backquote-fullscreen-toggle');
+            const spaceBtn = document.getElementById('space-save-toggle');
+            spaceBtn.click();
+            const cs = getComputedStyle(btn);
+            const scs = getComputedStyle(spaceBtn);
+            const res = {
+                btn: { bg: cs.backgroundColor, color: cs.color, border: cs.borderColor },
+                space: { bg: scs.backgroundColor, color: scs.color, border: scs.borderColor }
+            };
+            spaceBtn.click();
+            return res;
+        });
+        assert.deepEqual(unpressedParity.btn, unpressedParity.space, 'unpressed styles must match #space-save-toggle');
+
+        // Released state: Backquote in fullscreen exits fullscreen.
+        await page.keyboard.press('Backquote');
+        await page.waitForFunction(() => !document.fullscreenElement);
+        assert.equal(await page.evaluate(() => !!document.fullscreenElement), false, 'Backquote must exit fullscreen when toggle is released');
+
+        // Released state: holding Backquote enters fullscreen and ignores key repeat.
+        await page.keyboard.down('Backquote');
+        await page.waitForFunction(() => document.fullscreenElement === document.documentElement);
+        await page.keyboard.down('Backquote');
+        await page.keyboard.up('Backquote');
+        await page.waitForTimeout(200);
+        assert.equal(await page.evaluate(() => !!document.fullscreenElement), true, 'holding Backquote must not toggle back out on repeat');
+
+        // Released state: typing Backquote inside an input while fullscreen must type ` without exiting fullscreen.
+        await page.evaluate(() => {
+            const input = document.createElement('input'); input.id = 'fullscreen-exit-guard-input'; document.body.appendChild(input); input.focus();
+        });
+        await page.keyboard.press('Backquote');
+        assert.equal(await page.locator('#fullscreen-exit-guard-input').inputValue(), '`');
+        assert.equal(await page.evaluate(() => !!document.fullscreenElement), true, 'typing backquote in input must not exit fullscreen');
+        await page.evaluate(() => document.getElementById('fullscreen-exit-guard-input').remove());
+
+        // Released state: pressing Backquote again exits fullscreen cleanly.
+        await page.keyboard.press('Backquote');
+        await page.waitForFunction(() => !document.fullscreenElement);
+
+        // Restore pressed default and re-enter fullscreen before testing native Escape exit.
+        await page.click('#backquote-fullscreen-toggle');
+        assert.equal(await page.locator('#backquote-fullscreen-toggle').getAttribute('aria-pressed'), 'true');
+        await page.keyboard.press('Backquote');
+        await page.waitForFunction(() => document.fullscreenElement === document.documentElement);
+
         // Simulate the browser's native Escape exit between keydown and keyup.
         await page.keyboard.down('Escape');
         if (await page.evaluate(() => !!document.fullscreenElement)) await page.evaluate(() => document.exitFullscreen());
