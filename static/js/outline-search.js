@@ -262,24 +262,55 @@
                 return [m, s].map(v => String(v).padStart(2, '0')).join(':');
             }
 
+            function updateCountdownSliderVisual() {
+                if (!els.countdownSlider) return;
+                const min = Number(els.countdownSlider.min) || 1;
+                const max = Number(els.countdownSlider.max) || 120;
+                const rawVal = parseInt(els.countdownSlider.value, 10);
+                const val = Number.isFinite(rawVal) ? Math.max(min, Math.min(max, rawVal)) : 25;
+                const pct = max > min ? ((val - min) / (max - min)) * 100 : 0;
+                els.countdownSlider.style.setProperty('--slider-progress', `${pct.toFixed(2)}%`);
+            }
+
             function readConfiguredCountdownSec() {
-                const minVal = Math.max(0, Math.min(999, parseInt(els.countdownMinInput?.value, 10) || 0));
-                const secVal = Math.max(0, Math.min(59, parseInt(els.countdownSecInput?.value, 10) || 0));
-                return minVal * 60 + secVal;
+                if (!els.countdownSlider) return 25 * 60;
+                const min = Number(els.countdownSlider.min) || 1;
+                const max = Number(els.countdownSlider.max) || 120;
+                const rawVal = parseInt(els.countdownSlider.value, 10);
+                const clampedMin = Number.isFinite(rawVal) ? Math.max(min, Math.min(max, rawVal)) : 25;
+                return clampedMin * 60;
+            }
+
+            function updateCountdownStartBtn(label) {
+                if (!els.countdownStartBtn) return;
+                const isRunning = label === '暂停';
+                els.countdownStartBtn.title = label;
+                els.countdownStartBtn.setAttribute('aria-label', label);
+                els.countdownStartBtn.dataset.state = isRunning ? 'running' : (label === '继续' ? 'paused' : 'idle');
+                const icon = els.countdownStartBtn.querySelector('i');
+                if (icon) {
+                    icon.className = isRunning
+                        ? 'ph-fill ph-pause text-[13px]'
+                        : 'ph-fill ph-play text-[13px] translate-x-[0.5px]';
+                } else {
+                    els.countdownStartBtn.textContent = label;
+                }
             }
 
             function renderCountdownDisplay(isFinished = false) {
                 if (!els.countdownDisplay) return;
                 els.countdownDisplay.textContent = isFinished ? '00:00' : formatCountdown(countdownRemainingSec);
-                els.countdownDisplay.classList.toggle('text-red-500', isFinished);
-                els.countdownDisplay.classList.toggle('text-blue-600', !isFinished);
+                els.countdownDisplay.classList.toggle('is-finished', isFinished);
+                els.countdownDisplay.classList.toggle('is-running', countdownRunning && !isFinished);
+                els.countdownStartBtn?.classList.toggle('is-running', countdownRunning);
             }
 
-            function syncCountdownFromInputs() {
+            function syncCountdownFromSlider() {
+                updateCountdownSliderVisual();
                 if (countdownRunning) return;
                 countdownRemainingSec = readConfiguredCountdownSec();
                 renderCountdownDisplay(false);
-                if (els.countdownStartBtn) els.countdownStartBtn.textContent = '开始';
+                updateCountdownStartBtn('开始');
             }
 
             function tickCountdown() {
@@ -289,9 +320,8 @@
                     countdownTimerId = null;
                     countdownRunning = false;
                     countdownRemainingSec = 0;
-                    if (els.countdownMinInput) els.countdownMinInput.disabled = false;
-                    if (els.countdownSecInput) els.countdownSecInput.disabled = false;
-                    if (els.countdownStartBtn) els.countdownStartBtn.textContent = '开始';
+                    if (els.countdownSlider) els.countdownSlider.disabled = false;
+                    updateCountdownStartBtn('开始');
                     renderCountdownDisplay(true);
                     if (!state.isTimePanelOpen) toggleTimePanel(true);
                     return;
@@ -306,9 +336,8 @@
                     countdownTimerId = null;
                     countdownRunning = false;
                     countdownRemainingSec = Math.max(0, Math.ceil((countdownEndTime - Date.now()) / 1000));
-                    if (els.countdownMinInput) els.countdownMinInput.disabled = false;
-                    if (els.countdownSecInput) els.countdownSecInput.disabled = false;
-                    if (els.countdownStartBtn) els.countdownStartBtn.textContent = countdownRemainingSec > 0 ? '继续' : '开始';
+                    if (els.countdownSlider) els.countdownSlider.disabled = false;
+                    updateCountdownStartBtn(countdownRemainingSec > 0 ? '继续' : '开始');
                     renderCountdownDisplay(false);
                 } else {
                     if (countdownRemainingSec <= 0) {
@@ -317,9 +346,8 @@
                     if (countdownRemainingSec <= 0) return;
                     countdownRunning = true;
                     countdownEndTime = Date.now() + countdownRemainingSec * 1000;
-                    if (els.countdownMinInput) els.countdownMinInput.disabled = true;
-                    if (els.countdownSecInput) els.countdownSecInput.disabled = true;
-                    if (els.countdownStartBtn) els.countdownStartBtn.textContent = '暂停';
+                    if (els.countdownSlider) els.countdownSlider.disabled = true;
+                    updateCountdownStartBtn('暂停');
                     renderCountdownDisplay(false);
                     clearInterval(countdownTimerId);
                     countdownTimerId = setInterval(tickCountdown, 250);
@@ -330,10 +358,9 @@
                 clearInterval(countdownTimerId);
                 countdownTimerId = null;
                 countdownRunning = false;
-                if (els.countdownMinInput) els.countdownMinInput.disabled = false;
-                if (els.countdownSecInput) els.countdownSecInput.disabled = false;
+                if (els.countdownSlider) els.countdownSlider.disabled = false;
                 countdownRemainingSec = readConfiguredCountdownSec();
-                if (els.countdownStartBtn) els.countdownStartBtn.textContent = '开始';
+                updateCountdownStartBtn('开始');
                 renderCountdownDisplay(false);
             }
 
@@ -348,18 +375,30 @@
             els.timePanel.addEventListener('click', (e) => e.stopPropagation());
             els.timePanel.addEventListener('keydown', (e) => {
                 e.stopPropagation();
-                if (e.key === 'Enter' && (e.target === els.countdownMinInput || e.target === els.countdownSecInput)) {
+                if (e.key === 'Enter' && e.target === els.countdownSlider) {
                     e.preventDefault();
                     countdownRemainingSec = readConfiguredCountdownSec();
                     if (!countdownRunning) toggleCountdownStartPause();
                 }
             });
-            els.countdownMinInput?.addEventListener('input', syncCountdownFromInputs);
-            els.countdownSecInput?.addEventListener('input', syncCountdownFromInputs);
+            els.countdownSlider?.addEventListener('input', syncCountdownFromSlider);
+            els.countdownSlider?.addEventListener('wheel', (e) => {
+                if (countdownRunning || els.countdownSlider.disabled) return;
+                e.preventDefault();
+                const min = Number(els.countdownSlider.min) || 1;
+                const max = Number(els.countdownSlider.max) || 120;
+                const cur = parseInt(els.countdownSlider.value, 10) || 25;
+                const delta = e.deltaY < 0 ? 1 : -1;
+                const next = Math.max(min, Math.min(max, cur + delta));
+                if (next !== cur) {
+                    els.countdownSlider.value = String(next);
+                    syncCountdownFromSlider();
+                }
+            }, { passive: false });
             els.countdownStartBtn?.addEventListener('click', toggleCountdownStartPause);
             els.countdownResetBtn?.addEventListener('click', resetCountdown);
 
-            syncCountdownFromInputs();
+            syncCountdownFromSlider();
         })();
 
         function performAction(actionFn, affectedPages = null) {

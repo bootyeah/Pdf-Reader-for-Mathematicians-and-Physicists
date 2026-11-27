@@ -82,7 +82,7 @@
         }
 
         /* 4. 按钮悬停时，使用匹配淡色背景的 hover 颜色 */
-        body.eye-protection-mode header button:hover:not(.color-btn):not(#countdown-start-btn),
+        body.eye-protection-mode header button:hover:not(.color-btn):not(#countdown-start-btn):not(#countdown-reset-btn):not(#close-time-btn),
         body.eye-protection-mode aside .sidebar-item:hover,
         body.eye-protection-mode #page-hud button:hover { /* 👈 新增：HUD 里的图钉和重置按钮悬停色 */
             background-color: #F0EBE1 !important; 
@@ -6912,6 +6912,332 @@ body.eye-protection-mode .empty-state-guide-svg {
 #outline-panel,
 #time-panel {
     transition-property: opacity, transform, visibility;
+}
+
+/* 内置时间与倒计时下拉面板：呼应阅读器整体的浅蓝点缀与轻盈纸面质感 */
+#time-panel.time-panel-card {
+    border: 1px solid rgba(15, 23, 42, 0.09);
+    box-shadow: 0 12px 32px -8px rgba(15, 23, 42, 0.11), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
+}
+
+#time-panel .time-panel-header {
+    background-color: rgba(249, 250, 251, 0.85);
+    border-bottom: 1px solid #f1f5f9;
+}
+
+#time-panel .time-panel-title {
+    color: #64748b;
+}
+
+#time-panel .time-panel-title-icon {
+    color: #3b82f6;
+}
+
+#time-panel .time-panel-close-btn {
+    color: #94a3b8;
+    background-color: transparent;
+}
+
+#time-panel .time-panel-close-btn:hover {
+    color: #ef4444;
+    background-color: #fef2f2;
+}
+
+#time-panel .time-panel-clock-section {
+    border-bottom: 1px solid #f1f5f9;
+}
+
+#time-panel .time-panel-clock-digits {
+    color: #1f2937;
+}
+
+#time-panel .time-panel-countdown-section {
+    background-color: rgba(248, 250, 252, 0.55);
+}
+
+#time-panel .time-panel-countdown-digits {
+    color: #2563eb;
+    transition: color 0.18s ease;
+}
+
+#time-panel .time-panel-countdown-digits.is-running {
+    color: #1d4ed8;
+}
+
+#time-panel .time-panel-countdown-digits.is-finished {
+    color: #dc2626;
+}
+
+#time-panel .time-panel-btn {
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+}
+
+#time-panel .time-panel-btn:active {
+    transform: scale(0.97);
+}
+
+#time-panel .time-panel-btn-primary {
+    background-color: #eff6ff;
+    color: #2563eb;
+    border: 1px solid #bfdbfe;
+    box-shadow: 0 1px 2px rgba(37, 99, 235, 0.06);
+}
+
+#time-panel .time-panel-btn-primary:hover {
+    background-color: #dbeafe;
+    border-color: #93c5fd;
+    color: #1d4ed8;
+}
+
+#time-panel .time-panel-btn-primary.is-running {
+    background-color: #dbeafe;
+    color: #1d4ed8;
+    border-color: #93c5fd;
+    box-shadow: inset 0 1px 2px rgba(37, 99, 235, 0.12);
+}
+
+#time-panel .time-panel-btn-primary.is-running:hover {
+    background-color: #cfe4fd;
+    border-color: #60a5fa;
+    color: #1e40af;
+}
+
+#time-panel .time-panel-btn-secondary {
+    background-color: transparent;
+    color: #94a3b8;
+    border: 1px solid transparent;
+}
+
+#time-panel .time-panel-btn-secondary:hover {
+    background-color: #f1f5f9;
+    color: #334155;
+    border-color: transparent;
+}
+
+.countdown-range-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 9999px;
+    background: linear-gradient(
+        to right,
+        #60a5fa 0%,
+        #60a5fa var(--slider-progress, 20.17%),
+        #e5e7eb var(--slider-progress, 20.17%),
+        #e5e7eb 100%
+    );
+    outline: none;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+}
+
+.countdown-range-slider:hover:not(:disabled) {
+    background: linear-gradient(
+        to right,
+        #3b82f6 0%,
+        #3b82f6 var(--slider-progress, 20.17%),
+        #dbe3ee var(--slider-progress, 20.17%),
+        #dbe3ee 100%
+    );
+}
+
+.countdown-range-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 9999px;
+    background-color: #ffffff;
+    border: 1.5px solid #60a5fa;
+    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.16), 0 0 0 1px rgba(15, 23, 42, 0.03);
+    cursor: grab;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.countdown-range-slider:hover:not(:disabled)::-webkit-slider-thumb {
+    transform: scale(1.12);
+    border-color: #3b82f6;
+}
+
+.countdown-range-slider:active:not(:disabled)::-webkit-slider-thumb {
+    cursor: grabbing;
+    transform: scale(1.06);
+    border-color: #2563eb;
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.22);
+}
+
+.countdown-range-slider::-moz-range-track {
+    height: 4px;
+    border-radius: 9999px;
+    background: transparent;
+}
+
+.countdown-range-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 9999px;
+    background-color: #ffffff;
+    border: 1.5px solid #60a5fa;
+    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.16), 0 0 0 1px rgba(15, 23, 42, 0.03);
+    cursor: grab;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.countdown-range-slider:hover:not(:disabled)::-moz-range-thumb {
+    transform: scale(1.12);
+    border-color: #3b82f6;
+}
+
+.countdown-range-slider:active:not(:disabled)::-moz-range-thumb {
+    cursor: grabbing;
+    transform: scale(1.06);
+    border-color: #2563eb;
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.22);
+}
+
+.countdown-range-slider:focus-visible {
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.28);
+}
+
+.countdown-range-slider:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.countdown-range-slider:disabled::-webkit-slider-thumb {
+    cursor: not-allowed;
+    transform: none;
+}
+
+.countdown-range-slider:disabled::-moz-range-thumb {
+    cursor: not-allowed;
+    transform: none;
+}
+
+body.eye-protection-mode #time-panel.time-panel-card {
+    box-shadow: 0 12px 28px -8px rgba(68, 64, 60, 0.11), 0 2px 6px -1px rgba(68, 64, 60, 0.04) !important;
+}
+
+body.eye-protection-mode #time-panel .time-panel-header {
+    background-color: rgba(240, 235, 225, 0.48);
+    border-bottom-color: #EBE5D9;
+}
+
+body.eye-protection-mode #time-panel .time-panel-title {
+    color: #78716C;
+}
+
+body.eye-protection-mode #time-panel .time-panel-title-icon {
+    color: #3b82f6;
+}
+
+body.eye-protection-mode #time-panel .time-panel-close-btn {
+    color: #A8A29E;
+}
+
+body.eye-protection-mode #time-panel .time-panel-close-btn:hover {
+    color: #dc2626;
+    background-color: rgba(254, 226, 226, 0.65);
+}
+
+body.eye-protection-mode #time-panel .time-panel-clock-section {
+    border-bottom-color: #EBE5D9;
+}
+
+body.eye-protection-mode #time-panel .time-panel-clock-digits {
+    color: #292524;
+}
+
+body.eye-protection-mode #time-panel .time-panel-countdown-section {
+    background-color: rgba(240, 235, 225, 0.32);
+}
+
+body.eye-protection-mode #time-panel .time-panel-countdown-digits {
+    color: #2563eb;
+}
+
+body.eye-protection-mode #time-panel .time-panel-countdown-digits.is-running {
+    color: #1d4ed8;
+}
+
+body.eye-protection-mode #time-panel .time-panel-countdown-digits.is-finished {
+    color: #dc2626;
+}
+
+body.eye-protection-mode #time-panel .time-panel-btn-primary {
+    background-color: rgba(239, 246, 255, 0.85);
+    color: #2563eb;
+    border-color: #bfdbfe;
+    box-shadow: 0 1px 2px rgba(37, 99, 235, 0.05);
+}
+
+body.eye-protection-mode #time-panel .time-panel-btn-primary:hover {
+    background-color: rgba(219, 234, 254, 0.92);
+    border-color: #93c5fd;
+    color: #1d4ed8;
+}
+
+body.eye-protection-mode #time-panel .time-panel-btn-primary.is-running {
+    background-color: rgba(219, 234, 254, 0.9);
+    color: #1d4ed8;
+    border-color: #93c5fd;
+    box-shadow: inset 0 1px 2px rgba(37, 99, 235, 0.12);
+}
+
+body.eye-protection-mode #time-panel .time-panel-btn-primary.is-running:hover {
+    background-color: rgba(191, 219, 254, 0.9);
+    border-color: #60a5fa;
+    color: #1e40af;
+}
+
+body.eye-protection-mode #time-panel .time-panel-btn-secondary {
+    background-color: transparent;
+    color: #A8A29E;
+    border-color: transparent;
+}
+
+body.eye-protection-mode #time-panel .time-panel-btn-secondary:hover {
+    background-color: #EFE9DC;
+    color: #44403C;
+    border-color: transparent;
+}
+
+body.eye-protection-mode .countdown-range-slider {
+    background: linear-gradient(
+        to right,
+        #60a5fa 0%,
+        #60a5fa var(--slider-progress, 20.17%),
+        #E6E2D6 var(--slider-progress, 20.17%),
+        #E6E2D6 100%
+    );
+}
+
+body.eye-protection-mode .countdown-range-slider:hover:not(:disabled) {
+    background: linear-gradient(
+        to right,
+        #3b82f6 0%,
+        #3b82f6 var(--slider-progress, 20.17%),
+        #DDD7C8 var(--slider-progress, 20.17%),
+        #DDD7C8 100%
+    );
+}
+
+body.eye-protection-mode .countdown-range-slider::-webkit-slider-thumb {
+    background-color: #FDFCF9;
+    border-color: #60a5fa;
+}
+
+body.eye-protection-mode .countdown-range-slider:hover:not(:disabled)::-webkit-slider-thumb {
+    border-color: #3b82f6;
+}
+
+body.eye-protection-mode .countdown-range-slider::-moz-range-thumb {
+    background-color: #FDFCF9;
+    border-color: #60a5fa;
+}
+
+body.eye-protection-mode .countdown-range-slider:hover:not(:disabled)::-moz-range-thumb {
+    border-color: #3b82f6;
 }
 
 #main-toolbar {
