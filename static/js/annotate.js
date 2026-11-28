@@ -1121,6 +1121,7 @@
                 // 3. 高亮当前章节，目录打开时将条目保持在可视区。
                 updateCurrentOutline(true);
                 window.PageAutoGrid?.updateHudButton?.();
+                window.SidecarHandwriting?.onCurrentPageChanged?.(currentPhysicalPage);
             }
         }
 

@@ -524,6 +524,7 @@ function toggleSidecar(forceOpen = null, skipScroll = false) {
             els.container.scrollBy({ left: -els.container.scrollLeft, behavior: 'smooth' });
         }
     }
+    window.SidecarHandwriting?.onSidecarVisibilityChange?.(isSidecarOpen);
 }
 
 // 按钮点击依然执行标准展开（带有屏幕滑动反馈）
@@ -615,7 +616,7 @@ window.addEventListener('keydown', (e) => {
                 return;
             }
         }
-        for (const sel of ['#ds-chat-panel', '#video-panel', '#formula-input-panel']) {
+        for (const sel of ['#ds-chat-panel', '#video-panel', '#formula-input-panel', '#sidecar-hw-dock']) {
             const panelEl = document.querySelector(sel);
             if (panelEl && panelEl.style.display !== 'none' && !panelEl.classList.contains('hidden')) {
                 if (e.target.closest?.(sel) || panelEl.contains(document.activeElement) || panelEl.matches?.(':hover')) {

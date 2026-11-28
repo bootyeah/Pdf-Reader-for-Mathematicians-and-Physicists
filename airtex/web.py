@@ -77,6 +77,24 @@ class AppCore:
         self.page_id = ""                  # 只保存手机白板当前页的标识和内容
         self.page_generation = 0
         self.rev = 0                       # 手机画布版本号，每写一次 +1
+        self.scene = "board"               # board=自由白板/公式；sidecar=阅读器无界草稿本映射
+        self.board_doc = {"w": 1000, "h": 700, "strokes": []}
+        self.board_page_id = ""
+        self.sidecar_page = 0
+        self.sidecar_total = 0
+        self.sidecar_size = [1000, 1414]
+        self.sidecar_bg = ""
+        self.sidecar_bg_rev = 0
+        self.sidecar_docs = {}             # page_num(int) -> sanitized doc
+        self.sidecar_doc_seq = 0
+        self.sidecar_doc_seqs = {}         # page_num(int) -> seq
+        self.sidecar_page_request = 0
+        self.sidecar_page_req_seq = 0
+        self.active_purpose = "whiteboard" if cfg.get("output_kind") == "paragraph" else "formula"
+        self.active_target = self.active_purpose
+        self.recognizing_target = ""
+        self.error_target = ""
+        self.result_seq = 0
         self.pc_doc = {"w": 1000, "h": 700, "strokes": []}   # 鼠标手写画板
         self.pc_rev = 0                    # 鼠标画板版本号，每写一笔 +1
         self.seq = 0                       # 状态广播序号（每次状态变化 +1）
@@ -100,7 +118,7 @@ class AppCore:
 
     # ---------- 状态快照 ----------
 
-    def snapshot(self, since_rev=None, since_seq=None):
+    def snapshot(self, since_rev=None, since_seq=None, since_bg_rev=None, since_sidecar_seq=None):
         """状态快照。
 
         since_rev / since_seq 为 None 时一定带上完整文档（客户端首次询问）；
@@ -114,6 +132,9 @@ class AppCore:
                 "protocol": PROTOCOL_VERSION,
                 "session": self.session,
                 "mode": self.mode,
+                "scene": self.scene,
+                "activePurpose": self.active_purpose,
+                "activeTarget": self.active_target,
                 "rev": self.rev,
                 "seq": self.seq,
                 "size": [self.doc["w"], self.doc["h"]],
@@ -125,15 +146,32 @@ class AppCore:
                 "clientIp": self.client_ip,
                 "online": self.is_online(),
                 "recognizing": self.recognizing,
+                "recognizingTarget": self.recognizing_target if self.recognizing else "",
                 "result": self.result,
                 "error": self.error,
                 "errorMode": self.error_mode,
+                "errorTarget": self.error_target if self.error else "",
                 "clearedSeq": self.cleared_seq,
                 "pageId": self.page_id,
                 "autoRecognize": bool(self.cfg.get("auto_recognize")),
+                "sidecarPage": self.sidecar_page,
+                "sidecarTotal": self.sidecar_total,
+                "sidecarSize": list(self.sidecar_size),
+                "sidecarBgRev": self.sidecar_bg_rev,
+                "sidecarDocSeq": self.sidecar_doc_seq,
+                "sidecarPageRequest": self.sidecar_page_request,
+                "sidecarPageReqSeq": self.sidecar_page_req_seq,
             }
             if since_rev is None or since_rev != self.rev:
                 data["doc"] = self.doc
+            if self.scene == "sidecar" and self.sidecar_bg and (since_bg_rev is None or since_bg_rev != self.sidecar_bg_rev):
+                data["sidecarBg"] = self.sidecar_bg
+            if since_sidecar_seq is not None and since_sidecar_seq < self.sidecar_doc_seq:
+                data["sidecarDocs"] = {
+                    str(p): self.sidecar_docs[p]
+                    for p, s in self.sidecar_doc_seqs.items()
+                    if s > since_sidecar_seq and p in self.sidecar_docs
+                }
             return data
 
     def is_online(self, timeout=6.0):
@@ -228,11 +266,12 @@ class AppCore:
                 continue
             self.send_frame(wid, frame)
 
-    def push_state(self, extra=None, exclude_wid=None, exclude_client=None):
+    def push_state(self, extra=None, exclude_wid=None, exclude_client=None, include_bg=False):
         with self.lock:
             self.seq += 1
+            bg_rev = None if include_bg else self.sidecar_bg_rev
         payload = {"type": "state"}
-        payload.update(self.snapshot())
+        payload.update(self.snapshot(since_bg_rev=bg_rev))
         if extra:
             payload.update(extra)
         if exclude_wid is not None or exclude_client:
@@ -283,6 +322,156 @@ class AppCore:
             if ip:
                 self.client_ip = ip
 
+    def set_active_context(self, purpose=None, target=None):
+        changed = False
+        with self.lock:
+            if purpose in ("formula", "whiteboard") and purpose != self.active_purpose:
+                self.active_purpose = purpose
+                changed = True
+            if isinstance(target, str) and target and target != self.active_target:
+                self.active_target = target
+                changed = True
+        if changed:
+            self.push_state()
+
+    def set_sidecar_state(self, active, page=1, total_pages=1, w=1000, h=1414, bg_image=None, initial_doc=None):
+        if not active:
+            with self.lock:
+                if self.scene != "sidecar":
+                    return
+                if self.sidecar_page > 0:
+                    self.sidecar_docs[self.sidecar_page] = deepcopy(self.doc)
+                self.scene = "board"
+                self.doc = deepcopy(self.board_doc)
+                self.page_id = self.board_page_id
+                self.page_generation += 1
+                self.rev += 1
+                self.result = None
+                self.error = ""
+            self._notify()
+            self.push_state({"sidecarChanged": True})
+            return
+
+        try:
+            page = max(1, min(100000, int(page or 1)))
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            total_pages = max(page, min(100000, int(total_pages or page)))
+        except (TypeError, ValueError):
+            total_pages = page
+        try:
+            w = max(80, min(6000, int(round(float(w or 1000)))))
+            h = max(80, min(6000, int(round(float(h or 1414)))))
+        except (TypeError, ValueError):
+            w, h = 1000, 1414
+
+        with self.lock:
+            was_board = (self.scene != "sidecar")
+            if was_board:
+                self.board_doc = deepcopy(self.doc)
+                self.board_page_id = self.page_id
+                self.scene = "sidecar"
+            elif self.sidecar_page > 0:
+                self.sidecar_docs[self.sidecar_page] = deepcopy(self.doc)
+
+            page_changed = was_board or (page != self.sidecar_page)
+            self.sidecar_page = page
+            self.sidecar_total = total_pages
+            self.sidecar_size = [w, h]
+            if self.sidecar_page_request == page:
+                self.sidecar_page_request = 0
+
+            if page_changed:
+                existing = self.sidecar_docs.get(page)
+                if existing is None and isinstance(initial_doc, dict):
+                    existing = core.sanitize_doc(dict(initial_doc, w=w, h=h, infinite=True))
+                if existing is None:
+                    existing = {"w": w, "h": h, "infinite": True, "strokes": []}
+                else:
+                    existing = dict(deepcopy(existing), w=w, h=h, infinite=True)
+                self.sidecar_docs[page] = existing
+                self.doc = deepcopy(existing)
+                self.page_id = f"sidecar:{page}"
+                self.page_generation += 1
+                self.rev += 1
+                self.result = None
+                self.error = ""
+            else:
+                self.doc["w"] = w
+                self.doc["h"] = h
+                self.doc["infinite"] = True
+                if page in self.sidecar_docs:
+                    self.sidecar_docs[page]["w"] = w
+                    self.sidecar_docs[page]["h"] = h
+
+            bg_changed = False
+            if isinstance(bg_image, str) and bg_image != self.sidecar_bg:
+                self.sidecar_bg = bg_image
+                self.sidecar_bg_rev += 1
+                bg_changed = True
+
+        if page_changed or bg_changed or was_board:
+            self._notify()
+            self.push_state({"sidecarChanged": True}, include_bg=bg_changed or page_changed)
+
+    def clear_sidecar_page(self, page=None):
+        with self.lock:
+            try:
+                p = int(page if page is not None else self.sidecar_page)
+            except (TypeError, ValueError):
+                p = self.sidecar_page
+            is_current = (self.scene == "sidecar" and p == self.sidecar_page and p > 0)
+        if is_current:
+            self.clear(from_pc=True)
+            return
+        if p > 0:
+            with self.lock:
+                old = self.sidecar_docs.get(p) or {"w": self.sidecar_size[0], "h": self.sidecar_size[1], "infinite": True, "strokes": []}
+                self.sidecar_docs[p] = dict(old, strokes=[])
+                self.sidecar_doc_seq += 1
+                self.sidecar_doc_seqs[p] = self.sidecar_doc_seq
+                self.seq += 1
+
+    def reset_sidecar(self):
+        was_sidecar = False
+        with self.lock:
+            self.sidecar_docs.clear()
+            self.sidecar_doc_seqs.clear()
+            self.sidecar_page_request = 0
+            self.sidecar_bg = ""
+            if self.scene == "sidecar":
+                was_sidecar = True
+                self.scene = "board"
+                self.sidecar_page = 0
+                self.sidecar_total = 0
+                self.doc = deepcopy(self.board_doc)
+                self.page_id = self.board_page_id
+                self.page_generation += 1
+                self.rev += 1
+                self.result = None
+                self.error = ""
+        if was_sidecar:
+            self._notify()
+            self.push_state({"sidecarChanged": True})
+
+    def request_sidecar_page(self, page):
+        try:
+            target = int(page)
+        except (TypeError, ValueError):
+            raise ValueError("无效的草稿纸页码")
+        with self.lock:
+            if self.scene != "sidecar" or self.sidecar_total <= 0:
+                return False
+            target = max(1, min(self.sidecar_total, target))
+            if target == self.sidecar_page:
+                return True
+            self.sidecar_page_request = target
+            self.sidecar_page_req_seq += 1
+        self._notify()
+        self.push_state({"sidecarPageRequested": target})
+        return True
+
     def set_doc(self, doc, rev=None, client_id="", wid=None, cleared_seq=None, update_id=None, page_id=None):
         """客户端写入文档。
 
@@ -296,11 +485,21 @@ class AppCore:
         with self.lock:
             if self.mode == core.MODE_PC:
                 return self.rev, False
-        if self.cfg.get("output_kind") != "paragraph":
+        is_sidecar_pid = isinstance(page_id, str) and page_id.startswith("sidecar:")
+        if not is_sidecar_pid and not self.cfg.get("pages_enabled") and self.cfg.get("output_kind") != "paragraph":
             page_id = None
         if page_id is not None and (not isinstance(page_id, str) or not page_id or len(page_id) > 100):
             raise ValueError("无效的白板页标识")
+        sc_page = 0
+        if is_sidecar_pid:
+            try:
+                sc_page = int(page_id.split(":", 1)[1])
+            except (TypeError, ValueError):
+                raise ValueError("无效的草稿纸页标识")
+            if sc_page < 1 or sc_page > 100000:
+                raise ValueError("无效的草稿纸页标识")
         doc = core.sanitize_doc(doc)
+        late_other_page = False
         with self.lock:
             if self.mode == core.MODE_PC or (cleared_seq is not None and cleared_seq != self.cleared_seq):
                 return self.rev, False
@@ -310,23 +509,40 @@ class AppCore:
                 self.client_updates[client_id] = update_id
                 if len(self.client_updates) > 32:
                     del self.client_updates[next(iter(self.client_updates))]
-            # 只有「客户端自己说它基于的版本比服务端旧很多」才当作乱序旧帧。
-            # 这里留 0 容差会误伤，所以直接不做丢弃：客户端本地才是唯一真相，
-            # 服务端只是存储 + 转发（多客户端并发场景由客户端侧的采纳规则兜底）。
-            if page_id is not None and page_id != self.page_id:
-                self.page_id = page_id
-                self.page_generation += 1
-                self.result = None
+            if is_sidecar_pid:
+                self.sidecar_docs[sc_page] = deepcopy(doc)
+                self.sidecar_doc_seq += 1
+                self.sidecar_doc_seqs[sc_page] = self.sidecar_doc_seq
+                if self.scene != "sidecar" or sc_page != self.sidecar_page:
+                    late_other_page = True
+            elif self.scene == "sidecar":
+                if page_id is not None:
+                    # 刚切到无界草稿本时，手机端尚未收完的自由白板尾帧存回自由白板，不覆盖草稿纸
+                    self.board_doc = deepcopy(doc)
+                    self.board_page_id = page_id
+                    late_other_page = True
+                elif self.sidecar_page > 0:
+                    self.sidecar_docs[self.sidecar_page] = deepcopy(doc)
+                    self.sidecar_doc_seq += 1
+                    self.sidecar_doc_seqs[self.sidecar_page] = self.sidecar_doc_seq
+            if not late_other_page:
+                if page_id is not None and page_id != self.page_id:
+                    self.page_id = page_id
+                    self.page_generation += 1
+                    self.result = None
+                    self.error = ""
+                self.doc = doc
+                if self.scene == "board":
+                    self.board_doc = deepcopy(doc)
+                    self.board_page_id = self.page_id
+                self.rev += 1
                 self.error = ""
-            self.doc = doc
-            self.rev += 1
-            self.error = ""
-            if self.cfg.get("auto_recognize") and core.ink_pixels(doc) > 0:
-                self.auto_recognize_at = (
-                    time.monotonic() + float(
-                        self.cfg.get("auto_recognize_delay", 1800)) / 1000.0)
-            else:
-                self.auto_recognize_at = 0.0
+                if self.cfg.get("auto_recognize") and core.ink_pixels(doc) > 0:
+                    self.auto_recognize_at = (
+                        time.monotonic() + float(
+                            self.cfg.get("auto_recognize_delay", 1800)) / 1000.0)
+                else:
+                    self.auto_recognize_at = 0.0
             cur_rev = self.rev
         self._notify()
         # 不回推给写入者本人（否则手机会被自己的旧帧覆盖），
@@ -343,6 +559,12 @@ class AppCore:
             return
         with self.lock:
             self.doc = dict(self.doc, strokes=[])
+            if self.scene == "sidecar" and self.sidecar_page > 0:
+                self.sidecar_docs[self.sidecar_page] = deepcopy(self.doc)
+                self.sidecar_doc_seq += 1
+                self.sidecar_doc_seqs[self.sidecar_page] = self.sidecar_doc_seq
+            elif self.scene == "board":
+                self.board_doc = deepcopy(self.doc)
             self.rev += 1
             self.result = None
             self.error = ""
@@ -364,6 +586,12 @@ class AppCore:
         with self.lock:
             if self.doc["strokes"]:
                 self.doc["strokes"].pop()
+                if self.scene == "sidecar" and self.sidecar_page > 0:
+                    self.sidecar_docs[self.sidecar_page] = deepcopy(self.doc)
+                    self.sidecar_doc_seq += 1
+                    self.sidecar_doc_seqs[self.sidecar_page] = self.sidecar_doc_seq
+                elif self.scene == "board":
+                    self.board_doc = deepcopy(self.doc)
                 self.rev += 1
                 self.result = None
             cur_rev = self.rev
@@ -376,7 +604,8 @@ class AppCore:
     # ---------- 识别 ----------
 
     def start_recognize(self, payload_doc=None, client_id="", wid=None,
-                        remote=False, page_id=None):
+                        remote=False, page_id=None, cfg_override=None,
+                        purpose=None, target=None):
         """发起识别：识别**当前模式**正在写的那块画布。
 
         手机端点识别时会顺手把当前笔迹一起带上来（保证识别的是它自己
@@ -401,6 +630,11 @@ class AppCore:
                 return False
             if self.recognizing:
                 return False
+            eff_purpose = self.active_purpose if remote or not purpose else purpose
+            eff_target = self.active_target if remote or not target else target
+            if self.scene == "sidecar" and remote and eff_target != "formula":
+                eff_purpose = "whiteboard"
+                eff_target = "sidecar"
             src = self.pc_doc if mode == core.MODE_PC else self.doc
             # 无限画布必须保留 infinite，否则栅格化会把远处笔迹夹回初始画板边界。
             doc = deepcopy(src)
@@ -412,26 +646,41 @@ class AppCore:
                               if mode == core.MODE_PC
                               else "画布是空的，先写点内容吧")
                 self.error_mode = mode
+                self.error_target = eff_target or ""
             self.push_state()
             return False
         with self.lock:
             self.recognizing = True
+            self.recognizing_target = eff_target or ""
             self.error = ""
+            self.error_target = ""
             self.auto_recognize_at = 0.0
         self._notify()
         self.push_state()
         self._recog_thread = threading.Thread(
-            target=self._recognize_worker, args=(doc, mode, page_generation, recognized_page), daemon=True)
+            target=self._recognize_worker,
+            args=(doc, mode, page_generation, recognized_page, cfg_override, eff_purpose, eff_target),
+            daemon=True)
         self._recog_thread.start()
         return True
 
-    def _recognize_worker(self, doc, mode=core.MODE_PHONE, page_generation=None, page_id=""):
+    def _recognize_worker(self, doc, mode=core.MODE_PHONE, page_generation=None,
+                          page_id="", cfg_override=None, purpose=None, target=None):
         log("开始识别（%s，笔迹 %d 条）"
             % (core.mode_label(mode), len(doc.get("strokes", []))))
         t0 = time.monotonic()
         try:
-            provider = getattr(self, 'config_provider', None)
-            cfg = provider() if provider else self.cfg
+            if cfg_override is not None:
+                cfg = cfg_override
+            else:
+                provider = getattr(self, 'config_provider', None)
+                if provider:
+                    try:
+                        cfg = provider(purpose)
+                    except TypeError:
+                        cfg = provider()
+                else:
+                    cfg = self.cfg
             res = core.recognize_doc(cfg, doc, mode)
         except Exception as exc:
             res = {"ok": False, "error": "识别异常：" + str(exc), "latex": "",
@@ -444,8 +693,13 @@ class AppCore:
             "cost": round(cost, 2),
             "mode": mode,               # 结果属于哪种模式，界面只显示本模式的
         }
+        if purpose:
+            out["purpose"] = purpose
+        if target:
+            out["target"] = target
         with self.lock:
             self.recognizing = False
+            self.recognizing_target = ""
             stale_page = mode == core.MODE_PHONE and page_generation is not None and page_generation != self.page_generation
             if stale_page:
                 # 翻页后旧识别任务只结束忙碌状态，不能把旧结果显示到新页。
@@ -456,14 +710,19 @@ class AppCore:
             elif res.get("ok") and not res.get("empty"):
                 if page_id:
                     out["pageId"] = page_id
+                self.result_seq += 1
+                out["resultSeq"] = self.result_seq
                 self.result = out
                 self.error = ""
+                self.error_target = ""
             elif res.get("ok") and res.get("empty"):
                 self.result = None
                 self.error = res.get("error") or "没看出公式"
+                self.error_target = target or ""
             else:
                 self.result = None
                 self.error = res.get("error") or "识别失败"
+                self.error_target = target or ""
             err = self.error
         if stale_page:
             self._notify()
@@ -710,9 +969,16 @@ class Handler(BaseHTTPRequestHandler):
                 since = int(since) if since is not None else None
             except ValueError:
                 since = None
-            self.app.touch(device=core.guess_device_name(self._ua()),
-                           ip=self._client_ip())
-            return self._json(200, self.app.snapshot(since))
+            bg_rev = query.get("bgRev", [None])[0]
+            try:
+                bg_rev = int(bg_rev) if bg_rev is not None else None
+            except ValueError:
+                bg_rev = None
+            is_pc_monitor = query.get("role", [""])[0] == "pc"
+            if not is_pc_monitor:
+                self.app.touch(device=core.guess_device_name(self._ua()),
+                               ip=self._client_ip())
+            return self._json(200, self.app.snapshot(since, since_bg_rev=bg_rev))
         if path == "/api/health":
             return self._json(200, {"ok": True, "app": core.APP_NAME,
                                     "protocol": PROTOCOL_VERSION,
@@ -781,6 +1047,12 @@ class Handler(BaseHTTPRequestHandler):
             with self.app.lock:
                 cur = self.app.rev
             return self._json(200, {"ok": True, "rev": cur})
+        if path == "/api/sidecar_page":
+            try:
+                accepted = self.app.request_sidecar_page(body.get("page"))
+            except ValueError as exc:
+                return self._json(400, {"ok": False, "error": str(exc)})
+            return self._json(200, {"ok": True, "accepted": accepted, "sidecarPage": self.app.sidecar_page})
         return self._json(404, {"error": "未知路径"})
 
     # ---------- 静态页面 ----------
@@ -793,10 +1065,12 @@ class Handler(BaseHTTPRequestHandler):
             log("读取手机页失败：" + repr(exc))
             return self._send(500, "无法读取 web/index.html")
         token = str(self.app.cfg.get("token", "") or "").strip()
+        is_paragraph = self.app.cfg.get('output_kind') == 'paragraph'
+        pages_enabled = bool(self.app.cfg.get('pages_enabled') or is_paragraph)
         inject = ("<script>window.AIRTEX_TOKEN=%s;window.AIRTEX_PROTOCOL=%d;window.AIRTEX_PARAGRAPH=%s;"
-                  "window.AIRTEX_NAME=%s;</script>"
-                  % (json.dumps(token), PROTOCOL_VERSION, json.dumps(self.app.cfg.get('output_kind') == 'paragraph'),
-                     json.dumps(core.APP_NAME)))
+                  "window.AIRTEX_PAGES=%s;window.AIRTEX_NAME=%s;</script>"
+                  % (json.dumps(token), PROTOCOL_VERSION, json.dumps(is_paragraph),
+                     json.dumps(pages_enabled), json.dumps(core.APP_NAME)))
         html = html.replace(b"<!--AIRTEX_BOOT-->", inject.encode("utf-8"))
         self._send(200, html, "text/html; charset=utf-8")
 
@@ -817,15 +1091,20 @@ class Handler(BaseHTTPRequestHandler):
         sock = self.connection
         sock.settimeout(None)
         app = self.app
-        app.touch(device=core.guess_device_name(self._ua()),
-                  ip=self._client_ip())
+        is_pc_monitor = (query.get("role") or [""])[0] == "pc"
+        if not is_pc_monitor:
+            app.touch(device=core.guess_device_name(self._ua()),
+                      ip=self._client_ip())
         wid = app.register_ws(sock)
-        log(f"WebSocket 已连接（#{wid} {self._client_ip()}）")
-        client_id = ""
+        log(f"WebSocket 已连接（#{wid} {self._client_ip()}{' pc' if is_pc_monitor else ''}）")
+        client_id = "__pc_monitor__" if is_pc_monitor else ""
+        if is_pc_monitor:
+            app.set_ws_client(wid, client_id)
         try:
             # 首帧只给这个新连接自己的状态（不是群发），避免打扰其它客户端
+            init_bg_rev = app.sidecar_bg_rev if is_pc_monitor else None
             if not app.send_frame(wid, ws_encode(json.dumps(
-                dict({"type": "state"}, **app.snapshot()),
+                dict({"type": "state"}, **app.snapshot(since_bg_rev=init_bg_rev)),
                 ensure_ascii=False).encode("utf-8"), OP_TEXT)):
                 return
             frag_opcode = None
@@ -905,15 +1184,22 @@ class Handler(BaseHTTPRequestHandler):
             app.clear(client_id=client_id, wid=wid)
         elif kind == "undo":
             app.undo(client_id=client_id, wid=wid, remote=True)
+        elif kind == "sidecar_page":
+            try:
+                app.request_sidecar_page(msg.get("page"))
+            except ValueError:
+                pass
         elif kind == "hello":
             # 手机页连上后自报身份；回一份最新状态给它
-            app.touch(device=core.guess_device_name(self._ua()),
-                      ip=self._client_ip())
+            if client_id != "__pc_monitor__":
+                app.touch(device=core.guess_device_name(self._ua()),
+                          ip=self._client_ip())
             app.send_to(wid, dict({"type": "state", "hello": True},
                                   **app.snapshot()))
         elif kind == "ping":
-            app.touch(device=core.guess_device_name(self._ua()),
-                      ip=self._client_ip())
+            if client_id != "__pc_monitor__":
+                app.touch(device=core.guess_device_name(self._ua()),
+                          ip=self._client_ip())
             app.send_to(wid, {"type": "pong", "t": msg.get("t")})
 
 

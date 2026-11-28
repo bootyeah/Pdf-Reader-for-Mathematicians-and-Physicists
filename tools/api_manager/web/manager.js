@@ -19,7 +19,7 @@ const numeric = new Set(['temperature', 'timeout', 'max_tokens']);
 const fields = ['base_url', 'key_source', 'model', 'fallback_model', 'models', 'temperature', 'timeout', 'max_tokens', 'thinking', 'proxy', 'prompt', 'web_search'];
 
 // 功能显示顺序
-const FEATURE_ORDER = ['chat', 'chat_gemini', 'dictionary', 'translation', 'formula_image', 'formula_handwriting', 'formula_alt', 'page_grid'];
+const FEATURE_ORDER = ['chat', 'chat_gemini', 'dictionary', 'translation', 'formula_image', 'formula_handwriting', 'formula_whiteboard', 'formula_alt', 'page_grid'];
 
 // 极简 SVG 图标
 const FEATURE_ICONS = {
@@ -29,6 +29,7 @@ const FEATURE_ICONS = {
     translation: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>',
     formula_image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>',
     formula_handwriting: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>',
+    formula_whiteboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"></rect><line x1="7" y1="9" x2="13" y2="9"></line><line x1="7" y1="13" x2="17" y2="13"></line><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="18" x2="12" y2="21"></line></svg>',
     formula_alt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>',
     page_grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line><line x1="9" y1="3" x2="9" y2="21"></line></svg>'
 };
@@ -254,20 +255,21 @@ async function syncTemperaturePolicy() {
 }
 
 function renderPromptContexts() {
-    const options = selected === 'formula_handwriting' ? [['pc', '电脑手写'], ['phone', '手机手写'], ['whiteboard', '独立白板']]
-        : selected === 'formula_alt' ? [['image', '图片公式'], ['pc', '电脑手写'], ['phone', '手机手写'], ['whiteboard', '独立白板']]
+    const options = selected === 'formula_handwriting' ? [['pc', '电脑手写'], ['phone', '手机手写']]
+        : selected === 'formula_alt' ? [['image', '图片公式'], ['pc', '电脑手写'], ['phone', '手机手写'], ['whiteboard', '白板 / 草稿本']]
         : [['image', '图片公式']];
-    $('prompt-context-field').hidden = !selected.startsWith('formula_');
+    $('prompt-context-field').hidden = !selected.startsWith('formula_') || selected === 'formula_whiteboard';
     $('prompt-context').replaceChildren(...options.map(([value, label]) => new Option(label, value)));
 }
 
 async function syncPromptPreview(fill = true) {
     if (!doc) return;
     const request = ++promptRequest;
-    promptReadonly = selected.startsWith('formula_') && $('prompt-context').value === 'whiteboard';
+    const context = selected === 'formula_whiteboard' ? null : $('prompt-context').value;
+    promptReadonly = selected.startsWith('formula_') && selected !== 'formula_whiteboard' && context === 'whiteboard';
     syncPolicyControls();
     try {
-        const preview = await api('prompt-preview', {document: doc, feature: selected, context: $('prompt-context').value});
+        const preview = await api('prompt-preview', {document: doc, feature: selected, context});
         if (request !== promptRequest) return;
         if (fill) $('prompt').value = preview.editable_text;
         promptReadonly = preview.readonly;
@@ -275,9 +277,10 @@ async function syncPromptPreview(fill = true) {
         $('prompt-source-tag').hidden = !source;
         $('prompt-source-tag').textContent = source;
         $('shared-prompt-hint').hidden = !source;
-        $('shared-prompt-text').textContent = preview.readonly ? '独立白板使用固定段落提示词，此处仅供查看。'
+        $('shared-prompt-text').textContent = preview.readonly
+            ? '白板与草稿本使用「' + source + '」的段落提示词，请前往该功能项编辑。'
             : '当前使用「' + source + '」；直接编辑将保存为此功能的专属提示词。';
-        const extra = preview.text.slice(preview.editable_text.length);
+        const extra = preview.text.startsWith(preview.editable_text) ? preview.text.slice(preview.editable_text.length) : '';
         $('prompt-extra').textContent = extra ? '识别时还会附加：' + extra : '';
         $('prompt-extra').hidden = !extra;
         syncPolicyControls();

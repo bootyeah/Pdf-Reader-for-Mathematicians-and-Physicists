@@ -1114,6 +1114,7 @@
             state.fingerprint = '';
             if (typeof CloudSync !== 'undefined') CloudSync.resetForDocument();   // 换文档：上一份的「云端有更新」提示必须立刻消失
             window.MindMap?.resetForDocument?.();
+            window.SidecarHandwriting?.resetForDocument?.();
             state.pageDimensions = [];
             state.outlineMap = [];
             state.annotationsReady = null;

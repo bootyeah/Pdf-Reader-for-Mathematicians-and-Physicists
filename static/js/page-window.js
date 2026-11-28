@@ -224,6 +224,7 @@ function layoutPdfPage(pageNum, wrapper) {
         if (layer._pdfScale) setPdfStyle(layer, 'transform', `scale(${state.scale / layer._pdfScale})`);
     }
     scaleAnnotationLayer(pageNum);
+    window.SidecarHandwriting?.onPageLayout?.(pageNum, wrapper);
 }
 function layoutPdfWindow(skipDetachedArrows = false) {
     if (!state.pdfDoc) return;
@@ -293,6 +294,7 @@ function ensurePdfPage(pageNum) {
         }
     }
     els.pagesContainer.insertBefore(wrapper, nextEl);
+    window.SidecarHandwriting?.mountPage?.(pageNum, wrapper);
     if (wrapper._annotationView?.entries.size) annotationPages.add(pageNum);
     renderAnnotations(pageNum);
     for (const node of wrapper.querySelectorAll('.text-annotation')) {
@@ -319,6 +321,7 @@ function evictCachedPdfPage(pageNum) {
     disposePdfWrapper(entry.wrapper);
 }
 function disposePdfWrapper(wrapper) {
+    window.SidecarHandwriting?.unmountWrapper?.(wrapper);
     for (const node of wrapper.querySelectorAll('.text-annotation')) globalTextResizeObserver.unobserve(node);
     const canvas = wrapper.querySelector('canvas');
     if (canvas) {

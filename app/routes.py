@@ -68,7 +68,7 @@ def handle_ai_config(handler):
         document = api_settings.load_document() or api_settings.legacy_document()
         public['formula_models'] = {
             fid: document['features'][fid]['model']
-            for fid in ('formula_image', 'formula_handwriting', 'formula_alt')
+            for fid in ('formula_image', 'formula_handwriting', 'formula_whiteboard', 'formula_alt')
         }
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json; charset=utf-8')

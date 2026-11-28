@@ -138,6 +138,8 @@ def _api_config(feature):
         defaults = dict(DEEPSEEK_VISION, api_key=CHAT_API_KEY or DEEPSEEK_API_KEY)
     elif feature == 'chat_gemini':
         defaults = dict(api_settings.GEMINI_CHAT_DEFAULT)
+    elif feature == 'formula_whiteboard':
+        defaults = dict(api_settings.WHITEBOARD_DEFAULT)
     elif feature == 'page_grid':
         defaults = dict(api_settings.PAGE_GRID_DEFAULT)
     return api_settings.resolve(feature, defaults)

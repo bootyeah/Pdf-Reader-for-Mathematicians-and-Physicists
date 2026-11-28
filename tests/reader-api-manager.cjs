@@ -34,11 +34,11 @@ const root = path.resolve(__dirname, '..');
         page.on('pageerror', error => errors.push(error.message));
         await page.goto(info.manager);
         await page.waitForFunction(() => document.getElementById('model').value === 'model-chat');
-        assert.equal(await page.locator('nav button').count(), 8);
+        assert.equal(await page.locator('nav button').count(), 9);
         assert.equal(await page.inputValue('#api_key'), 'test-key-chat');
         assert.equal(await page.locator('#api_key').getAttribute('type'), 'text');
         assert.equal(await page.locator('#key-status').textContent(), 'Key 已配置');
-        for (const fid of ['chat_gemini', 'dictionary', 'translation', 'formula_image', 'formula_handwriting', 'formula_alt', 'page_grid', 'chat']) {
+        for (const fid of ['chat_gemini', 'dictionary', 'translation', 'formula_image', 'formula_handwriting', 'formula_whiteboard', 'formula_alt', 'page_grid', 'chat']) {
             await page.click(`nav button[data-feature="${fid}"]`);
             await page.waitForFunction(() => document.getElementById('thinking').options.length > 1);
         }
@@ -127,10 +127,19 @@ const root = path.resolve(__dirname, '..');
         assert.equal(await page.locator('#shared-prompt-hint').isVisible(), true);
         await page.selectOption('#prompt-context', 'phone');
         await page.waitForFunction(() => document.getElementById('prompt').value.includes('手机'));
-        await page.selectOption('#prompt-context', 'whiteboard');
-        await page.waitForFunction(() => document.getElementById('prompt').readOnly && document.getElementById('prompt').value.includes('相应段落'));
+        await page.click('nav button[data-feature="formula_whiteboard"]');
+        await page.waitForFunction(() => !document.getElementById('prompt').readOnly && document.getElementById('prompt').value.includes('相应段落'));
+        assert.equal(await page.locator('#prompt-context-field').isHidden(), true);
         assert.match(await page.inputValue('#prompt'), /相应段落/);
+        assert.equal(await page.locator('#reset-prompt').isDisabled(), false);
+        await page.fill('#prompt', 'DRAFT_WB_PARAGRAPH_PROMPT');
+        await page.click('nav button[data-feature="formula_alt"]');
+        await page.selectOption('#prompt-context', 'whiteboard');
+        await page.waitForFunction(() => document.getElementById('prompt').readOnly && document.getElementById('prompt').value === 'DRAFT_WB_PARAGRAPH_PROMPT');
         assert.equal(await page.locator('#reset-prompt').isDisabled(), true);
+        await page.click('nav button[data-feature="formula_whiteboard"]');
+        await page.click('#reset-prompt');
+        await page.waitForFunction(() => document.getElementById('prompt').value.includes('相应段落'));
         fs.mkdirSync(path.join(__dirname, 'results'), {recursive: true});
         await page.locator('.prompt-card').screenshot({path: path.join(__dirname, 'results', 'api-manager-whiteboard-prompt.png'), animations: 'disabled'});
         await page.click('nav button[data-feature="formula_image"]');
@@ -187,17 +196,21 @@ const root = path.resolve(__dirname, '..');
 
         // Both formula controls show the configured model, including live settings changes.
         await reader.evaluate(() => window.HandwritingWhiteboard.show());
-        await reader.waitForFunction(() => document.getElementById('whiteboard-engine').title.includes('model-formula_alt'));
+        await reader.waitForFunction(() => document.getElementById('whiteboard-engine').title.includes('model-formula_whiteboard'));
+        assert.match(await reader.locator('#whiteboard-engine').getAttribute('title'), /正在使用默认模型：model-formula_whiteboard · 点击切换至model-formula_alt/);
         await reader.click('#whiteboard-engine');
         assert.match(await reader.locator('#whiteboard-engine').getAttribute('title'), /正在使用第二模型：model-formula_alt/);
+        await page.click('nav button[data-feature="formula_whiteboard"]');
+        await page.fill('#model', 'WB-Paragraph-Pro');
         await page.click('nav button[data-feature="formula_alt"]');
         await page.fill('#model', 'Kimi-K3.1-Pro');
         await page.click('#save');
         await page.waitForFunction(() => document.getElementById('save').disabled && document.getElementById('notice').textContent.includes('设置已保存'));
         await reader.mouse.move(0, 0);
         await reader.locator('#whiteboard-engine').hover();
-        await reader.waitForFunction(() => document.getElementById('whiteboard-engine').title.includes('Kimi-K3.1-Pro'));
+        await reader.waitForFunction(() => document.getElementById('whiteboard-engine').title.includes('Kimi-K3.1-Pro') && document.getElementById('whiteboard-engine').title.includes('WB-Paragraph-Pro'));
         assert.match(await reader.locator('#formula-deepseek').getAttribute('title'), /Kimi-K3.1-Pro/);
+        assert.doesNotMatch(await reader.locator('#formula-deepseek').getAttribute('title'), /WB-Paragraph-Pro/);
         assert.doesNotMatch(await reader.locator('#whiteboard-engine').getAttribute('title'), /DeepSeek|GLM/);
         await reader.evaluate(() => window.HandwritingWhiteboard.hide());
         await page.click('nav button[data-feature="chat"]');
@@ -208,7 +221,7 @@ const root = path.resolve(__dirname, '..');
         await page.evaluate(() => scrollTo(0, 0));
         await page.screenshot({path: path.join(__dirname, 'results', 'api-manager-desktop.png'), animations: 'disabled'});
         await page.setViewportSize({width: 390, height: 844});
-        for (const fid of ['dictionary', 'translation', 'formula_image', 'formula_handwriting', 'formula_alt', 'page_grid', 'chat']) {
+        for (const fid of ['dictionary', 'translation', 'formula_image', 'formula_handwriting', 'formula_whiteboard', 'formula_alt', 'page_grid', 'chat']) {
             await page.click('nav button[data-feature="' + fid + '"]');
             assert.equal(await page.locator('nav button[data-feature="' + fid + '"]').getAttribute('aria-current'), 'page');
         }

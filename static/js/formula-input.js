@@ -37,7 +37,7 @@
     let target = '', selection = [0, 0], savedSize = null, imageData = '';
     let doc = { w: 900, h: 360, strokes: [] }, stroke = null, eraser = false;
     let phoneResult = '';
-    let phoneDoc = null, phoneHasConnected = false, phoneWholeBoard = false;
+    let phoneDoc = null, phoneHasConnected = false, phoneWasOnline = false, phoneWholeBoard = false;
     let cropOverlay = null, suppressClickUntil = 0;
     const editing = () => !modal.classList.contains('hidden') && state.isEditingNote && !!state.activeAnnotationId;
     const identity = () => `${state.loadToken}:${state.fingerprint}:${state.activePageNum}:${state.activeAnnotationId}`;
@@ -112,7 +112,13 @@
         bar.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
         panel.querySelectorAll('[data-formula-pane]').forEach(p => p.hidden = p.dataset.formulaPane !== mode);
         if (mode === 'handwriting') requestAnimationFrame(() => draw($('pad'), doc));
-        if (mode === 'phone') { phoneResult = ''; phone.start(); drawPhone(); }
+        if (mode === 'phone') {
+            phoneResult = '';
+            phoneWasOnline = !!phone.state?.online;
+            if (phoneWasOnline) { phoneHasConnected = true; showPairing(false); }
+            phone.start();
+            drawPhone();
+        }
         else phone.schedule();
     }
     function cancelCrop() {
@@ -158,6 +164,7 @@
     $('deepseek').onclick = () => {
         engine = engine === 'deepseek' ? '' : 'deepseek';
         updateEngine();
+        if (activeMode === 'phone' && phone.id) phone.refresh();
         const modelName = window.ReaderModelLabels?.name(activeMode, engine === 'deepseek');
         status('已切换至' + (modelName || (engine ? '第二模型' : '默认模型')));
     };
@@ -297,32 +304,40 @@
         collapse(); input.focus();
     };
     function startPhone() {
-        phoneHasConnected = false; phoneDoc = null; showPairing(true); drawPhone();
+        phoneHasConnected = false; phoneWasOnline = false; phoneDoc = null; showPairing(true); drawPhone();
         phoneResult = ''; clearResult();
         $('qr').hidden = true; $('phone-url').removeAttribute('href');
         $('phone-status').dataset.online = 'false';
         $('phone-status').textContent = '正在连接…'; status();
         phone.start(true);
     }
-    const phone = new PhoneHandwriting.Session({
+    const phone = PhoneHandwriting.connect({
+        id: 'formula',
+        purpose: 'formula',
         active: () => editing() && expanded && activeMode === 'phone',
         engine: () => engine,
         error: message => { if (editing() && activeMode === 'phone') status(message, true); },
         change: (data, pairing) => {
             const changed = phoneDoc !== data.doc;
             if (data.doc) phoneDoc = data.doc;
+            if (data.online) phoneHasConnected = true;
             if (!editing() || activeMode !== 'phone') return;
             PhoneHandwriting.renderPairing(phone, pairing, { qr: $('qr'), link: $('phone-url'),
                 modes: $('phone-modes'), hint: $('phone-connection-hint'), retry: $('phone-tunnel-retry') });
-            $('phone-status').textContent = data.recognizing ? '正在识别…' : data.online ? '手机已连接' : phoneHasConnected ? '手机已离线' : '等待手机扫码';
+            const myRecognizing = !!data.recognizing && (!data.recognizingTarget || data.recognizingTarget === 'formula');
+            $('phone-status').textContent = myRecognizing ? '正在识别…' : data.online ? '手机已连接' : phoneHasConnected ? '手机已离线' : '等待手机扫码';
             $('phone-status').dataset.online = String(!!data.online);
-            if (data.online && !phoneHasConnected) { phoneHasConnected = true; showPairing(false); }
-            $('phone-recognize').disabled = data.recognizing;
+            if (data.online && !phoneWasOnline) { phoneWasOnline = true; showPairing(false); }
+            else if (!data.online) { phoneWasOnline = false; }
+            $('phone-recognize').disabled = !!data.recognizing;
             if (changed) drawPhone();
-            if (data.recognizing) { clearResult(); phoneResult = ''; status(); }
-            if (data.error) { clearResult(); status(data.error, true); }
-            else if (data.result?.latex && JSON.stringify(data.result) !== phoneResult) {
-                phoneResult = JSON.stringify(data.result); previewResult(data.result.latex); status();
+            if (myRecognizing) { clearResult(); phoneResult = ''; status(); }
+            const myError = data.error && (!data.errorTarget || data.errorTarget === 'formula') ? data.error : '';
+            const myResult = data.result?.latex && (!data.result.target ? !window.SidecarHandwriting?.isActive?.() : data.result.target === 'formula')
+                ? data.result : null;
+            if (myError) { clearResult(); status(myError, true); }
+            else if (myResult && JSON.stringify(myResult) !== phoneResult) {
+                phoneResult = JSON.stringify(myResult); previewResult(myResult.latex); status();
             }
             else if ($('status').classList.contains('formula-error')) status();
         }

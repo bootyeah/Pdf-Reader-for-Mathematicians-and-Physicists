@@ -277,12 +277,17 @@ class ManagerTests(unittest.TestCase):
         status, initial = self.request('/api/ai-config')
         self.assertEqual(status, 200)
         self.assertEqual(initial['formula_models']['formula_alt'], 'model-formula_alt')
+        self.assertEqual(initial['formula_models']['formula_whiteboard'], 'model-formula_whiteboard')
         self.update('formula_alt', model='Kimi-K3.1-Pro')
+        self.update('formula_whiteboard', model='GLM-5.3-Flash')
         status, updated = self.request('/api/ai-config')
         self.assertEqual(status, 200)
         self.assertEqual(updated['formula_models']['formula_alt'], 'Kimi-K3.1-Pro')
+        self.assertEqual(updated['formula_models']['formula_whiteboard'], 'GLM-5.3-Flash')
         self.assertEqual(updated['revision'], initial['revision'])
-        self.assertEqual(set(updated['formula_models']), {'formula_image', 'formula_handwriting', 'formula_alt'})
+        self.assertEqual(set(updated['formula_models']), {
+            'formula_image', 'formula_handwriting', 'formula_whiteboard', 'formula_alt'
+        })
 
     def test_temperature_policy_validation_and_manual_values(self):
         doc = settings.load_document()
@@ -410,18 +415,32 @@ class ManagerTests(unittest.TestCase):
         from airtex import core
         self.update('formula_image', prompt='CUSTOM_IMAGE_PROMPT')
         self.update('formula_handwriting', prompt='')
-        self.update('formula_alt', prompt='')
+        self.update('formula_whiteboard', prompt='CUSTOM_WHITEBOARD_PARAGRAPH_PROMPT')
+        self.update('formula_alt', prompt='CUSTOM_ALT_FORMULA_PROMPT')
         draft = settings.public_document(settings.load_document())
         draft['features']['formula_image']['prompt'] = 'UNSAVED_IMAGE_PROMPT'
+        draft['features']['formula_alt']['prompt'] = ''
         status, preview = self.request('/api/prompt-preview', {
             'document': draft, 'feature': 'formula_alt', 'context': 'image'}, manager=True)
         self.assertEqual(status, 200)
         self.assertEqual(preview['text'], 'UNSAVED_IMAGE_PROMPT')
+        draft['features']['formula_whiteboard']['prompt'] = 'UNSAVED_WB_PARAGRAPH_PROMPT'
+        status, wb_preview = self.request('/api/prompt-preview', {
+            'document': draft, 'feature': 'formula_alt', 'context': 'whiteboard'}, manager=True)
+        self.assertEqual(status, 200)
+        self.assertTrue(wb_preview['readonly'])
+        self.assertEqual(wb_preview['source'], 'formula_whiteboard')
+        self.assertEqual(wb_preview['text'], 'UNSAVED_WB_PARAGRAPH_PROMPT')
+
         stroke = {'w': 200, 'h': 100, 'strokes': [{'k': 'pen', 'w': 4, 'p': [[10, 10], [100, 70]]}]}
         saved = settings.load_document()
+        wb_self_preview = settings.prompt_preview(saved, 'formula_whiteboard')
+        self.assertFalse(wb_self_preview['readonly'])
+        self.assertEqual(wb_self_preview['text'], 'CUSTOM_WHITEBOARD_PARAGRAPH_PROMPT')
+
         for fid, engine in [('formula_handwriting', ''), ('formula_alt', 'deepseek')]:
             for context, kind, purpose in [('image', 'image', ''), ('pc', 'handwriting', ''), ('whiteboard', 'handwriting', 'whiteboard')]:
-                if fid == 'formula_handwriting' and context == 'image':
+                if fid == 'formula_handwriting' and context in ('image', 'whiteboard'):
                     continue
                 preview = settings.prompt_preview(saved, fid, context)
                 status, result = self.request('/api/formula/recognize', {
@@ -432,6 +451,61 @@ class ManagerTests(unittest.TestCase):
             cfg = formula_bridge._config('handwriting')
             cfg = formula_bridge._apply_engine(cfg, engine, settings.resolve('formula_alt', {}))
             self.assertEqual(settings.prompt_preview(saved, fid, 'phone')['text'], core.build_prompt(cfg, 'phone'))
+
+        # Standalone formula_whiteboard feature governs both whiteboard and sidecar recognition (model, key, prompt)
+        status, res = self.request('/api/formula/recognize', {
+            'kind': 'handwriting', 'purpose': 'whiteboard', 'doc': stroke})
+        self.assertEqual(status, 200, res)
+        self.assertEqual(Upstream.calls[-1]['body']['model'], 'model-formula_whiteboard')
+        self.assertEqual(Upstream.calls[-1]['auth'], 'Bearer test-key-formula_whiteboard')
+        self.assertEqual(Upstream.calls[-1]['body']['messages'][0]['content'][0]['text'], 'CUSTOM_WHITEBOARD_PARAGRAPH_PROMPT')
+
+        # Unified phone session: formula target uses formula_handwriting, whiteboard & sidecar targets use formula_whiteboard
+        with patch.object(core, 'get_lan_ips', return_value=['127.0.0.1']):
+            status, pair = self.request('/api/formula/phone', {
+                'action': 'start', 'purpose': 'unified', 'activePurpose': 'whiteboard', 'activeTarget': 'sidecar'
+            })
+        self.assertEqual(status, 200, pair)
+        sid = pair['session']
+        try:
+            entry = formula_bridge._sessions[sid]
+            self.update('formula_whiteboard', model='wb-sidecar-model', prompt='SIDECAR_AND_WB_PROMPT')
+            entry['server'].app._recognize_worker(stroke, purpose='whiteboard', target='sidecar')
+            self.assertEqual(Upstream.calls[-1]['body']['model'], 'wb-sidecar-model')
+            self.assertEqual(Upstream.calls[-1]['auth'], 'Bearer test-key-formula_whiteboard')
+            self.assertEqual(Upstream.calls[-1]['body']['messages'][0]['content'][0]['text'], 'SIDECAR_AND_WB_PROMPT')
+
+            entry['server'].app._recognize_worker(stroke, purpose='formula', target='formula')
+            self.assertEqual(Upstream.calls[-1]['body']['model'], 'model-formula_handwriting')
+            self.assertEqual(Upstream.calls[-1]['auth'], 'Bearer test-key-formula_handwriting')
+            self.assertNotIn('SIDECAR_AND_WB_PROMPT', Upstream.calls[-1]['body']['messages'][0]['content'][0]['text'])
+        finally:
+            self.request('/api/formula/phone', {'action': 'close', 'session': sid})
+
+    def test_upgrade_seeds_formula_whiteboard_from_formula_handwriting(self):
+        old_doc = copy.deepcopy(settings.load_document())
+        del old_doc['features']['formula_whiteboard']
+        old_doc['features']['formula_handwriting'].update(
+            base_url='https://open.bigmodel.cn/api/paas/v4',
+            api_key='',
+            key_source='formula_image',
+            model='GLM-5.3-Flash',
+            fallback_model='glm-4.6v-flash',
+            thinking='high',
+            timeout=90,
+            prompt='FORMULA_ONLY_ALIGNED_PROMPT',
+        )
+        upgraded = settings.validate(settings.upgrade(old_doc))
+        wb = upgraded['features']['formula_whiteboard']
+        self.assertEqual(wb['base_url'], 'https://open.bigmodel.cn/api/paas/v4')
+        self.assertEqual(wb['model'], 'GLM-5.3-Flash')
+        self.assertEqual(wb['fallback_model'], 'glm-4.6v-flash')
+        self.assertEqual(wb['thinking'], 'high')
+        self.assertEqual(wb['timeout'], 90)
+        self.assertEqual(wb['key_source'], 'formula_image')
+        self.assertEqual(wb['api_key'], '')
+        self.assertEqual(wb['prompt'], settings.WHITEBOARD_PROMPT)
+        self.assertEqual(upgraded['features']['formula_handwriting']['prompt'], 'FORMULA_ONLY_ALIGNED_PROMPT')
 
     def test_kimi_history_survives_validation_and_is_filtered_on_model_switch_and_fallback(self):
         self.update('chat', model='Kimi-K3.1-Pro', models=['GLM-5.3-Flash'], thinking='high', max_tokens=700)

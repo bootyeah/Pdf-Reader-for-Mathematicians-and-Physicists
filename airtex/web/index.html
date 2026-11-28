@@ -589,16 +589,33 @@
   var redo = [], undo = [];
   // 视角只存手机本地；笔迹始终用不受屏幕尺寸限制的世界坐标。
   var view = { x: 0, y: 0, scale: 0 };
-  var pagesEnabled = !!window.AIRTEX_PARAGRAPH, pages = [], pageIndex = 0;
+  var pagesEnabled = !!(window.AIRTEX_PARAGRAPH || window.AIRTEX_PAGES), pages = [], pageIndex = 0;
   var notebookDb = null, pagesReady = false, restoredPages = false, notebookSaveError = false;
   var notebookKey = TOKEN || "default", pendingRecognition = "";
+  var serverScene = "board", activePurpose = window.AIRTEX_PARAGRAPH ? "whiteboard" : "formula";
+  var sidecarPage = 0, sidecarTotal = 0, sidecarBgRev = -1, sidecarBgImg = null;
+  var sidecarViews = Object.create(null), savedBoardState = null;
+
+  function isSidecar() { return serverScene === "sidecar" && sidecarPage > 0; }
+  function isParagraphMode() { return activePurpose === "whiteboard" || (isSidecar() && activePurpose !== "formula"); }
+  function fitSidecarView() {
+    if (!cssW || !cssH || !doc.w || !doc.h) return;
+    var pad = Math.min(20, Math.min(cssW, cssH) * 0.04);
+    view.scale = Math.min((cssW - pad * 2) / doc.w, (cssH - pad * 2) / doc.h);
+    if (!(view.scale > 0)) view.scale = Math.min(cssW / doc.w, cssH / doc.h);
+    view.x = (doc.w - cssW / view.scale) / 2;
+    view.y = (doc.h - cssH / view.scale) / 2;
+  }
 
   function newPage() {
     return { id: "p" + Date.now().toString(36) + Math.random().toString(36).slice(2),
       doc: { w: doc.w, h: doc.h, infinite: true, strokes: [] }, redo: [], undo: [],
       view: { x: 0, y: 0, scale: view.scale } };
   }
-  function currentPageId() { return pagesEnabled && pages[pageIndex] ? pages[pageIndex].id : ""; }
+  function currentPageId() {
+    if (isSidecar()) return "sidecar:" + sidecarPage;
+    return pagesEnabled && pages[pageIndex] ? pages[pageIndex].id : "";
+  }
   function storageError() {
     if (!notebookSaveError) toast("手机本地保存不可用，关闭页面前请保留草稿");
     notebookSaveError = true;
@@ -638,6 +655,10 @@
     pagesReady = true; $("pageNav").hidden = false; updatePages();
   }
   function saveLocalPage() {
+    if (isSidecar()) {
+      if (view.scale > 0) sidecarViews[sidecarPage] = { x: view.x, y: view.y, scale: view.scale };
+      return;
+    }
     if (!pagesEnabled || !pagesReady) return;
     pages[pageIndex].doc = doc; pages[pageIndex].redo = redo;
     pages[pageIndex].undo = undo; pages[pageIndex].view = view;
@@ -650,13 +671,33 @@
     } catch (e) { storageError(); }
   }
   function updatePages() {
-    if (!pagesEnabled) return;
+    if (isSidecar()) {
+      $("pageNav").hidden = false;
+      $("pageNumber").textContent = "P" + sidecarPage + " / " + Math.max(sidecarPage, sidecarTotal || 1);
+      $("prevPageBtn").disabled = locked() || sidecarPage <= 1;
+      $("nextPageBtn").disabled = locked() || sidecarPage >= Math.max(sidecarPage, sidecarTotal || 1);
+      $("nextPageBtn").title = "下一页无界草稿纸";
+      return;
+    }
+    if (!pagesEnabled) { $("pageNav").hidden = true; return; }
+    $("pageNav").hidden = false;
     $("pageNumber").textContent = (pageIndex + 1) + " / " + pages.length;
     $("prevPageBtn").disabled = !pagesReady || locked() || pageIndex === 0;
     $("nextPageBtn").disabled = !pagesReady || locked();
     $("nextPageBtn").title = pageIndex === pages.length - 1 ? "新建下一页" : "下一页";
   }
   function turnPage(step) {
+    if (isSidecar()) {
+      var target = sidecarPage + step;
+      if (locked() || target < 1 || target > Math.max(sidecarPage, sidecarTotal || 1)) return;
+      onUp({ type: "touchcancel", cancelable: false });
+      saveLocalPage();
+      if (dirty) syncNow();
+      api("/api/sidecar_page", { page: target }, function (st) {
+        if (st !== 200) toast("草稿纸切换失败，请重试");
+      });
+      return;
+    }
     if (!pagesEnabled || !pagesReady || locked() || pageIndex + step < 0) return;
     var heldTouch = touchActive || pageTouchBlocked;
     onUp({ type: "touchcancel", cancelable: false }); saveLocalPage();
@@ -844,13 +885,27 @@
   function redraw() {
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (isSidecar()) {
+      ctx.fillStyle = "#e5e7eb";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      var px = offX, py = offY, pw = doc.w * scale, ph = doc.h * scale;
+      ctx.fillStyle = "#fdfcf9";
+      ctx.fillRect(px, py, pw, ph);
+      if (sidecarBgImg && sidecarBgImg.complete && sidecarBgImg.naturalWidth > 0) {
+        ctx.drawImage(sidecarBgImg, px, py, pw, ph);
+      }
+      ctx.strokeStyle = "rgba(148, 163, 184, 0.55)";
+      ctx.lineWidth = Math.max(1, dpr);
+      ctx.strokeRect(px, py, pw, ph);
+    } else {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
     ctx.restore();
     for (var i = 0; i < doc.strokes.length; i++) strokePath(doc.strokes[i]);
     if (drawing) strokePath(drawing);
     drawSelection();
-    $("hint").className = (doc.strokes.length || locked()) ? "hide" : "";
+    $("hint").className = (doc.strokes.length || locked() || isSidecar()) ? "hide" : "";
     updateButtons();
   }
 
@@ -1091,6 +1146,11 @@
   updateSelectionButtons();
   $("resetViewBtn").onclick = function () {
     onUp({ type: "touchcancel", cancelable: false });
+    if (isSidecar()) {
+      fitSidecarView();
+      relayout(); redraw(); saveLocalPage();
+      return;
+    }
     var b = boundsOf(doc.strokes, 0);
     if (b) {
       view.scale = Math.min(8, (cssW - 64) / Math.max(80, b.right - b.left), (cssH - 64) / Math.max(80, b.bottom - b.top));
@@ -1378,7 +1438,7 @@
   }
 
   function onDown(e) {
-    if (locked() || (pagesEnabled && !pagesReady)) return;
+    if (locked() || (!isSidecar() && pagesEnabled && !pagesReady)) return;
     if (pageTouchBlocked) { if (e.cancelable) e.preventDefault(); return; }
     var t0 = evtPoint(e);
     if (e.type === "touchstart") {
@@ -1467,7 +1527,7 @@
   }
 
   function onMove(e) {
-    if (locked() || (pagesEnabled && !pagesReady)) return;
+    if (locked() || (!isSidecar() && pagesEnabled && !pagesReady)) return;
     if (pageTouchBlocked) { if (e.cancelable) e.preventDefault(); return; }
     if (e.type === "touchmove") {
       touchActive = true;
@@ -1601,7 +1661,7 @@
   window.addEventListener("mouseup", onUp);
 
   function onWheel(e) {
-    if (locked() || (pagesEnabled && !pagesReady)) return;
+    if (locked() || (!isSidecar() && pagesEnabled && !pagesReady)) return;
     if (e.cancelable) e.preventDefault();
     var r = canvas.getBoundingClientRect();
     var mouseX = e.clientX - r.left;
@@ -1692,24 +1752,125 @@
     return false;
   }
 
+  function applySceneAndSidecar(msg) {
+    if (msg.activePurpose === "formula" || msg.activePurpose === "whiteboard") {
+      activePurpose = msg.activePurpose;
+      if (!busy) setBusy(false);
+    }
+    if (typeof msg.sidecarBg === "string" && msg.sidecarBg && msg.sidecarBgRev !== sidecarBgRev) {
+      var targetBgRev = msg.sidecarBgRev;
+      sidecarBgRev = targetBgRev;
+      var bg = new Image();
+      bg.onload = function () {
+        if (sidecarBgRev === targetBgRev) { sidecarBgImg = bg; redraw(); }
+      };
+      bg.src = msg.sidecarBg;
+    }
+    if (msg.scene === undefined) return false;
+    var nextScene = (msg.scene === "sidecar" && msg.sidecarPage > 0) ? "sidecar" : "board";
+    if (nextScene === "sidecar") {
+      if (serverScene !== "sidecar" || msg.sidecarPage !== sidecarPage) {
+        if (inputDown || drawing) onUp({ type: "touchcancel", cancelable: false });
+        if (dirty) syncNow();
+        if (serverScene !== "sidecar") {
+          saveLocalPage();
+          savedBoardState = {
+            doc: doc, undo: undo, redo: redo,
+            view: { x: view.x, y: view.y, scale: view.scale }
+          };
+          $("app").classList.add("whiteboard-pages");
+        } else if (sidecarPage > 0 && view.scale > 0) {
+          sidecarViews[sidecarPage] = { x: view.x, y: view.y, scale: view.scale };
+        }
+        serverScene = "sidecar";
+        sidecarPage = msg.sidecarPage;
+        sidecarTotal = msg.sidecarTotal || sidecarPage;
+        var sz = Array.isArray(msg.sidecarSize) && msg.sidecarSize.length === 2
+          ? msg.sidecarSize : (msg.size || [1000, 1414]);
+        var expectId = "sidecar:" + sidecarPage;
+        var srcDoc = (msg.doc && (!msg.pageId || msg.pageId === expectId)) ? msg.doc : null;
+        doc = {
+          w: sz[0], h: sz[1], infinite: true,
+          strokes: srcDoc && Array.isArray(srcDoc.strokes) ? srcDoc.strokes.slice() : []
+        };
+        undo = penHistory(); redo = []; dirty = false;
+        selection = null; selectionDrag = null; navigation = null; navigating = false;
+        pageTouchBlocked = touchActive;
+        pendingRecognition = ""; lastLatex = ""; $("err").className = "";
+        if (sidecarViews[sidecarPage] && sidecarViews[sidecarPage].scale > 0) {
+          view = {
+            x: sidecarViews[sidecarPage].x,
+            y: sidecarViews[sidecarPage].y,
+            scale: sidecarViews[sidecarPage].scale
+          };
+        } else {
+          view = { x: 0, y: 0, scale: 0 };
+          fitSidecarView();
+        }
+        if (!busy) setBusy(false);
+        relayout(); redraw(); updatePages();
+        return true;
+      }
+      sidecarTotal = msg.sidecarTotal || sidecarTotal;
+      if (Array.isArray(msg.sidecarSize) && msg.sidecarSize.length === 2 &&
+          (doc.w !== msg.sidecarSize[0] || doc.h !== msg.sidecarSize[1])) {
+        doc.w = msg.sidecarSize[0]; doc.h = msg.sidecarSize[1];
+        redraw();
+      }
+      updatePages();
+      return false;
+    }
+    if (serverScene === "sidecar") {
+      if (inputDown || drawing) onUp({ type: "touchcancel", cancelable: false });
+      if (dirty) syncNow();
+      if (sidecarPage > 0 && view.scale > 0) {
+        sidecarViews[sidecarPage] = { x: view.x, y: view.y, scale: view.scale };
+      }
+      serverScene = "board";
+      sidecarPage = 0;
+      if (!pagesEnabled) $("app").classList.remove("whiteboard-pages");
+      if (savedBoardState) {
+        doc = savedBoardState.doc;
+        undo = savedBoardState.undo;
+        redo = savedBoardState.redo;
+        view = savedBoardState.view;
+        savedBoardState = null;
+      } else if (pagesEnabled && pages[pageIndex]) {
+        doc = pages[pageIndex].doc;
+        undo = pages[pageIndex].undo || penHistory();
+        redo = pages[pageIndex].redo || [];
+        view = pages[pageIndex].view || { x: 0, y: 0, scale: 0 };
+      }
+      dirty = false;
+      selection = null; selectionDrag = null; navigation = null; navigating = false;
+      pageTouchBlocked = touchActive;
+      pendingRecognition = ""; lastLatex = ""; $("err").className = "";
+      if (!busy) setBusy(false);
+      fitDocToCanvas(); relayout(); redraw(); updatePages();
+      return true;
+    }
+    return false;
+  }
+
   // 只有「电脑端清空」「电脑端重启过」或「本地空白而电脑有内容」时才采纳
   // 服务端文档。其它情况一律保留手机本地笔迹 —— 这是修掉
   // 「写一笔下一秒被清空」的关键。
   function maybeAdoptServerDoc(msg) {
     var adopted = false;
-    if (pagesEnabled && msg.pageId && msg.pageId !== currentPageId()) return false;
+    var paged = pagesEnabled || isSidecar();
+    if (paged && msg.pageId && msg.pageId !== currentPageId()) return false;
     // 1) 电脑端主动清空：手机上也要清掉
     if (typeof msg.clearedSeq === "number" && msg.clearedSeq > serverCleared) {
       serverCleared = msg.clearedSeq;
       if (doc.strokes.length || dirty || drawing || inputDown) {
         drawing = null; lastPt = null; editVersion++;
         pendingRecognition = "";
-        adopt({ w: doc.w, h: doc.h, strokes: [] });
+        adopt({ w: doc.w, h: doc.h, infinite: true, strokes: [] });
         adopted = true;
       }
     }
-    // 多页内容以手机本地记录为准；只接受电脑针对当前页的清空。
-    if (pagesEnabled) return adopted;
+    // 多页白板内容以手机本地记录为准；无界草稿本在本地空白且未改动时可接管电脑端已有笔迹。
+    if (pagesEnabled && !isSidecar()) return adopted;
     if (!msg.doc) return adopted;
     // 电脑端鼠标手写中：服务端那份「手机画布」谁也没在写，不采纳、不回推，
     // 免得暂停期间把本地内容换掉或覆盖掉
@@ -1737,7 +1898,8 @@
     redo = [];
     undo = penHistory();
     dirty = false;       // 采纳的是服务端那一版，本地没有待同步的修改了
-    fitDocToCanvas();
+    if (isSidecar()) { if (!view.scale) fitSidecarView(); }
+    else fitDocToCanvas();
     relayout();
     redraw();
     saveLocalPage();
@@ -1761,8 +1923,9 @@
     }
     // 电脑端可能刚切换了输入模式
     if (msg.mode !== undefined) applyMode(msg.mode);
+    var switchedScene = applySceneAndSidecar(msg);
     // 采纳服务端文档（受严格条件限制）
-    maybeAdoptServerDoc(msg);
+    if (!switchedScene) maybeAdoptServerDoc(msg);
     if (msg.session) serverSession = msg.session;
     if (typeof msg.rev === "number" && msg.rev > serverRev) serverRev = msg.rev;
     if (typeof msg.clearedSeq === "number") serverCleared = msg.clearedSeq;
@@ -1775,7 +1938,8 @@
     }
     // 结果仅在电脑显示；手机按模式和当前页处理识别状态与报错。
     var res = msg.result;
-    var pageMatches = !pagesEnabled || !msg.pageId || msg.pageId === currentPageId();
+    var paged = pagesEnabled || isSidecar();
+    var pageMatches = !paged || !msg.pageId || msg.pageId === currentPageId();
     if (!pageMatches) res = null;
     if (res && res.mode && res.mode !== "phone") res = null;
     var errMine = pageMatches && !locked() && (!msg.errorMode || msg.errorMode === "phone");
@@ -1791,7 +1955,7 @@
     syncTimer = setTimeout(function () {
       syncTimer = null;
       syncNow();
-    }, 180);
+    }, isSidecar() ? 80 : 180);
   }
 
   function compactDoc() {
@@ -1816,9 +1980,10 @@
     if (!dirty) return;
     sending = true;
     var sentVersion = editVersion;
+    var sentPageId = (pagesEnabled || isSidecar()) ? currentPageId() : "";
     // 写入使用串行 HTTP 确认，WebSocket 只负责状态推送。send() 成功不代表服务端收到。
     var payload = { rev: serverRev, doc: compactDoc(), clearedSeq: serverCleared, client: CLIENT_ID, updateId: sentVersion };
-    if (pagesEnabled) payload.pageId = currentPageId();
+    if (sentPageId) payload.pageId = sentPageId;
     api("/api/update", payload, function (status, data) {
       sending = false;
       if (status === 200 && data && data.ok) {
@@ -1842,7 +2007,8 @@
   function poll() {
     if (polling) return;
     polling = true;
-    api("/api/state?rev=" + serverRev, null, function (status, data) {
+    var url = "/api/state?rev=" + serverRev + (isSidecar() && sidecarBgImg ? "&bgRev=" + sidecarBgRev : "");
+    api(url, null, function (status, data) {
       polling = false;
       if (status === 200 && data) {
         handleMessage(Object.assign({ type: "state" }, data));
@@ -1863,18 +2029,21 @@
   function setBusy(on) {
     busy = on;
     $("busy").className = on ? "show" : "";
-    $("recognizeBtn").textContent = on ? "识别中…" : window.AIRTEX_PARAGRAPH ? "识别段落" : "识别公式";
+    var recogLabel = isParagraphMode() ? "识别段落" : "识别公式";
+    $("recognizeBtn").textContent = on ? "识别中…" : recogLabel;
     if ($("fullscreenRecognizeBtn")) {
       $("fullscreenRecognizeBtn").classList.toggle("busy", on);
+      $("fullscreenRecognizeBtn").setAttribute("aria-label", recogLabel);
+      $("fullscreenRecognizeBtn").title = recogLabel;
       var fsTxt = $("fullscreenRecognizeBtn").querySelector(".fullscreen-recog-text");
-      if (fsTxt) fsTxt.textContent = on ? "识别中…" : (window.AIRTEX_PARAGRAPH ? "识别段落" : "识别公式");
+      if (fsTxt) fsTxt.textContent = on ? "识别中…" : recogLabel;
     }
     updateButtons();
   }
 
   var lastLatex = "";
   function applyResult(result, error, recognizedError) {
-    if (pagesEnabled && result && result.pageId && result.pageId !== currentPageId()) return;
+    if ((pagesEnabled || isSidecar()) && result && result.pageId && result.pageId !== currentPageId()) return;
     if (result && result.latex && result.latex !== lastLatex) {
       // 仅供只读诊断；手机不创建结果面板，也不改写剪贴板。
       lastLatex = result.latex;
@@ -1906,7 +2075,7 @@
     setStatus("识别中…", true);
     $("err").className = "";
     var body = { doc: compactDoc() };
-    if (pagesEnabled) body.pageId = currentPageId();
+    if (pagesEnabled || isSidecar()) body.pageId = currentPageId();
     api("/api/recognize", body, function (status, data) {
         if (status !== 200 || (data && data.started === false && !data.recognizing)) {
           setBusy(false);
@@ -1918,7 +2087,7 @@
     if (busy || locked()) return;
     onUp({ type: "touchcancel", cancelable: false });
     if (!doc.strokes.length) return;
-    if (pagesEnabled && dirty) { pendingRecognition = currentPageId(); updateButtons(); syncNow(); return; }
+    if ((pagesEnabled || isSidecar()) && dirty) { pendingRecognition = currentPageId(); updateButtons(); syncNow(); return; }
     requestRecognition();
   };
 
@@ -2046,8 +2215,11 @@
     get selection() { return selection ? selection.indices.length : 0; },
     get view() { return { x: view.x, y: view.y, scale: view.scale }; },
     get palmGuard() { return palmGuard; },
-    get page() { return pagesEnabled ? pageIndex + 1 : 1; },
-    get pages() { return pagesEnabled ? pages.length : 1; },
+    get page() { return isSidecar() ? sidecarPage : (pagesEnabled ? pageIndex + 1 : 1); },
+    get pages() { return isSidecar() ? Math.max(sidecarPage, sidecarTotal || 1) : (pagesEnabled ? pages.length : 1); },
+    get scene() { return serverScene; },
+    get sidecarPage() { return sidecarPage; },
+    get sidecarBgLoaded() { return !!(sidecarBgImg && sidecarBgImg.complete && sidecarBgImg.naturalWidth > 0); },
     get isStylus() { return activeTouchIsStylus; },
     get isIPad() { return isIPad; },
     get palmRest() {
@@ -2118,10 +2290,11 @@
         if (data.session) serverSession = data.session;
         if (typeof data.rev === "number") serverRev = data.rev;
         var helloState = data.state || data;
-        if (pagesEnabled && restoredPages) maybeAdoptServerDoc(helloState);
+        var switchedOnHello = applySceneAndSidecar(helloState);
+        if (!switchedOnHello && pagesEnabled && restoredPages) maybeAdoptServerDoc(helloState);
         if (typeof helloState.clearedSeq === "number") serverCleared = helloState.clearedSeq;
         // 刷新页面后：本地为空而电脑上还有内容 -> 接过来继续写
-        if ((!pagesEnabled || (!restoredPages && pages.length === 1 && currentPageId() === helloPage && editVersion === helloEdit)) && data.doc && (data.doc.strokes || []).length && !doc.strokes.length
+        if (!switchedOnHello && (!pagesEnabled || (!restoredPages && pages.length === 1 && currentPageId() === helloPage && editVersion === helloEdit)) && data.doc && (data.doc.strokes || []).length && !doc.strokes.length
             && !locked()) {
           if (pagesEnabled && data.state && data.state.pageId) pages[pageIndex].id = data.state.pageId;
           adopt(data.doc);
@@ -2132,10 +2305,10 @@
           if (data.state.recognizing) setBusy(!locked());
           var r0 = data.state.result;
           if (r0 && r0.mode && r0.mode !== "phone") r0 = null;
-          if (!pagesEnabled || !data.state.pageId || data.state.pageId === currentPageId()) applyResult(r0, data.state.error, null);
+          if (!(pagesEnabled || isSidecar()) || !data.state.pageId || data.state.pageId === currentPageId()) applyResult(r0, data.state.error, null);
         }
         setStatus(locked() ? "电脑鼠标手写中" : "已连接", true);
-        if (pagesEnabled) { dirty = true; queueSync(); }
+        if (pagesEnabled && !isSidecar()) { dirty = true; queueSync(); }
       } else if (status === 403) {
         setStatus("token 错误", false);
         $("err").textContent = "连接被拒绝：访问地址里的 token 不正确，请重新扫二维码。";

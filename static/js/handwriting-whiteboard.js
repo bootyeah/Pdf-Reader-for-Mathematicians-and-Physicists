@@ -1,7 +1,7 @@
 /* 独立手写草稿白板：窗口隐藏/折叠不结束手机会话。 */
 (() => {
     const MIN_W = 280, MIN_H = 200;
-    let panel, phone, board = null, whole = false, connected = false, collapsed = false, pureMode = false;
+    let panel, phone, board = null, whole = false, connected = false, wasOnline = false, collapsed = false, pureMode = false;
     let engine = '', resultKey = '', expandedHeight = 620, phonePageId = '', collapseDir = 'up';
     const KEY = 'pdf_reader_handwriting_whiteboard';
     let saved = {};
@@ -130,7 +130,7 @@
         $('engine').setAttribute('aria-pressed', String(isDeepSeek));
         $('engine').classList.toggle('active', isDeepSeek);
         $('engine-label').textContent = isDeepSeek ? '第二模型' : '默认模型';
-        $('engine').title = window.ReaderModelLabels?.title('handwriting', isDeepSeek)
+        $('engine').title = window.ReaderModelLabels?.title('whiteboard', isDeepSeek)
             || '切换默认模型 / 第二模型（在 API 管理工具中配置）';
     }
     window.addEventListener('reader-model-labels-changed', updateEngine);
@@ -309,39 +309,57 @@
         Object.assign(panel.style, { width: (Number(saved.w) || 840) + 'px', height: (Number(saved.h) || 620) + 'px',
             left: (saved.x === 0 ? 0 : (Number(saved.x) || Math.max(16, (innerWidth - 840) / 2))) + 'px', top: (saved.y === 0 ? 0 : (Number(saved.y) || 110)) + 'px' });
         updateResponsive(panel.getBoundingClientRect().width);
-        phone = new PhoneHandwriting.Session({ purpose: 'whiteboard', engine: () => engine,
+        phone = (PhoneHandwriting.connect || (opts => new PhoneHandwriting.Session(opts)))({
+            id: 'whiteboard',
+            purpose: 'whiteboard',
+            engine: () => engine,
             active: () => !panel.hidden && !collapsed,
             error: message => {
+                if (panel.hidden) return;
                 const connText = $('connection')?.querySelector('.wb-status-text');
                 if (connText) connText.textContent = '连接待恢复';
                 status(message, 'error');
             },
             change: (data, info) => {
-                if (data.pageId !== undefined && data.pageId !== phonePageId) {
+                if (data.scene !== 'sidecar' && data.pageId !== undefined && data.pageId !== phonePageId) {
                     phonePageId = data.pageId;
                     clearResult(); status();
                 }
                 PhoneHandwriting.renderPairing(phone, info, { qr: $('qr'), link: $('url'),
                     modes: $('phone-modes'), hint: $('connection-hint'), retry: $('tunnel-retry'),
                     placeholder: $('qr-placeholder') });
+                const myRecognizing = !!data.recognizing && (!data.recognizingTarget || data.recognizingTarget === 'whiteboard');
                 const connText = $('connection')?.querySelector('.wb-status-text');
                 if (connText) {
-                    const text = data.recognizing ? '正在识别…' : data.online ? '手机已连接' : connected ? '等待手机重连' : '等待手机扫码';
+                    const text = myRecognizing ? '正在识别…' : data.online ? '手机已连接' : connected ? '等待手机重连' : '等待手机扫码';
                     connText.textContent = text;
                     if ($('connection')) $('connection').title = text;
                 }
                 $('connection').dataset.online = String(!!data.online);
-                if (data.online && !connected) { connected = true; pairing(false); }
-                const isRecognizing = !!data.recognizing;
-                updateRecognizeButton(isRecognizing);
-                if (data.doc && data.doc !== board) { board = data.doc; draw(); }
-                if (data.recognizing) { clearResult(); status('正在识别文字和公式…', 'loading'); }
-                else if (data.error) status(data.error, 'error');
+                if (data.online) connected = true;
+                if (data.online && !wasOnline) { wasOnline = true; pairing(false); }
+                else if (!data.online) { wasOnline = false; }
+                updateRecognizeButton(myRecognizing);
+                $('recognize').disabled = !!data.recognizing;
+                if (data.scene !== 'sidecar' && data.doc && data.doc !== board) { board = data.doc; draw(); }
+                const isFormulaEditingPhone = () => {
+                    const m = document.getElementById('note-modal');
+                    const p = document.getElementById('formula-input-panel');
+                    const btn = document.querySelector('#formula-input-bar [data-mode="phone"]');
+                    return !!(m && !m.classList.contains('hidden') && p && !p.hidden && btn?.getAttribute('aria-pressed') === 'true');
+                };
+                const myError = data.error && (!data.errorTarget ? !isFormulaEditingPhone() : data.errorTarget === 'whiteboard')
+                    ? data.error : '';
+                const myResult = data.result?.latex && (!data.result.target
+                    ? (!isFormulaEditingPhone() && !window.SidecarHandwriting?.isActive?.())
+                    : data.result.target === 'whiteboard') ? data.result : null;
+                if (myRecognizing) { clearResult(); status('正在识别文字和公式…', 'loading'); }
+                else if (myError) status(myError, 'error');
                 else {
                     if ($('status').classList.contains('error') || $('status').textContent.includes('正在识别文字和公式')) status();
-                    if (data.result?.latex && JSON.stringify(data.result) !== resultKey) {
-                        resultKey = JSON.stringify(data.result);
-                        $('code').value = data.result.latex;
+                    if (myResult && JSON.stringify(myResult) !== resultKey) {
+                        resultKey = JSON.stringify(myResult);
+                        $('code').value = myResult.latex;
                         preview();
                         setCodeVisible(false);
                         showResult(true);
@@ -372,12 +390,12 @@
             draw();
         };
         $('reconnect').onclick = () => {
-            connected = false; board = null; clearResult(); pairing(true); draw(); status();
+            connected = false; wasOnline = false; board = null; clearResult(); pairing(true); draw(); status();
             $('qr').hidden = true;
             const ph = $('qr-placeholder'); if (ph) ph.hidden = false;
             $('url').removeAttribute('href'); phone.start(true);
         };
-        $('engine').onclick = () => { engine = engine ? '' : 'deepseek'; updateEngine(); save(); };
+        $('engine').onclick = () => { engine = engine ? '' : 'deepseek'; updateEngine(); save(); if (phone?.id) phone.refresh(); };
         for (const event of ['pointerenter', 'focus']) $('engine').addEventListener(event, () => window.ReaderModelLabels?.refresh());
         updateEngine();
         let copyImageTimer = null;
@@ -631,7 +649,9 @@
     }
     window.HandwritingWhiteboard = {
         show() {
+            window.SidecarHandwriting?.pauseToBoard?.();
             ensure(); panel.hidden = false; window.FloatingWindowLayers?.bringToFront(panel);
+            if (phone?.state?.online) { connected = true; wasOnline = true; pairing(false); }
             if (window.FloatingWindowLayers?.hasViewportBase(panel)) {
                 window.FloatingWindowLayers.syncViewportBottom(panel);
                 clamp();

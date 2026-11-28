@@ -80,6 +80,21 @@
       "web_search": false,
       "api_key": ""
     },
+    "formula_whiteboard": {
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "key_source": "formula_handwriting",
+      "model": "glm-4.6v-flash",
+      "fallback_model": "glm-4v-flash",
+      "models": [],
+      "temperature": null,
+      "timeout": 60,
+      "max_tokens": 0,
+      "thinking": "disabled",
+      "proxy": "",
+      "prompt": "输出这段内容在latex文档中相应段落的代码。\n忠实识别手写草稿中的文字与公式，保留段落、换行和推导顺序，不补写、不解题。\n普通文字作为 LaTeX 正文输出；行内公式用 $...$，独立公式用 $$...$$，排版多行公式用$$\\begin{aligned}& \\\\& \\end{aligned}$$。\n不要使用 \\(\\)、\\[\\] 或 equation 环境包裹公式；不要把整段文字包进数学环境。\n只输出可直接放入 LaTeX 文档正文的代码，不输出 Markdown 围栏、解释或导言区。\n如果画面没有可识别内容，只输出：未检测到内容。",
+      "web_search": false,
+      "api_key": ""
+    },
     "formula_alt": {
       "base_url": "https://api.deepseek.com",
       "key_source": "chat",

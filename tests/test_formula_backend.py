@@ -575,6 +575,82 @@ class FormulaTest(unittest.TestCase):
             app.set_doc({'w': 400, 'h': 200, 'strokes': self.doc['strokes'] * 50001})
         self.assertEqual(app.snapshot()['strokes'], 1)
 
+    def test_unified_session_purpose_routing_and_sidecar_mapping(self):
+        origin, token, sid = self.phone_pair(purpose='unified', activePurpose='whiteboard', activeTarget='whiteboard')
+        try:
+            # 1. Phone page receives multi-page flag in unified mode
+            _, page_html = self.request(origin + '/?t=' + token)
+            self.assertIn(b'window.AIRTEX_PAGES=true', page_html)
+
+            # 2. Write on shared whiteboard -> recognize as formula from note modal, then as paragraph from whiteboard
+            self.request(origin + '/api/update?t=' + token, {'doc': self.doc, 'pageId': 'wb-1'})
+            with patch.object(Upstream, 'reply', '```latex\n\\[a+b=c\\]\n```'):
+                self.post('phone', {'action': 'recognize', 'session': sid, 'purpose': 'formula', 'target': 'formula'})
+                for _ in range(60):
+                    _, st = self.post('phone', {'action': 'state', 'session': sid})
+                    if not st['recognizing']:
+                        break
+                    time.sleep(0.05)
+                self.assertEqual(st['result']['latex'], '$$a+b=c$$')
+                self.assertEqual(st['result']['target'], 'formula')
+                self.assertNotIn('相应段落', Upstream.requests[-1]['messages'][0]['content'][0]['text'])
+
+            with patch.object(Upstream, 'reply', '推导段落 \\(a+b=c\\)'):
+                self.post('phone', {'action': 'recognize', 'session': sid, 'purpose': 'whiteboard', 'target': 'whiteboard'})
+                for _ in range(60):
+                    _, st = self.post('phone', {'action': 'state', 'session': sid})
+                    if not st['recognizing']:
+                        break
+                    time.sleep(0.05)
+                self.assertEqual(st['result']['latex'], '推导段落 $a+b=c$')
+                self.assertEqual(st['result']['target'], 'whiteboard')
+                self.assertEqual(Upstream.requests[-1]['messages'][0]['content'][0]['text'], bridge.WHITEBOARD_PROMPT)
+
+            # 3. Sidecar mapping: bgImage sync, per-page strokes, late previous-page update, and phone page-turn request
+            bg1 = 'data:image/png;base64,AAA111'
+            bg2 = 'data:image/png;base64,BBB222'
+            _, sc = self.post('phone', {
+                'action': 'sidecar_sync', 'session': sid, 'active': True,
+                'page': 1, 'totalPages': 5, 'width': 1000, 'height': 1400, 'bgImage': bg1,
+            })
+            self.assertEqual(sc['scene'], 'sidecar')
+            self.assertEqual(sc['sidecarPage'], 1)
+            self.assertNotIn('sidecarBg', sc, 'PC response omits echoed background bitmap')
+
+            _, phone_st = self.request(origin + '/api/state?t=' + token)
+            self.assertEqual(phone_st['sidecarBg'], bg1)
+            _, phone_st_cached = self.request(origin + '/api/state?t=' + token + '&bgRev=' + str(phone_st['sidecarBgRev']))
+            self.assertNotIn('sidecarBg', phone_st_cached, 'Phone omits unchanged background bitmap')
+
+            stroke_p1 = {'w': 1000, 'h': 1400, 'infinite': True, 'strokes': [{'k': 'pen', 'c': '#16a34a', 'w': 4, 'p': [[120, 300], [420, 320]]}]}
+            self.request(origin + '/api/update?t=' + token, {'doc': stroke_p1, 'pageId': 'sidecar:1', 'client': 'phone-1', 'updateId': 1})
+
+            # Switch to page 2, then send a late stroke for page 1: page 2 must stay clean while page 1 retains the late stroke
+            self.post('phone', {
+                'action': 'sidecar_sync', 'session': sid, 'active': True,
+                'page': 2, 'totalPages': 5, 'width': 1000, 'height': 1400, 'bgImage': bg2,
+            })
+            late_p1 = {'w': 1000, 'h': 1400, 'infinite': True, 'strokes': stroke_p1['strokes'] + [{'k': 'pen', 'w': 3, 'p': [[500, 600], [550, 620]]}]}
+            self.request(origin + '/api/update?t=' + token, {'doc': late_p1, 'pageId': 'sidecar:1', 'client': 'phone-1', 'updateId': 2})
+            _, st_p2 = self.post('phone', {'action': 'state', 'session': sid, 'sidecarDocSeq': 0})
+            self.assertEqual(st_p2['sidecarPage'], 2)
+            self.assertEqual(len(st_p2['doc']['strokes']), 0, 'Active page 2 is not overwritten by late page 1 stroke')
+            self.assertEqual(len(st_p2['sidecarDocs']['1']['strokes']), 2, 'Late page 1 stroke is preserved in sidecarDocs')
+
+            # Phone requests turning to page 3
+            _, req_ans = self.request(origin + '/api/sidecar_page?t=' + token, {'page': 3})
+            self.assertTrue(req_ans['accepted'])
+            _, st_req = self.post('phone', {'action': 'state', 'session': sid})
+            self.assertEqual(st_req['sidecarPageRequest'], 3)
+
+            # Exit sidecar back to board: original board stroke is restored
+            _, back = self.post('phone', {'action': 'sidecar_sync', 'session': sid, 'active': False})
+            self.assertEqual(back['scene'], 'board')
+            self.assertEqual(back['pageId'], 'wb-1')
+            self.assertEqual(len(back['doc']['strokes']), 1)
+        finally:
+            self.post('phone', {'action': 'close', 'session': sid})
+
     def test_validation_and_private_configs(self):
         self.assertEqual(self.post('recognize', {'kind': 'image', 'image': 'bad'})[0], 400)
         self.assertEqual(self.post('recognize', {'kind': 'other'})[0], 400)

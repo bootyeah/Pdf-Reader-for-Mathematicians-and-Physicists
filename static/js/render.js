@@ -1075,6 +1075,7 @@
                 }
             }
             if (list.length) annotationPages.add(pageNum); else annotationPages.delete(pageNum);
+            window.SidecarHandwriting?.notifyAnnotationsChanged?.(pageNum);
         }
 
         function appendAnnotationNodes(anno, pageNum, container, w, h, currentScale, layoutScale = currentScale) {

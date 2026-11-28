@@ -18,12 +18,7 @@ from app.services.tunnel_service import QuickTunnel
 
 MAX_BODY = 12 * 1024 * 1024
 ENGINE_DEEPSEEK = 'deepseek'
-WHITEBOARD_PROMPT = r'''输出这段内容在latex文档中相应段落的代码。
-忠实识别手写草稿中的文字与公式，保留段落、换行和推导顺序，不补写、不解题。
-普通文字作为 LaTeX 正文输出；行内公式用 $...$，独立或多行公式用 $$...$$。
-不要使用 \(\)、\[\] 或 equation 环境包裹公式；不要把整段文字包进数学环境。
-只输出可直接放入 LaTeX 文档正文的代码，不输出 Markdown 围栏、解释或导言区。
-如果画面没有可识别内容，只输出：未检测到内容。'''
+WHITEBOARD_PROMPT = api_settings.WHITEBOARD_PROMPT
 
 _sessions = {}
 _lock = threading.RLock()
@@ -56,6 +51,22 @@ def _config(kind):
     return api_settings.resolve('formula_image' if kind == 'image' else 'formula_handwriting', cfg)
 
 
+def _purpose_base_config(kind, purpose=None):
+    cfg = _config(kind)
+    if purpose == 'whiteboard':
+        cfg = api_settings.resolve('formula_whiteboard', dict(cfg, prompt=WHITEBOARD_PROMPT))
+    return cfg
+
+
+def _whiteboard_prompt():
+    doc = api_settings.load_document()
+    if doc is not None:
+        own = str(doc.get('features', {}).get('formula_whiteboard', {}).get('prompt') or '').strip()
+        if own:
+            return own
+    return WHITEBOARD_PROMPT
+
+
 def _apply_engine(cfg, engine, deepseek=None):
     if engine != ENGINE_DEEPSEEK:
         return dict(cfg)
@@ -66,8 +77,8 @@ def _apply_engine(cfg, engine, deepseek=None):
     return merged
 
 
-def _engine_config(kind, engine, deepseek=None):
-    cfg = _config(kind)
+def _engine_config(kind, engine, deepseek=None, purpose=None):
+    cfg = _purpose_base_config(kind, purpose)
     if engine == ENGINE_DEEPSEEK:
         return _apply_engine(cfg, engine, deepseek)
     if not str(cfg.get('api_key', '')).strip():
@@ -79,7 +90,7 @@ def _engine_config(kind, engine, deepseek=None):
 def _purpose_config(cfg, purpose):
     cfg = dict(cfg)
     if purpose == 'whiteboard':
-        cfg.update(prompt=WHITEBOARD_PROMPT, output_kind='paragraph', enable_text=False)
+        cfg.update(prompt=_whiteboard_prompt(), output_kind='paragraph', enable_text=False)
     return cfg
 
 
@@ -88,7 +99,8 @@ def recognize(body, deepseek=None):
     kind = body.get('kind')
     if kind not in ('image', 'handwriting'):
         raise ValueError('不支持的识别类型')
-    cfg = _purpose_config(_engine_config(kind, _engine(body), deepseek), body.get('purpose'))
+    purpose = body.get('purpose')
+    cfg = _purpose_config(_engine_config(kind, _engine(body), deepseek, purpose=purpose), purpose)
     if not _ocr_slots.acquire(blocking=False):
         raise RuntimeError('正在识别其他公式，请稍后重试')
     try:
@@ -207,8 +219,10 @@ def _pairing(entry):
                 qr.to_image(urls[0]).save(buf, format='PNG')
                 qr_image = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode('ascii')
             entry['pairing_key'] = key
+            ws_url = 'ws://127.0.0.1:%d/ws?role=pc&t=%s' % (
+                entry['server'].port, urllib.parse.quote(entry['base']['token']))
             entry['pairing'] = {'connection': connection, 'status': state['status'],
-                'message': state['message'], 'urls': urls, 'qr': qr_image,
+                'message': state['message'], 'urls': urls, 'qr': qr_image, 'wsUrl': ws_url,
                 'pairingRev': entry.get('pairing', {}).get('pairingRev', 0) + 1}
         return entry['pairing']
 
@@ -229,24 +243,34 @@ def _reap_idle():
 
 
 def _set_engine(entry, engine, deepseek):
-    base = _config('handwriting')
     with _lock:
-        base.update({k: entry['base'][k] for k in ('host', 'port', 'token', 'input_mode',
-                     'auto_recognize', 'require_page_token') if k in entry['base']})
-        cfg = _purpose_config(_apply_engine(base, engine, deepseek), entry.get('purpose'))
+        eff_purpose = entry.get('active_purpose') or entry.get('purpose') or 'formula'
+        session_keys = {k: entry['base'][k] for k in ('host', 'port', 'token', 'input_mode',
+                        'auto_recognize', 'require_page_token', 'pages_enabled') if k in entry['base']}
+    base = _purpose_base_config('handwriting', eff_purpose)
+    base.update(session_keys)
+    cfg = _purpose_config(_apply_engine(base, engine, deepseek), eff_purpose)
+    with _lock:
         entry['server'].app.cfg = entry['server'].cfg = cfg
         entry['engine'] = engine
         entry['deepseek'] = deepseek
 
 
-def _phone_config(entry):
+def _phone_config(entry, req_purpose=None, req_engine=None):
     with _lock:
-        engine = entry['engine']
+        engine = entry['engine'] if req_engine is None else req_engine
+        purpose = req_purpose or entry.get('active_purpose') or entry.get('purpose') or 'formula'
         base_ds = dict(entry.get('deepseek') or {})
+        session_keys = {k: entry['base'][k] for k in ('host', 'port', 'token', 'input_mode',
+                        'auto_recognize', 'require_page_token', 'pages_enabled') if k in entry['base']}
     deepseek = api_settings.resolve('formula_alt', base_ds)
-    _set_engine(entry, engine, deepseek)
-    with _lock:
-        return entry['server'].app.cfg
+    if req_purpose is None and req_engine is None:
+        _set_engine(entry, engine, deepseek)
+        with _lock:
+            return entry['server'].app.cfg
+    base = _purpose_base_config('handwriting', purpose)
+    base.update(session_keys)
+    return _purpose_config(_apply_engine(base, engine, deepseek), purpose)
 
 
 def phone(body, deepseek=None):
@@ -256,25 +280,39 @@ def phone(body, deepseek=None):
     engine = _engine(body)
     if action == 'start':
         connection = _connection(body)
-        base = _config('handwriting')
+        raw_purpose = str(body.get('purpose') or '').strip()
+        unified = raw_purpose == 'unified' or body.get('pagesEnabled') is True
+        purpose = 'whiteboard' if raw_purpose == 'whiteboard' else 'formula'
+        active_purpose = body.get('activePurpose') if body.get('activePurpose') in ('formula', 'whiteboard') else (
+            'whiteboard' if raw_purpose in ('whiteboard', 'unified') else 'formula')
+        active_target = str(body.get('activeTarget') or active_purpose)
+        start_purpose = active_purpose if unified else purpose
+        base = _purpose_base_config('handwriting', start_purpose)
         if engine != ENGINE_DEEPSEEK and not str(base.get('api_key', '')).strip():
-            raise ValueError('请通过 API-Manager.bat 或 airtex/config.json 填写 api_key')
+            alt_base = _purpose_base_config('handwriting', 'formula' if start_purpose == 'whiteboard' else 'whiteboard') if unified else {}
+            if not str(alt_base.get('api_key', '')).strip():
+                raise ValueError('请通过 API-Manager.bat 或 airtex/config.json 填写 api_key')
         base.update(host='0.0.0.0', port=0, token=secrets.token_urlsafe(24),
                     input_mode='phone', auto_recognize=False,
                     require_page_token=True)
-        purpose = 'whiteboard' if body.get('purpose') == 'whiteboard' else 'formula'
-        cfg = _purpose_config(_apply_engine(base, engine, deepseek), purpose)
+        if unified:
+            base['pages_enabled'] = True
+        cfg = _purpose_config(_apply_engine(base, engine, deepseek), start_purpose)
         with _lock:
             if len(_sessions) >= 4:
                 raise ValueError('手机连接过多，请先关闭其他编辑框后重试')
             server = web.AirtexServer(cfg)
+            server.app.active_purpose = active_purpose
+            server.app.active_target = active_target
             server.start()
             sid = secrets.token_urlsafe(24)
             _sessions[sid] = {'server': server, 'seen': time.monotonic(),
-                              'base': base, 'engine': engine, 'deepseek': deepseek, 'purpose': purpose,
+                              'base': base, 'engine': engine, 'deepseek': deepseek,
+                              'purpose': purpose, 'active_purpose': active_purpose,
+                              'active_target': active_target, 'unified': unified,
                               'connection': 'lan', 'tunnel': None}
             entry = _sessions[sid]
-            server.app.config_provider = lambda: _phone_config(entry)
+            server.app.config_provider = lambda p=None: _phone_config(entry, req_purpose=p)
             if not _reaper_started:
                 threading.Thread(target=_reap, daemon=True).start()
                 _reaper_started = True
@@ -300,19 +338,54 @@ def phone(body, deepseek=None):
             raise ValueError('手机连接已结束，请重新扫码')
         entry['seen'] = time.monotonic()
         app = entry['server'].app
-        need_set = (action != 'state' or entry.get('engine') != engine or entry.get('deepseek') != deepseek)
+        active_purpose = body.get('activePurpose')
+        active_target = body.get('activeTarget')
+        context_changed = False
+        if active_purpose in ('formula', 'whiteboard') and entry.get('active_purpose') != active_purpose:
+            entry['active_purpose'] = active_purpose
+            context_changed = True
+        if isinstance(active_target, str) and active_target and entry.get('active_target') != active_target:
+            entry['active_target'] = active_target
+            context_changed = True
+        need_set = (action != 'state' or entry.get('engine') != engine or entry.get('deepseek') != deepseek or context_changed)
+    if context_changed:
+        app.set_active_context(active_purpose, active_target)
     if need_set:
         _set_engine(entry, engine, deepseek)
     if action == 'connection':
         _set_connection(entry, _connection(body), retry=body.get('retry') is True)
         return {'ok': True, 'pairing': _pairing(entry)}
-    if action == 'recognize':
-        app.start_recognize()
+    if action == 'context':
+        pass
+    elif action == 'recognize':
+        req_purpose = body.get('purpose') if body.get('purpose') in ('formula', 'whiteboard') else (
+            entry.get('active_purpose') or entry.get('purpose') or 'formula')
+        req_target = str(body.get('target') or req_purpose)
+        cfg_override = _phone_config(entry, req_purpose=req_purpose, req_engine=engine)
+        app.start_recognize(cfg_override=cfg_override, purpose=req_purpose, target=req_target)
     elif action == 'clear':
         app.clear(from_pc=True)
+    elif action == 'sidecar_sync':
+        app.set_sidecar_state(
+            active=bool(body.get('active', True)),
+            page=body.get('page', 1),
+            total_pages=body.get('totalPages', 1),
+            w=body.get('width', 1000),
+            h=body.get('height', 1414),
+            bg_image=body.get('bgImage'),
+            initial_doc=body.get('doc'),
+        )
+    elif action == 'sidecar_clear':
+        app.clear_sidecar_page(body.get('page'))
+    elif action == 'sidecar_reset':
+        app.reset_sidecar()
     elif action != 'state':
         raise ValueError('未知的手机操作')
-    result = {'ok': True, **app.snapshot(since_rev=body.get('rev'))}
+    result = {'ok': True, **app.snapshot(
+        since_rev=body.get('rev'),
+        since_bg_rev=app.sidecar_bg_rev,
+        since_sidecar_seq=body.get('sidecarDocSeq'),
+    )}
     pairing = _pairing(entry)
     if body.get('pairingRev') != pairing['pairingRev']:
         result['pairing'] = pairing
@@ -360,7 +433,7 @@ def handle(handler, deepseek=None):
         if route == '/api/formula/recognize':
             result = recognize(body, deepseek)
         elif route == '/api/formula/phone':
-            handler._formula_state_poll = body.get('action') == 'state'
+            handler._formula_state_poll = body.get('action') in ('state', 'context', 'sidecar_sync')
             result = phone(body, deepseek)
         else:
             _drain_request(handler)

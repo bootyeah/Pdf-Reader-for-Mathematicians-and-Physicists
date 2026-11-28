@@ -25,10 +25,11 @@ FEATURES = {
     'dictionary': ('单词 / 短语词典', '框选文字后查询词义、音标、用法与例句。', '翻译'),
     'translation': ('整句 / 段落翻译', '框选后的整句、整段翻译。', '翻译'),
     'formula_image': ('图片公式识别', '识图、粘贴图片与框选 PDF 公式的默认模型。', '视觉'),
-    'formula_handwriting': ('手写 / 手机识别', '编辑框手写、手机识别及独立手写白板共用的默认接口、Key、模型与调用参数。白板使用独立段落提示词。', '视觉'),
+    'formula_handwriting': ('手写 / 手机识别', '编辑框内的电脑手写与手机手写公式识别共用的默认接口、Key、模型与调用参数。', '视觉'),
+    'formula_whiteboard': ('白板 / 草稿本识别', '独立手写白板与右侧无界草稿本「转 LaTeX」共用的接口、Key、模型与段落识别提示词。', '视觉'),
     # 第二模型不是只换接口：formula_bridge._apply_engine 会把本项的整组配置覆盖到默认识别项上，
     # 温度、超时、输出上限、思考、代理、备用模型都跟着换，只有提示词留空时才保留默认项的提示词。
-    'formula_alt': ('公式识别 · 第二模型', '按下编辑框公式面板或独立手写白板的「第二模型」后，接口、Key、模型与调用参数（温度、超时、输出上限、思考、代理、备用模型）整组改用此项。白板使用独立段落提示词。', '视觉'),
+    'formula_alt': ('公式识别 · 第二模型', '按下编辑框公式面板或独立手写白板的「第二模型」后，接口、Key、模型与调用参数（温度、超时、输出上限、思考、代理、备用模型）整组改用此项。白板使用「白板 / 草稿本识别」的段落提示词。', '视觉'),
     'page_grid': ('页面自动分格', '纯图片 PDF 页面的文字行识别与高精度框选定位。默认复用图片公式识别的 GLM 模型与密钥。', '视觉'),
 }
 COMMON = dict(base_url='', api_key='', key_source='', model='', fallback_model='',
@@ -48,17 +49,32 @@ PAGE_GRID_PROMPT = (
     '4. 只输出编号行列表本身，不要输出 Markdown 代码块围栏或任何额外说明。'
 )
 
+WHITEBOARD_PROMPT = r'''输出这段内容在latex文档中相应段落的代码。
+忠实识别手写草稿中的文字与公式，保留段落、换行和推导顺序，不补写、不解题。
+普通文字作为 LaTeX 正文输出；行内公式用 $...$，独立公式用 $$...$$，排版多行公式用$$\begin{aligned}& \\& \end{aligned}$$。
+不要使用 \(\)、\[\] 或 equation 环境包裹公式；不要把整段文字包进数学环境。
+只输出可直接放入 LaTeX 文档正文的代码，不输出 Markdown 围栏、解释或导言区。
+如果画面没有可识别内容，只输出：未检测到内容。'''
+
 # Google AI Studio 的 OpenAI 兼容端点；Key 走 Authorization: Bearer，与 DeepSeek 调用方式一致。
 # Gemini 的温度按具体型号自动处理；超时 180s，思考默认 high，代理默认跟随系统代理。
 GEMINI_CHAT_DEFAULT = dict(COMMON, base_url='https://generativelanguage.googleapis.com/v1beta/openai',
                            model='gemini-4-argon', fallback_model='gemini-3.8-flash',
                            temperature=None, timeout=180, thinking='high', proxy='system')
+WHITEBOARD_DEFAULT = dict(COMMON, base_url='https://open.bigmodel.cn/api/paas/v4',
+                          key_source='formula_handwriting', model='glm-4.6v-flash',
+                          fallback_model='glm-4v-flash', temperature=None,
+                          timeout=60, thinking='disabled', prompt=WHITEBOARD_PROMPT)
 PAGE_GRID_DEFAULT = dict(COMMON, base_url='https://open.bigmodel.cn/api/paas/v4',
                          key_source='formula_image', model='glm-4.6v-flash',
                          fallback_model='glm-4v-flash', temperature=None,
                          timeout=180, thinking='disabled', prompt=PAGE_GRID_PROMPT)
 # 后来新增的功能：旧 settings.json 里没有时按默认值补齐，避免整份配置因缺项被判为损坏。
-ADDED_FEATURES = {'chat_gemini': GEMINI_CHAT_DEFAULT, 'page_grid': PAGE_GRID_DEFAULT}
+ADDED_FEATURES = {
+    'chat_gemini': GEMINI_CHAT_DEFAULT,
+    'formula_whiteboard': WHITEBOARD_DEFAULT,
+    'page_grid': PAGE_GRID_DEFAULT,
+}
 
 
 def detect_model_family(model=None, base_url=None):
@@ -89,6 +105,16 @@ def upgrade(doc):
     """Fill in features added after the file was written; leaves everything else untouched."""
     features = doc.get('features') if isinstance(doc, dict) else None
     if isinstance(features, dict):
+        if 'formula_whiteboard' not in features:
+            seed = copy.deepcopy(WHITEBOARD_DEFAULT)
+            fh = features.get('formula_handwriting')
+            if isinstance(fh, dict):
+                for k in ('base_url', 'model', 'fallback_model', 'temperature', 'timeout', 'max_tokens', 'thinking', 'proxy'):
+                    if k in fh:
+                        seed[k] = copy.deepcopy(fh[k])
+                seed['api_key'] = ''
+                seed['key_source'] = fh.get('key_source') or 'formula_handwriting'
+            features['formula_whiteboard'] = seed
         if 'page_grid' not in features:
             seed = copy.deepcopy(PAGE_GRID_DEFAULT)
             fi = features.get('formula_image')
@@ -176,12 +202,14 @@ def legacy_document():
         return dict(COMMON, **{k: v for k, v in cfg.items() if k in COMMON})
     alt = dict(vision(image), **old['DEEPSEEK_VISION'])
     alt.update(api_key='', key_source='chat', prompt='')
+    wb = dict(vision(hand), api_key='', key_source='formula_handwriting', prompt=WHITEBOARD_PROMPT)
     grid = dict(vision(image), api_key='', key_source='formula_image',
                 timeout=180, prompt=PAGE_GRID_PROMPT)
     return {'version': 1, 'revision': 'legacy', 'updated_at': '', 'features': {
         'chat': chat, 'chat_gemini': copy.deepcopy(GEMINI_CHAT_DEFAULT), 'dictionary': dictionary,
         'translation': dict(dictionary, api_key='', key_source='dictionary', prompt=old['SENTENCE_PROMPT']),
-        'formula_image': vision(image), 'formula_handwriting': vision(hand), 'formula_alt': alt,
+        'formula_image': vision(image), 'formula_handwriting': vision(hand),
+        'formula_whiteboard': wb, 'formula_alt': alt,
         'page_grid': grid,
     }}
 
@@ -211,6 +239,13 @@ def prompt_preview(doc, fid, context=None):
     features = doc['features']
     own = str(features[fid].get('prompt') or '')
     source = ''
+    if fid == 'formula_whiteboard':
+        stripped = own.strip()
+        text = stripped or WHITEBOARD_PROMPT
+        editable = own if stripped else WHITEBOARD_PROMPT
+        if not stripped:
+            source = '内置段落提示词'
+        return dict(text=text, editable_text=editable, source=source, readonly=False)
     if not fid.startswith('formula_'):
         if fid == 'chat_gemini' and not own:
             own = str(features['chat'].get('prompt') or '')
@@ -221,8 +256,9 @@ def prompt_preview(doc, fid, context=None):
     if context not in ('image', 'pc', 'phone', 'whiteboard'):
         raise ConfigError('无效的识别场景。')
     if context == 'whiteboard':
-        text = _literals(ROOT / 'app/services/formula_service.py')['WHITEBOARD_PROMPT']
-        return dict(text=text, editable_text=text, source='独立白板固定提示词', readonly=True)
+        wb_own = str(features.get('formula_whiteboard', {}).get('prompt') or '').strip()
+        text = wb_own or WHITEBOARD_PROMPT
+        return dict(text=text, editable_text=text, source='formula_whiteboard', readonly=True)
     base_fid = 'formula_image' if context == 'image' else 'formula_handwriting'
     native = _literals(ROOT / ('tex/latex_ocr.py' if context == 'image' else 'airtex/core.py'))
     defaults = dict(native['DEFAULT_CONFIG'])
@@ -363,8 +399,10 @@ def resolve(fid, defaults, document=None):
     cfg = dict(defaults, **doc['features'][fid])
     cfg['api_key'] = api_key_for(doc, fid)
     # Empty vision prompts preserve tex / airtex's mode-aware prompt.
-    if (fid.startswith('formula_') or fid == 'page_grid') and not cfg['prompt']:
-        cfg['prompt'] = defaults.get('prompt', '') or (PAGE_GRID_PROMPT if fid == 'page_grid' else '')
+    if (fid.startswith('formula_') or fid == 'page_grid') and not cfg['prompt'].strip():
+        cfg['prompt'] = defaults.get('prompt', '') or (
+            WHITEBOARD_PROMPT if fid == 'formula_whiteboard' else PAGE_GRID_PROMPT if fid == 'page_grid' else ''
+        )
     return cfg
 
 

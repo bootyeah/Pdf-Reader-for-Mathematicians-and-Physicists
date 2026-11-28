@@ -34,7 +34,7 @@ const saveArtifacts = process.env.READER_TEST_ARTIFACTS === '1';
             if (delay) await new Promise(r => setTimeout(r, delay));
             answer = failed ? { ok: false, error: '测试：识别服务暂时不可用' } : { ok: true, latex };
         } else if (body.action === 'start') {
-            const sid = body.purpose === 'whiteboard' ? 'whiteboard-session' : 'test-session';
+            const sid = 'unified-session';
             connections.set(sid, { connection: body.connection || 'lan', rev: 0 });
             answer = { ok: true, session: sid, ...pairingFor(sid) };
         } else if (body.action === 'connection') {
@@ -44,8 +44,11 @@ const saveArtifacts = process.env.READER_TEST_ARTIFACTS === '1';
         }
         else if (body.action === 'close') { closes++; answer = { ok: true }; }
         else {
-            const latex = body.session === 'whiteboard-session' ? whiteboardLatex : phoneLatex;
-            answer = { ok: true, pairing: pairingFor(body.session), online: phoneOnline, doc: { w: 1000, h: 2000, strokes: [{ k: 'pen', w: 4, p: [[700, 1700], [900, 1760]] }] }, result: latex ? { latex, cost: 1 } : null };
+            const activeTarget = body.target || body.activeTarget || 'formula';
+            const useWb = activeTarget === 'whiteboard' && !!whiteboardLatex;
+            const latex = useWb ? whiteboardLatex : phoneLatex;
+            const target = useWb ? 'whiteboard' : 'formula';
+            answer = { ok: true, pairing: pairingFor(body.session), online: phoneOnline, doc: { w: 1000, h: 2000, strokes: [{ k: 'pen', w: 4, p: [[700, 1700], [900, 1760]] }] }, result: latex ? { latex, cost: 1, target } : null };
         }
         await route.fulfill({ json: answer }).catch(() => {});
     });
@@ -301,8 +304,8 @@ const saveArtifacts = process.env.READER_TEST_ARTIFACTS === '1';
         await page.waitForFunction(() => document.getElementById('whiteboard-url').href.startsWith('https://synthetic-board'));
         if (saveArtifacts) await page.screenshot({ path: path.join(resultsDir, 'whiteboard-phone-internet.png') });
         assert.equal(await page.evaluate(() => localStorage.getItem('pdf_reader_phone_connection_whiteboard')), 'internet');
-        pass('草稿白板共享互联网入口，远程二维码和偏好独立于手机公式输入');
-        assert.equal(calls.filter(c => c.action === 'start' && c.purpose === 'whiteboard').length, 1);
+        pass('草稿白板共享互联网入口与统一手机连接，无需重复扫码');
+        assert.equal(calls.filter(c => c.action === 'start').length, 1, '白板复用公式框已建立的统一手机连接');
         await page.mouse.click(1350, 900); assert.equal(await whiteboard.isVisible(), true);
         phoneOnline = true; await page.locator('#whiteboard-pairing').waitFor({ state: 'hidden' });
         const beforeDrag = await whiteboard.boundingBox();
@@ -348,7 +351,7 @@ const saveArtifacts = process.env.READER_TEST_ARTIFACTS === '1';
         assert.equal(await page.locator('#whiteboard-result').isVisible(), true);
         pass('回到纯白板释放全部结果区空间，轮询/折叠不重开结果；可取回修改过的代码，新识别结果正常显示');
         const pureHeight = (await whiteboard.boundingBox()).height;
-        const startsBeforePure = calls.filter(c => c.action === 'start' && c.purpose === 'whiteboard').length;
+        const startsBeforePure = calls.filter(c => c.action === 'start').length;
         await page.locator('#whiteboard-pure').click();
         assert.equal(await page.evaluate(() => HandwritingWhiteboard.isPureMode()), true);
         assert.equal(await page.locator('#whiteboard-actions').isVisible(), false);
@@ -364,7 +367,7 @@ const saveArtifacts = process.env.READER_TEST_ARTIFACTS === '1';
         await page.keyboard.press('v'); await page.keyboard.press('v');
         assert.equal(await page.evaluate(() => HandwritingWhiteboard.isPureMode()), true);
         assert.equal(await page.locator('#whiteboard-code').inputValue(), whiteboardLatex);
-        assert.equal(calls.filter(c => c.action === 'start' && c.purpose === 'whiteboard').length, startsBeforePure);
+        assert.equal(calls.filter(c => c.action === 'start').length, startsBeforePure);
         await page.keyboard.press('v');
         await page.locator('#whiteboard-pure').click(); // Changing mode must not expand the collapsed board.
         assert.ok((await whiteboard.boundingBox()).height < 50);
@@ -373,12 +376,12 @@ const saveArtifacts = process.env.READER_TEST_ARTIFACTS === '1';
         assert.equal(await page.locator('#whiteboard-actions').isVisible(), true);
         pass('纯白板模式与 V/按钮折叠独立；展开恢复原模式、尺寸、草稿和手机连接');
         await page.locator('#whiteboard-engine').click(); await page.waitForTimeout(800);
-        assert.equal(calls.filter(c => c.action === 'state' && c.session === 'whiteboard-session').at(-1).engine, 'deepseek');
-        assert.equal(calls.filter(c => c.action === 'state' && c.session === 'test-session').at(-1).engine, '');
+        assert.equal(calls.filter(c => c.action === 'state').at(-1).engine, 'deepseek');
+        assert.equal(calls.filter(c => c.action === 'state').at(-1).activeTarget, 'whiteboard');
         await page.locator('#whiteboard-close').click();
         await textTool.click(); await textTool.click();
         assert.equal(await whiteboard.isVisible(), true);
-        assert.equal(calls.filter(c => c.action === 'start' && c.purpose === 'whiteboard').length, 1);
+        assert.equal(calls.filter(c => c.action === 'start').length, 1);
         assert.equal(closes, previousCloses);
         if (saveArtifacts) await page.screenshot({ path: path.join(resultsDir, 'handwriting-whiteboard.png') });
         await page.setViewportSize({ width: 600, height: 500 }); await page.waitForTimeout(200);
@@ -387,6 +390,9 @@ const saveArtifacts = process.env.READER_TEST_ARTIFACTS === '1';
         await textTool.click(); assert.equal(await whiteboard.isVisible(), false);
         await page.evaluate(() => addAnnotation(1, { id: 'box', type: 'text', color: '#000000', x: .12, y: .1, text: 'New note' }));
         await open(); await mode('phone');
+        await page.waitForTimeout(200);
+        assert.equal(calls.filter(c => c.action === 'state').at(-1).engine, '');
+        assert.equal(calls.filter(c => c.action === 'state').at(-1).activeTarget, 'formula');
         assert.equal(await page.locator('#formula-code').inputValue(), '$z=3$');
         pass('白板二次入口、外部点击常驻、自由拖动缩放、折叠隐藏保持同步、双模型和识别结果隔离、小窗口适配');
         assert.deepEqual(errors, []);

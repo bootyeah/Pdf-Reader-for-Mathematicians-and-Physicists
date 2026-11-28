@@ -2,8 +2,11 @@
 (() => {
     let models = {}, pending = null;
     function name(kind, alternate = false) {
-        return models[alternate ? 'formula_alt' : kind === 'image' ? 'formula_image' : 'formula_handwriting']
-            || (alternate ? '第二模型' : '默认模型');
+        const key = alternate ? 'formula_alt'
+            : kind === 'image' ? 'formula_image'
+            : kind === 'whiteboard' ? 'formula_whiteboard'
+            : 'formula_handwriting';
+        return models[key] || (alternate ? '第二模型' : '默认模型');
     }
     function title(kind, alternate) {
         const current = name(kind, alternate), target = name(kind, !alternate);
@@ -17,7 +20,7 @@
                 if (!response.ok) throw new Error('Config unavailable');
                 const data = await response.json();
                 models = Object.fromEntries(Object.entries(data.formula_models || {})
-                    .filter(([key, value]) => ['formula_image', 'formula_handwriting', 'formula_alt'].includes(key)
+                    .filter(([key, value]) => ['formula_image', 'formula_handwriting', 'formula_whiteboard', 'formula_alt'].includes(key)
                         && typeof value === 'string' && value.trim()));
             } catch (_) {
                 models = {}; // Do not claim an old model is still the active configuration.
