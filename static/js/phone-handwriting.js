@@ -66,13 +66,7 @@
                 try { msg = JSON.parse(ev.data); } catch (_) { return; }
                 if (msg?.type !== 'state') return;
                 if (Number.isFinite(msg.seq) && msg.seq < (this.state.seq ?? -1)) return;
-                const prevSidecarSeq = this.sidecarDocSeq;
-                if (Number.isFinite(msg.sidecarDocSeq)) this.sidecarDocSeq = Math.max(this.sidecarDocSeq, msg.sidecarDocSeq);
-                this.state = { ...this.state, ...msg };
-                this.change(this.state, this.pairing);
-                if (this.sidecarTrack && Number.isFinite(msg.sidecarDocSeq) && msg.sidecarDocSeq > prevSidecarSeq && !msg.sidecarDocs) {
-                    this.refresh();
-                }
+                this.applyState(msg, true);
             };
             sock.onclose = () => {
                 if (this.ws !== sock) return;
@@ -82,6 +76,33 @@
                 }
             };
             sock.onerror = () => {};
+        }
+        applyState(payload, fromWs = false) {
+            // sidecarDocs 是一次性增量快照，绝不持久化进 this.state；
+            // 否则后续切页或退出映射时会把旧快照反复回放，导致非当前页只剩早先一部分笔迹。
+            const { sidecarDocs, ...rest } = payload;
+            const prevSidecarSeq = this.sidecarDocSeq;
+            const hasDelta = !!(sidecarDocs && typeof sidecarDocs === 'object');
+            if (Number.isFinite(payload.sidecarDocSeq)) {
+                if (!fromWs || hasDelta) {
+                    this.sidecarDocSeq = Math.max(this.sidecarDocSeq, payload.sidecarDocSeq);
+                } else {
+                    const wsCoversActive = payload.sidecarDocSeq === prevSidecarSeq + 1
+                        && payload.scene === 'sidecar'
+                        && Number.isInteger(payload.sidecarPage) && payload.sidecarPage > 0
+                        && payload.sidecarDocPage === payload.sidecarPage
+                        && !!payload.doc
+                        && (!payload.pageId || payload.pageId === `sidecar:${payload.sidecarPage}`);
+                    if (wsCoversActive) {
+                        this.sidecarDocSeq = Math.max(this.sidecarDocSeq, payload.sidecarDocSeq);
+                    }
+                }
+            }
+            this.state = { ...this.state, ...rest };
+            this.change(hasDelta ? { ...this.state, sidecarDocs } : this.state, this.pairing);
+            if (fromWs && this.sidecarTrack && Number.isFinite(payload.sidecarDocSeq) && payload.sidecarDocSeq > this.sidecarDocSeq) {
+                this.refresh();
+            }
         }
         close() {
             ++this.generation; clearTimeout(this.timer); this.timer = null;
@@ -173,11 +194,14 @@
                 const data = await api(payload);
                 if (generation !== this.generation) return;
                 this.failures = 0;
-                if (Number.isFinite(data.seq) && data.seq < (this.state.seq ?? -1)) return;
+                if (Number.isFinite(data.seq) && data.seq < (this.state.seq ?? -1)) {
+                    if (this.sidecarTrack && Number.isFinite(data.sidecarDocSeq) && data.sidecarDocSeq > this.sidecarDocSeq) {
+                        this.refreshPending = true;
+                    }
+                    return;
+                }
                 if (!this.switching) this.acceptPairing(data.pairing);
-                if (Number.isFinite(data.sidecarDocSeq)) this.sidecarDocSeq = Math.max(this.sidecarDocSeq, data.sidecarDocSeq);
-                this.state = { ...this.state, ...data };
-                this.change(this.state, this.pairing);
+                this.applyState(data, false);
             } catch (error) {
                 if (generation === this.generation) { this.failures++; this.error(error.message); }
             } finally {
@@ -196,11 +220,14 @@
                 if (this.sidecarTrack) body.sidecarDocSeq = this.sidecarDocSeq;
                 const data = await api(body);
                 if (generation !== this.generation) return;
-                if (Number.isFinite(data.seq) && data.seq < (this.state.seq ?? -1)) return;
+                if (Number.isFinite(data.seq) && data.seq < (this.state.seq ?? -1)) {
+                    if (this.sidecarTrack && Number.isFinite(data.sidecarDocSeq) && data.sidecarDocSeq > this.sidecarDocSeq) {
+                        this.refresh();
+                    }
+                    return data;
+                }
                 this.acceptPairing(data.pairing);
-                if (Number.isFinite(data.sidecarDocSeq)) this.sidecarDocSeq = Math.max(this.sidecarDocSeq, data.sidecarDocSeq);
-                this.state = { ...this.state, ...data };
-                this.change(this.state, this.pairing);
+                this.applyState(data, false);
                 return data;
             } catch (error) { if (generation === this.generation) this.error(error.message); }
         }

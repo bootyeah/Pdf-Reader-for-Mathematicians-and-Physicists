@@ -27,6 +27,8 @@
     let scrollFollowTimer = 0;
     let syncGeneration = 0;
     let katexCssPromise = null;
+    let syncedSessionId = '';
+    const syncedPages = new Set();
 
     const $ = id => document.getElementById('sidecar-hw-' + id);
 
@@ -427,6 +429,13 @@
                 if (sidecarActive) statusToast(message, 'error');
             },
             change: (data, pairing) => {
+                if (phone?.id && phone.id !== syncedSessionId) {
+                    syncedSessionId = phone.id;
+                    syncedPages.clear();
+                } else if (!phone?.id && syncedSessionId) {
+                    syncedSessionId = '';
+                    syncedPages.clear();
+                }
                 phoneOnline = !!data.online;
                 if (phoneOnline) phoneConnectedOnce = true;
 
@@ -435,16 +444,22 @@
                     for (const [pStr, doc] of Object.entries(data.sidecarDocs)) {
                         const p = Number(pStr);
                         if (Number.isInteger(p) && p > 0 && doc) {
-                            pageDocs.set(p, doc);
-                            scheduleDrawPageInk(p);
+                            syncedPages.add(p);
+                            if (pageDocs.get(p) !== doc) {
+                                pageDocs.set(p, doc);
+                                scheduleDrawPageInk(p);
+                            }
                         }
                     }
                 }
                 // 2. 当前激活草稿页实时笔迹（兼容本地 WebSocket 直推与单页状态快照）
                 if (data.scene === 'sidecar' && Number.isInteger(data.sidecarPage) && data.sidecarPage > 0 && data.doc) {
                     if (!data.pageId || data.pageId === `sidecar:${data.sidecarPage}`) {
-                        pageDocs.set(data.sidecarPage, data.doc);
-                        scheduleDrawPageInk(data.sidecarPage);
+                        syncedPages.add(data.sidecarPage);
+                        if (pageDocs.get(data.sidecarPage) !== data.doc) {
+                            pageDocs.set(data.sidecarPage, data.doc);
+                            scheduleDrawPageInk(data.sidecarPage);
+                        }
                     }
                 }
 
@@ -727,6 +742,10 @@
         const bgImage = await captureSidecarSnapshot(targetPage);
         if (myGen !== syncGeneration || !sidecarActive || activePage !== targetPage || !p.id) return;
 
+        if (p.id !== syncedSessionId) {
+            syncedSessionId = p.id;
+            syncedPages.clear();
+        }
         const payload = {
             active: true,
             page: targetPage,
@@ -735,10 +754,13 @@
             height: h,
             bgImage
         };
-        if (includeInitialDoc && existing?.strokes?.length) {
+        if (includeInitialDoc && existing?.strokes?.length && !syncedPages.has(targetPage)) {
             payload.doc = existing;
         }
-        await p.action('sidecar_sync', payload);
+        const res = await p.action('sidecar_sync', payload);
+        if (res && p.id === syncedSessionId) {
+            syncedPages.add(targetPage);
+        }
     }
 
     async function activatePage(pageNum, options = {}) {
@@ -908,6 +930,7 @@
         drawFrames.clear();
         pageDocs.clear();
         pageResults.clear();
+        syncedPages.clear();
         clearTimeout(bgRefreshTimer);
         clearTimeout(scrollFollowTimer);
         syncGeneration++;

@@ -87,6 +87,7 @@ class AppCore:
         self.sidecar_bg_rev = 0
         self.sidecar_docs = {}             # page_num(int) -> sanitized doc
         self.sidecar_doc_seq = 0
+        self.sidecar_doc_page = 0          # 最近一次 sidecar_doc_seq 变更所属的页码
         self.sidecar_doc_seqs = {}         # page_num(int) -> seq
         self.sidecar_page_request = 0
         self.sidecar_page_req_seq = 0
@@ -159,6 +160,7 @@ class AppCore:
                 "sidecarSize": list(self.sidecar_size),
                 "sidecarBgRev": self.sidecar_bg_rev,
                 "sidecarDocSeq": self.sidecar_doc_seq,
+                "sidecarDocPage": self.sidecar_doc_page,
                 "sidecarPageRequest": self.sidecar_page_request,
                 "sidecarPageReqSeq": self.sidecar_page_req_seq,
             }
@@ -430,6 +432,7 @@ class AppCore:
                 old = self.sidecar_docs.get(p) or {"w": self.sidecar_size[0], "h": self.sidecar_size[1], "infinite": True, "strokes": []}
                 self.sidecar_docs[p] = dict(old, strokes=[])
                 self.sidecar_doc_seq += 1
+                self.sidecar_doc_page = p
                 self.sidecar_doc_seqs[p] = self.sidecar_doc_seq
                 self.seq += 1
 
@@ -438,6 +441,7 @@ class AppCore:
         with self.lock:
             self.sidecar_docs.clear()
             self.sidecar_doc_seqs.clear()
+            self.sidecar_doc_page = 0
             self.sidecar_page_request = 0
             self.sidecar_bg = ""
             if self.scene == "sidecar":
@@ -512,6 +516,7 @@ class AppCore:
             if is_sidecar_pid:
                 self.sidecar_docs[sc_page] = deepcopy(doc)
                 self.sidecar_doc_seq += 1
+                self.sidecar_doc_page = sc_page
                 self.sidecar_doc_seqs[sc_page] = self.sidecar_doc_seq
                 if self.scene != "sidecar" or sc_page != self.sidecar_page:
                     late_other_page = True
@@ -524,6 +529,7 @@ class AppCore:
                 elif self.sidecar_page > 0:
                     self.sidecar_docs[self.sidecar_page] = deepcopy(doc)
                     self.sidecar_doc_seq += 1
+                    self.sidecar_doc_page = self.sidecar_page
                     self.sidecar_doc_seqs[self.sidecar_page] = self.sidecar_doc_seq
             if not late_other_page:
                 if page_id is not None and page_id != self.page_id:
@@ -562,6 +568,7 @@ class AppCore:
             if self.scene == "sidecar" and self.sidecar_page > 0:
                 self.sidecar_docs[self.sidecar_page] = deepcopy(self.doc)
                 self.sidecar_doc_seq += 1
+                self.sidecar_doc_page = self.sidecar_page
                 self.sidecar_doc_seqs[self.sidecar_page] = self.sidecar_doc_seq
             elif self.scene == "board":
                 self.board_doc = deepcopy(self.doc)
@@ -589,6 +596,7 @@ class AppCore:
                 if self.scene == "sidecar" and self.sidecar_page > 0:
                     self.sidecar_docs[self.sidecar_page] = deepcopy(self.doc)
                     self.sidecar_doc_seq += 1
+                    self.sidecar_doc_page = self.sidecar_page
                     self.sidecar_doc_seqs[self.sidecar_page] = self.sidecar_doc_seq
                 elif self.scene == "board":
                     self.board_doc = deepcopy(self.doc)

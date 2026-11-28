@@ -692,7 +692,7 @@
       if (locked() || target < 1 || target > Math.max(sidecarPage, sidecarTotal || 1)) return;
       onUp({ type: "touchcancel", cancelable: false });
       saveLocalPage();
-      if (dirty) syncNow();
+      if (dirty) enqueueCurrentSnapshot();
       api("/api/sidecar_page", { page: target }, function (st) {
         if (st !== 200) toast("草稿纸切换失败，请重试");
       });
@@ -717,6 +717,7 @@
   var dirty = false;        // 本地有未同步的修改
   var sending = false;
   var sending2 = false;
+  var syncQueue = [];       // 切页/退出前尚未落盘的快照，严格按 updateId 串行补发
 
   // 电脑端当前的输入模式：phone=手机手写（本页可写）；pc=鼠标手写（本页暂停）。
   // 两种模式在电脑上是两块不同的画布，所以这里必须真的停下来，
@@ -953,7 +954,7 @@
       $("lock").className = "";
       setStatus("已连接", true);
       redraw();
-      if (dirty) syncNow();          // 暂停期间的本地修改在这里补发
+      if (dirty || syncQueue.length) syncNow();          // 暂停期间的本地修改在这里补发
     }
     updateButtons();
     $("hint").className = (doc.strokes.length || locked()) ? "hide" : "";
@@ -1690,6 +1691,7 @@
   var busy = false;
   var serverSession = null;      // 服务端会话 id：变了说明电脑端重启过
   var serverRev = -1;            // 服务端文档版本号
+  var serverSeq = -1;            // 服务端状态广播序号（防迟到轮询回滚新状态）
   var serverCleared = 0;         // 服务端主动清空的次数（电脑端点「清空」）
   var editVersion = Date.now() * 1000, polling = false, lastWsMessage = Date.now(), syncError = '';
 
@@ -1728,7 +1730,7 @@
       lastWsMessage = Date.now();
       setStatus(locked() ? "电脑鼠标手写中" : "已连接", true);
       send({ type: "hello", client: CLIENT_ID, device: navigator.userAgent });
-      if (dirty && !locked()) syncNow();
+      if ((dirty || syncQueue.length) && !locked()) syncNow();
     };
     ws.onmessage = function (ev) {
       lastWsMessage = Date.now();
@@ -1771,7 +1773,7 @@
     if (nextScene === "sidecar") {
       if (serverScene !== "sidecar" || msg.sidecarPage !== sidecarPage) {
         if (inputDown || drawing) onUp({ type: "touchcancel", cancelable: false });
-        if (dirty) syncNow();
+        if (dirty) enqueueCurrentSnapshot();
         if (serverScene !== "sidecar") {
           saveLocalPage();
           savedBoardState = {
@@ -1788,7 +1790,16 @@
         var sz = Array.isArray(msg.sidecarSize) && msg.sidecarSize.length === 2
           ? msg.sidecarSize : (msg.size || [1000, 1414]);
         var expectId = "sidecar:" + sidecarPage;
-        var srcDoc = (msg.doc && (!msg.pageId || msg.pageId === expectId)) ? msg.doc : null;
+        var minCleared = typeof msg.clearedSeq === "number" ? msg.clearedSeq : serverCleared;
+        var queuedForPage = null;
+        for (var qi = syncQueue.length - 1; qi >= 0; qi--) {
+          if (syncQueue[qi].pageId === expectId && (syncQueue[qi].clearedSeq || 0) >= minCleared) {
+            queuedForPage = syncQueue[qi];
+            break;
+          }
+        }
+        var srcDoc = queuedForPage ? queuedForPage.doc
+          : ((msg.doc && (!msg.pageId || msg.pageId === expectId)) ? msg.doc : null);
         doc = {
           w: sz[0], h: sz[1], infinite: true,
           strokes: srcDoc && Array.isArray(srcDoc.strokes) ? srcDoc.strokes.slice() : []
@@ -1822,7 +1833,7 @@
     }
     if (serverScene === "sidecar") {
       if (inputDown || drawing) onUp({ type: "touchcancel", cancelable: false });
-      if (dirty) syncNow();
+      if (dirty) enqueueCurrentSnapshot();
       if (sidecarPage > 0 && view.scale > 0) {
         sidecarViews[sidecarPage] = { x: view.x, y: view.y, scale: view.scale };
       }
@@ -1921,6 +1932,13 @@
       }
       return;
     }
+    if (msg.session && serverSession && msg.session !== serverSession) {
+      serverSeq = -1;
+    }
+    if (typeof msg.seq === "number") {
+      if (msg.seq < serverSeq) return;
+      serverSeq = msg.seq;
+    }
     // 电脑端可能刚切换了输入模式
     if (msg.mode !== undefined) applyMode(msg.mode);
     var switchedScene = applySceneAndSidecar(msg);
@@ -1974,9 +1992,59 @@
     }) };
   }
 
+  function enqueueCurrentSnapshot() {
+    if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
+    if (locked() || !dirty) return;
+    var snapPageId = (pagesEnabled || isSidecar()) ? currentPageId() : "";
+    var snapVersion = ++editVersion;
+    var payload = {
+      rev: serverRev,
+      doc: compactDoc(),
+      clearedSeq: serverCleared,
+      client: CLIENT_ID,
+      updateId: snapVersion
+    };
+    if (snapPageId) payload.pageId = snapPageId;
+    if (syncQueue.length && syncQueue[syncQueue.length - 1].pageId === snapPageId) {
+      syncQueue[syncQueue.length - 1] = payload;
+    } else {
+      syncQueue.push(payload);
+    }
+    dirty = false;
+    syncNow();
+  }
+
   function syncNow() {
     if (locked()) return;        // 暂停期间不发数据（本地修改留在 dirty 里）
     if (sending) { sending2 = true; return; }
+    if (syncQueue.length > 0) {
+      sending = true;
+      var queued = syncQueue[0];
+      api("/api/update", queued, function (status, data) {
+        sending = false;
+        if (status === 200 && data && data.ok) {
+          syncError = '';
+          if (typeof data.rev === "number") serverRev = data.rev;
+          if (data.accepted === false && data.mode === "pc") {
+            handleMessage(Object.assign({ type: 'state' }, data));
+          } else {
+            syncQueue.shift();
+            if (data.accepted === false) handleMessage(Object.assign({ type: 'state' }, data));
+          }
+          setStatus(locked() ? "电脑鼠标手写中" : (dirty || syncQueue.length) ? "正在同步…" : "已同步", true);
+        } else if (status >= 400 && status < 500) {
+          syncQueue.shift();
+          syncError = data && data.error ? data.error : "同步失败";
+          setStatus(syncError, false);
+        } else {
+          syncError = data && data.error ? data.error : "连接中断，笔迹保留，正在重试…";
+          setStatus(syncError, false);
+        }
+        var again = sending2; sending2 = false;
+        if (status === 200 && (syncQueue.length > 0 || dirty || again)) syncNow();
+      });
+      return;
+    }
     if (!dirty) return;
     sending = true;
     var sentVersion = editVersion;
@@ -1994,13 +2062,13 @@
         if (!dirty && pendingRecognition === currentPageId() && pendingRecognition) {
           pendingRecognition = ""; requestRecognition();
         }
-        setStatus(locked() ? "电脑鼠标手写中" : dirty ? "正在同步…" : "已同步", true);
+        setStatus(locked() ? "电脑鼠标手写中" : (dirty || syncQueue.length) ? "正在同步…" : "已同步", true);
       } else {
         syncError = data && data.error ? data.error : "连接中断，笔迹保留，正在重试…";
         setStatus(syncError, false);
       }
       var again = sending2; sending2 = false;
-      if (again && status === 200 && dirty) syncNow();
+      if (status === 200 && (syncQueue.length > 0 || (again && dirty))) syncNow();
     });
   }
 
@@ -2020,7 +2088,7 @@
 
   // ---------- UI 状态 ----------
   function setStatus(text, online) {
-    if (dirty && !locked() && !busy) { text = syncError || '正在同步…'; online = !syncError && online; }
+    if ((dirty || syncQueue.length) && !locked() && !busy) { text = syncError || '正在同步…'; online = !syncError && online; }
     $("status").textContent = text;
     $("dot").className = online ? "on" : "";
     updateToolsToggle();
@@ -2208,7 +2276,7 @@
     get connected() { return !!(ws && wsReady); },
     get busy() { return busy; },
     get latex() { return lastLatex; },
-    get dirty() { return dirty; },
+    get dirty() { return dirty || syncQueue.length > 0; },
     get eraser() { return eraser; },
     get selecting() { return selecting; },
     get selectionMode() { return selectionMode; },
@@ -2290,6 +2358,7 @@
         if (data.session) serverSession = data.session;
         if (typeof data.rev === "number") serverRev = data.rev;
         var helloState = data.state || data;
+        if (typeof helloState.seq === "number") serverSeq = helloState.seq;
         var switchedOnHello = applySceneAndSidecar(helloState);
         if (!switchedOnHello && pagesEnabled && restoredPages) maybeAdoptServerDoc(helloState);
         if (typeof helloState.clearedSeq === "number") serverCleared = helloState.clearedSeq;
@@ -2322,7 +2391,7 @@
     pollTimer = setInterval(function () {
       // 暂停期间也要轮询：电脑端切回手机手写时得第一时间知道
       poll();
-      if (dirty && !locked()) syncNow();
+      if ((dirty || syncQueue.length) && !locked()) syncNow();
       if (ws && wsReady && Date.now() - lastWsMessage > 20000) ws.close();
       if (!ws) connect();
     }, 1500);
@@ -2331,10 +2400,10 @@
       setTimeout(scheduleFit, 250);
     });
     setInterval(function () { send({ type: "ping", t: Date.now() }); }, 8000);
-    function resumeSync() { if (!document.hidden) { poll(); if (dirty) syncNow(); if (!ws) connect(); } }
+    function resumeSync() { if (!document.hidden) { poll(); if (dirty || syncQueue.length) syncNow(); if (!ws) connect(); } }
     window.addEventListener('online', resumeSync);
     document.addEventListener('visibilitychange', resumeSync);
-    window.addEventListener("beforeunload", function () { if (dirty) syncNow(); });
+    window.addEventListener("beforeunload", function () { if (dirty || syncQueue.length) syncNow(); });
   }
 
   init();

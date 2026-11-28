@@ -374,6 +374,136 @@ finally:
         await desktop.evaluate(() => HandwritingWhiteboard.show());
         await phone.waitForFunction(() => window.__airtex.scene === 'board' && window.__airtex.strokes === 1);
         assert.equal(await desktop.evaluate(() => SidecarHandwriting.getPageDoc(1)?.strokes?.length), 1, '切回自由白板后无界草稿本已写笔迹仍保留显示');
+        await desktop.evaluate(() => HandwritingWhiteboard.hide());
+
+        // =====================================================================
+        // 6. 大量连续笔画后切页与叉掉连接：所有笔迹在非当前页状态下必须完整保留显示（不可回退到早先快照或丢失尾帧）
+        // =====================================================================
+        await desktop.evaluate(() => SidecarHandwriting.activate(1, { scrollIntoView: true }));
+        await phone.waitForFunction(() => window.__airtex.scene === 'sidecar' && window.__airtex.sidecarPage === 1);
+        await phone.locator('#resetViewBtn').tap();
+        await phone.waitForTimeout(80);
+
+        // 先写 8 笔并主动触发一次含 sidecarDocs 的轮询重叠，再继续写到总计 32 笔（原 1 笔 + 31 笔）
+        const quickStroke = async (rx1, ry1, rx2, ry2, colorHex = null) => {
+            if (colorHex) {
+                const colorBtn = phone.locator(`[data-color="${colorHex}"]`);
+                if (await colorBtn.isVisible()) await colorBtn.tap();
+            }
+            const box = await phone.locator('#board').boundingBox();
+            await cdp.send('Input.dispatchTouchEvent', {
+                type: 'touchStart',
+                touchPoints: [{ id: 1, x: box.x + rx1 * box.width, y: box.y + ry1 * box.height, radiusX: 5, radiusY: 5 }]
+            });
+            await cdp.send('Input.dispatchTouchEvent', {
+                type: 'touchMove',
+                touchPoints: [{ id: 1, x: box.x + rx2 * box.width, y: box.y + ry2 * box.height, radiusX: 5, radiusY: 5 }]
+            });
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        };
+
+        // 连续快速写 10 笔，并在第 5 笔后让 Session.poll 真实拿到一次含早先 sidecarDocs 快照的响应，
+        // 精确复现「写很多后切页/叉掉连接时被旧 sidecarDocs 快照回滚」的真实时序。
+        let injectEarlySidecarDelta = false;
+        let injectedEarlyDeltaCount = 0;
+        await desktop.route('**/api/formula/phone', async route => {
+            const req = route.request();
+            if (injectEarlySidecarDelta && req.method() === 'POST') {
+                try {
+                    const body = req.postDataJSON();
+                    if (body?.action === 'state' && Number.isFinite(body.sidecarDocSeq)) {
+                        injectEarlySidecarDelta = false;
+                        injectedEarlyDeltaCount++;
+                        body.sidecarDocSeq = 0;
+                        await route.continue({ postData: JSON.stringify(body) });
+                        return;
+                    }
+                } catch (_) {}
+            }
+            await route.continue();
+        });
+
+        for (let i = 0; i < 10; i++) {
+            const y = 0.16 + (i % 5) * 0.05;
+            await quickStroke(0.22 + (i % 2) * 0.2, y, 0.36 + (i % 2) * 0.2, y + 0.015, i === 0 ? '#2563eb' : null);
+            if (i === 4) {
+                await phone.waitForFunction(() => !window.__airtex.dirty);
+                injectEarlySidecarDelta = true;
+                await desktop.waitForFunction(() => true);
+                // 等待下一次真实 poll 触发并拿到包含当时 6 笔的 sidecarDocs
+                const deadline = Date.now() + 3000;
+                while (injectedEarlyDeltaCount === 0 && Date.now() < deadline) {
+                    await desktop.waitForTimeout(100);
+                }
+                assert.equal(injectedEarlyDeltaCount, 1, '已触发一次包含早先笔迹的真实 sidecarDocs 轮询快照');
+            }
+            await phone.waitForTimeout(45);
+        }
+        await desktop.unroute('**/api/formula/phone');
+        await phone.waitForFunction(() => !window.__airtex.dirty);
+        // 再写 21 笔（包含最后几笔用橙色画在页面下方区域，便于像素级核验最后几笔确实保留渲染）
+        for (let i = 0; i < 21; i++) {
+            const row = Math.floor(i / 3);
+            const col = i % 3;
+            const x1 = 0.18 + col * 0.22;
+            const y1 = 0.46 + row * 0.055;
+            await quickStroke(x1, y1, x1 + 0.14, y1 + 0.015, i === 16 ? '#ea580c' : null);
+            await phone.waitForTimeout(35);
+        }
+        await phone.waitForFunction(() => !window.__airtex.dirty);
+        await desktop.waitForFunction(() => SidecarHandwriting.getPageDoc(1)?.strokes?.length === 32);
+
+        // 切到第 2 页：第 1 页必须完整保留全部 32 笔（且画布下半区橙色笔迹依然可见）
+        await desktop.evaluate(() => ensurePdfPage(2));
+        await desktop.locator('#page-wrapper-2 .sidecar-hw-trigger').click();
+        await phone.waitForFunction(() => window.__airtex.scene === 'sidecar' && window.__airtex.sidecarPage === 2);
+        await desktop.waitForTimeout(900); // 等待至少一轮常规轮询，确认不会把第 1 页回滚成旧快照
+        assert.equal(await desktop.evaluate(() => SidecarHandwriting.getPageDoc(1)?.strokes?.length), 32, '切换到第 2 页并经过轮询后，第 1 页全部 32 笔必须完整保留');
+        const p1HasLateOrange = await desktop.evaluate(() => {
+            const c = document.querySelector('#page-wrapper-1 .sidecar-ink-canvas');
+            if (!c || !c.width) return false;
+            const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+            for (let i = 0; i < d.length; i += 4) {
+                if (d[i + 3] > 100 && d[i] > 200 && d[i + 1] > 60 && d[i + 1] < 140 && d[i + 2] < 60) return true;
+            }
+            return false;
+        });
+        assert.equal(p1HasLateOrange, true, '第 1 页后半程书写的橙色笔迹在切页后依然保留渲染');
+
+        // 在第 2 页快速写 24 笔（末尾几笔不等防抖结束就直接点「叉掉」退出连接，测试尾帧补发 + sidecarDocs 回收）
+        await phone.locator('#resetViewBtn').tap();
+        await phone.waitForTimeout(80);
+        for (let i = 0; i < 20; i++) {
+            const x1 = 0.2 + (i % 4) * 0.16;
+            const y1 = 0.18 + Math.floor(i / 4) * 0.08;
+            await quickStroke(x1, y1, x1 + 0.10, y1 + 0.02, i === 0 ? '#111111' : null);
+            await phone.waitForTimeout(30);
+        }
+        // 最后 4 笔用红色极速连写，不等 80ms 防抖完就立刻点 PC 端的 × 关闭草稿纸连接
+        for (let i = 0; i < 4; i++) {
+            const y1 = 0.65 + i * 0.04;
+            await quickStroke(0.25, y1, 0.72, y1 + 0.01, i === 0 ? '#dc2626' : null);
+        }
+        await desktop.locator('#sidecar-hw-exit').click();
+
+        // 等待手机尾帧全部冲刷落盘并被桌面端回收
+        await phone.waitForFunction(() => window.__airtex.scene === 'board' && !window.__airtex.dirty, null, { timeout: 6000 });
+        await desktop.waitForFunction(() => SidecarHandwriting.getPageDoc(2)?.strokes?.length === 24, null, { timeout: 6000 });
+        await desktop.waitForTimeout(900); // 再等一轮状态刷新，确认不会回滚
+        assert.equal(await desktop.evaluate(() => SidecarHandwriting.getPageDoc(1)?.strokes?.length), 32, '叉掉连接后第 1 页全部 32 笔依然完好');
+        assert.equal(await desktop.evaluate(() => SidecarHandwriting.getPageDoc(2)?.strokes?.length), 24, '叉掉连接后第 2 页全部 24 笔（含关闭前瞬间末 4 笔）依然完好');
+        const p2HasTailRed = await desktop.evaluate(() => {
+            const c = document.querySelector('#page-wrapper-2 .sidecar-ink-canvas');
+            if (!c || !c.width) return false;
+            const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+            for (let i = 0; i < d.length; i += 4) {
+                if (d[i + 3] > 100 && d[i] > 180 && d[i + 1] < 80 && d[i + 2] < 80) return true;
+            }
+            return false;
+        });
+        assert.equal(p2HasTailRed, true, '叉掉连接前瞬间书写的红色尾笔在桌面端第 2 页草稿纸上完整保留显示');
+        console.log('PASS 4: 大量连续笔画后切页与叉掉连接均完整保留全部笔迹（无上限截断、无旧快照回滚、无尾帧丢失）');
+
         assert.equal(startCalls.length, 1, '全流程仅 1 次配对会话');
         assert.deepEqual(errors, []);
         console.log('PASS 3: 全场景切换无缝衔接，零重扫、零前端报错');

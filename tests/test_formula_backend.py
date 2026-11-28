@@ -624,6 +624,8 @@ class FormulaTest(unittest.TestCase):
 
             stroke_p1 = {'w': 1000, 'h': 1400, 'infinite': True, 'strokes': [{'k': 'pen', 'c': '#16a34a', 'w': 4, 'p': [[120, 300], [420, 320]]}]}
             self.request(origin + '/api/update?t=' + token, {'doc': stroke_p1, 'pageId': 'sidecar:1', 'client': 'phone-1', 'updateId': 1})
+            _, st_p1 = self.post('phone', {'action': 'state', 'session': sid})
+            self.assertEqual(st_p1['sidecarDocPage'], 1)
 
             # Switch to page 2, then send a late stroke for page 1: page 2 must stay clean while page 1 retains the late stroke
             self.post('phone', {
@@ -634,8 +636,21 @@ class FormulaTest(unittest.TestCase):
             self.request(origin + '/api/update?t=' + token, {'doc': late_p1, 'pageId': 'sidecar:1', 'client': 'phone-1', 'updateId': 2})
             _, st_p2 = self.post('phone', {'action': 'state', 'session': sid, 'sidecarDocSeq': 0})
             self.assertEqual(st_p2['sidecarPage'], 2)
+            self.assertEqual(st_p2['sidecarDocPage'], 1)
             self.assertEqual(len(st_p2['doc']['strokes']), 0, 'Active page 2 is not overwritten by late page 1 stroke')
             self.assertEqual(len(st_p2['sidecarDocs']['1']['strokes']), 2, 'Late page 1 stroke is preserved in sidecarDocs')
+
+            # Writing many strokes on page 2 and exiting sidecar must preserve every stroke on backend
+            many_strokes = [{'k': 'pen', 'c': '#2563eb', 'w': 3, 'p': [[20 + (i % 40) * 20, 40 + (i // 40) * 30], [32 + (i % 40) * 20, 48 + (i // 40) * 30]]} for i in range(180)]
+            self.request(origin + '/api/update?t=' + token, {
+                'doc': {'w': 1000, 'h': 1400, 'infinite': True, 'strokes': many_strokes},
+                'pageId': 'sidecar:2', 'client': 'phone-1', 'updateId': 3
+            })
+            _, st_many = self.post('phone', {'action': 'state', 'session': sid, 'sidecarDocSeq': st_p2['sidecarDocSeq']})
+            self.assertEqual(st_many['sidecarDocPage'], 2)
+            self.assertEqual(len(st_many['sidecarDocs']['2']['strokes']), 180)
+            _, st_caught_up = self.post('phone', {'action': 'state', 'session': sid, 'sidecarDocSeq': st_many['sidecarDocSeq']})
+            self.assertNotIn('sidecarDocs', st_caught_up)
 
             # Phone requests turning to page 3
             _, req_ans = self.request(origin + '/api/sidecar_page?t=' + token, {'page': 3})

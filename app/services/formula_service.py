@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT))
 import api_settings
 from app.services.tunnel_service import QuickTunnel
 
-MAX_BODY = 12 * 1024 * 1024
+MAX_BODY = 24 * 1024 * 1024
 ENGINE_DEEPSEEK = 'deepseek'
 WHITEBOARD_PROMPT = api_settings.WHITEBOARD_PROMPT
 
