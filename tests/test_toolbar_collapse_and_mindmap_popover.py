@@ -29,11 +29,15 @@ class TestToolbarCollapseAndMindmapPopover(unittest.TestCase):
             'id="toolbar-file-divider"',
             'id="toolbar-file-group"',
             'id="toggle-toolbar-btn"',
+            'id="minus-collapse-toggle"',
         ):
             self.assertIn(required_id, index_html)
 
         style_css = (ROOT / "static/css/style.css").read_text(encoding="utf-8")
         self.assertIn("body.toolbar-collapsed #main-toolbar", style_css)
+        self.assertIn(".minus-collapse-toggle", style_css)
+        self.assertIn("body.page-hud-hidden #page-hud", style_css)
+        self.assertIn("body.toolbar-collapsed #main-toolbar #minus-collapse-toggle", style_css)
         self.assertIn("body.toolbar-collapsed #toggle-sidebar::after", style_css)
         self.assertIn("body.toolbar-collapsed #toggle-sidebar:hover::after", style_css)
         for hover_rule in (
@@ -305,6 +309,123 @@ window.addEventListener('load', () => {
             void header.offsetHeight;
             assert(!document.body.classList.contains('toolbar-collapsed') && header.offsetHeight === initialExpandedHeight,
                 'Pressing Shift + Minus (_) key must expand toolbar back');
+
+            // (e) Minus collapse mode toggle above #toggle-toolbar-btn: style parity + 3-step HUD cycle
+            const minusToggle = document.getElementById('minus-collapse-toggle');
+            const spaceToggle = document.getElementById('space-save-toggle');
+            const pageHud = document.getElementById('page-hud');
+            assert(minusToggle !== null && spaceToggle !== null && pageHud !== null,
+                '#minus-collapse-toggle, #space-save-toggle, and #page-hud must exist');
+            assert(minusToggle.getAttribute('aria-pressed') === 'true',
+                '#minus-collapse-toggle must default to pressed (aria-pressed="true")');
+
+            const mcRect = minusToggle.getBoundingClientRect();
+            const spRect = spaceToggle.getBoundingClientRect();
+            const tbRect = toggleBtn.getBoundingClientRect();
+            const hdrRect = header.getBoundingClientRect();
+            const mcCs = getComputedStyle(minusToggle);
+            const spCs = getComputedStyle(spaceToggle);
+            assert(Math.abs(mcRect.width - spRect.width) <= 0.5 && Math.abs(mcRect.height - spRect.height) <= 0.5,
+                `#minus-collapse-toggle size (${mcRect.width}x${mcRect.height}) must match #space-save-toggle (${spRect.width}x${spRect.height})`);
+            assert(mcCs.backgroundColor === spCs.backgroundColor && mcCs.color === spCs.color && mcCs.borderColor === spCs.borderColor,
+                '#minus-collapse-toggle pressed colors must match #space-save-toggle');
+            const mcCx = mcRect.left + mcRect.width / 2;
+            const tbCx = tbRect.left + tbRect.width / 2;
+            assert(Math.abs(mcCx - tbCx) <= 1,
+                `#minus-collapse-toggle must be centered above #toggle-toolbar-btn: mcCx=${mcCx}, tbCx=${tbCx}`);
+            assert(mcRect.bottom <= tbRect.top && mcRect.top >= hdrRect.top,
+                `#minus-collapse-toggle must sit above #toggle-toolbar-btn inside #main-toolbar: mc=[${mcRect.top},${mcRect.bottom}], tbTop=${tbRect.top}, hdrTop=${hdrRect.top}`);
+            assert(Math.abs(mcRect.top - spRect.top) <= 1.5,
+                `#minus-collapse-toggle top (${mcRect.top}) must align with #space-save-toggle top (${spRect.top})`);
+
+            // Simulate visible #page-hud as when a PDF is loaded
+            const prevHudTransition = pageHud.style.transition;
+            pageHud.style.transition = 'none';
+            pageHud.classList.remove('opacity-0', 'pointer-events-none');
+            pageHud.classList.add('opacity-100', 'pointer-events-auto');
+            void pageHud.offsetHeight;
+
+            // Default pressed state: 2-step cycle never hides #page-hud
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: '-', code: 'Minus', bubbles: true, cancelable: true }));
+            void header.offsetHeight;
+            assert(document.body.classList.contains('toolbar-collapsed') && !document.body.classList.contains('page-hud-hidden'),
+                'Pressed mode 1st Minus collapses toolbar only');
+            assert(getComputedStyle(minusToggle).display === 'none',
+                '#minus-collapse-toggle must hide when toolbar is collapsed');
+            assert(getComputedStyle(pageHud).opacity === '1' && getComputedStyle(pageHud).visibility === 'visible',
+                'Pressed mode must keep #page-hud visible');
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: '-', code: 'Minus', bubbles: true, cancelable: true }));
+            void header.offsetHeight;
+            assert(!document.body.classList.contains('toolbar-collapsed') && !document.body.classList.contains('page-hud-hidden'),
+                'Pressed mode 2nd Minus immediately restores toolbar');
+
+            // Unpress #minus-collapse-toggle and check unpressed style parity with #space-save-toggle
+            minusToggle.click();
+            assert(minusToggle.getAttribute('aria-pressed') === 'false',
+                'Clicking #minus-collapse-toggle must release it (aria-pressed="false")');
+            spaceToggle.click();
+            const mcOffCs = getComputedStyle(minusToggle);
+            const spOffCs = getComputedStyle(spaceToggle);
+            assert(mcOffCs.backgroundColor === spOffCs.backgroundColor && mcOffCs.color === spOffCs.color && mcOffCs.borderColor === spOffCs.borderColor,
+                '#minus-collapse-toggle unpressed colors must match #space-save-toggle');
+            spaceToggle.click();
+
+            // Unpressed mode: 3-step cycle (1: collapse toolbar -> 2: also hide #page-hud -> 3: restore all)
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: '-', code: 'Minus', bubbles: true, cancelable: true }));
+            void header.offsetHeight;
+            assert(document.body.classList.contains('toolbar-collapsed') && header.offsetHeight === 12,
+                'Unpressed mode 1st Minus must collapse toolbar');
+            assert(!document.body.classList.contains('page-hud-hidden') && !state.pageHudHidden,
+                'Unpressed mode 1st Minus must keep #page-hud visible');
+            assert(getComputedStyle(pageHud).opacity === '1' && getComputedStyle(pageHud).visibility === 'visible',
+                'Unpressed mode 1st Minus #page-hud must still be rendered visibly');
+
+            // Input and Ctrl+Minus guards in unpressed mode
+            searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: '-', code: 'Minus', bubbles: true, cancelable: true }));
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: '-', code: 'Minus', ctrlKey: true, bubbles: true, cancelable: true }));
+            assert(document.body.classList.contains('toolbar-collapsed') && !document.body.classList.contains('page-hud-hidden'),
+                'Input and Ctrl+Minus must not advance 3-step cycle');
+
+            // 2nd Minus: keep toolbar collapsed and hide #page-hud
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: '-', code: 'Minus', bubbles: true, cancelable: true }));
+            void pageHud.offsetHeight;
+            assert(document.body.classList.contains('toolbar-collapsed') && header.offsetHeight === 12,
+                'Unpressed mode 2nd Minus must keep toolbar collapsed');
+            assert(document.body.classList.contains('page-hud-hidden') && state.pageHudHidden === true,
+                'Unpressed mode 2nd Minus must add body.page-hud-hidden');
+            assert(getComputedStyle(pageHud).opacity === '0' && getComputedStyle(pageHud).visibility === 'hidden' && getComputedStyle(pageHud).pointerEvents === 'none',
+                'Unpressed mode 2nd Minus must visually hide and disable pointer-events on #page-hud');
+
+            // 3rd Minus: restore both toolbar and #page-hud
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: '-', code: 'Minus', bubbles: true, cancelable: true }));
+            void header.offsetHeight;
+            void pageHud.offsetHeight;
+            assert(!document.body.classList.contains('toolbar-collapsed') && header.offsetHeight === initialExpandedHeight,
+                'Unpressed mode 3rd Minus must restore toolbar');
+            assert(!document.body.classList.contains('page-hud-hidden') && state.pageHudHidden === false,
+                'Unpressed mode 3rd Minus must restore #page-hud');
+            assert(getComputedStyle(pageHud).opacity === '1' && getComputedStyle(pageHud).visibility === 'visible' && getComputedStyle(pageHud).pointerEvents === 'auto',
+                'Unpressed mode 3rd Minus must make #page-hud visible and interactive again');
+
+            // Second full cycle + expanding via #toggle-toolbar-btn directly while in step 2 restores #page-hud too
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: '-', code: 'Minus', bubbles: true, cancelable: true }));
+            assert(document.body.classList.contains('toolbar-collapsed') && !document.body.classList.contains('page-hud-hidden'),
+                '4th Minus must restart cycle at step 1');
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: '-', code: 'Minus', bubbles: true, cancelable: true }));
+            assert(document.body.classList.contains('toolbar-collapsed') && document.body.classList.contains('page-hud-hidden'),
+                '5th Minus must reach step 2 again');
+            toggleBtn.click();
+            void header.offsetHeight;
+            assert(!document.body.classList.contains('toolbar-collapsed') && !document.body.classList.contains('page-hud-hidden'),
+                'Clicking #toggle-toolbar-btn in step 2 must expand toolbar and restore #page-hud');
+
+            // Restore pressed default and initial #page-hud classes
+            minusToggle.click();
+            assert(minusToggle.getAttribute('aria-pressed') === 'true',
+                'Clicking #minus-collapse-toggle again must restore pressed state');
+            pageHud.classList.remove('opacity-100', 'pointer-events-auto');
+            pageHud.classList.add('opacity-0', 'pointer-events-none');
+            pageHud.style.transition = prevHudTransition;
 
             // =================================================================
             // 3. AI Chat Toolbar Button Status: streaming blink & error red state

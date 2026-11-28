@@ -168,6 +168,7 @@
             outlineMap: [],          // 解析后的有序目录地图，用于二分定位。
             currentPhysicalPage: 1,  // 记录当前屏幕中心的物理页
             toolbarCollapsed: false, // 顶部工具栏是否折叠为细条
+            pageHudHidden: false,    // 三段折叠循环中是否同时收起右上角页码浮窗
             cloudSync: { phase: 'idle', text: '', detail: '' }, // 云端批注库状态镜像（实现见 cloud-sync.js）
             isProgrammaticScroll: false,
             lastRenderedScale: 1.0,
@@ -228,6 +229,7 @@
             customColorInput: document.getElementById('custom-color-input'),
             customColorWrapper: document.getElementById('custom-color-wrapper'),
             toggleToolbarBtn: document.getElementById('toggle-toolbar-btn'),
+            minusCollapseToggle: document.getElementById('minus-collapse-toggle'),
             noteModal: document.getElementById('note-modal'),
             noteInput: document.getElementById('note-input'),
             notePreview: document.getElementById('note-preview'),

@@ -340,6 +340,10 @@
         <button type="button" id="toggle-toolbar-btn" class="absolute right-1.5 top-1/2 -translate-y-1/2 w-5 h-7 rounded-md flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors z-30 cursor-pointer" title="隐藏工具栏" aria-label="隐藏工具栏" aria-expanded="true">
             <i class="ph ph-caret-up text-[14px]"></i>
         </button>
+        <!-- 悬在折叠工具栏按钮上方，与保存/全屏上方切换按钮同高同设计，不占横向空间。 -->
+        <button type="button" id="minus-collapse-toggle" class="minus-collapse-toggle absolute w-6 h-[15px] p-0 rounded border flex items-center justify-center transition-colors z-30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500" aria-label="减号折叠模式" aria-pressed="true" title="- 键：折叠/展开工具栏；点击松开后按 - 键依次折叠工具栏、收起页码浮窗、全部恢复">
+            <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/></svg>
+        </button>
         <button type="button" id="toolbar-scale-down" class="toolbar-scale-bar toolbar-scale-down is-default" title="缩小工具栏按钮 (当前 100% · 默认 · 右键恢复默认)" aria-label="缩小工具栏按钮"></button>
         <button type="button" id="toolbar-scale-up" class="toolbar-scale-bar toolbar-scale-up is-default" title="放大工具栏按钮 (当前 100% · 默认 · 右键恢复默认)" aria-label="放大工具栏按钮"></button>
     </header>

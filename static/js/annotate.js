@@ -1317,8 +1317,20 @@
             scheduleToolbarLayoutSync();
         }
 
+        function setPageHudHidden(hidden) {
+            const next = Boolean(hidden);
+            state.pageHudHidden = next;
+            document.body.classList.toggle('page-hud-hidden', next);
+            if (next && els.pageHud && els.pageHud.contains(document.activeElement)) {
+                document.activeElement.blur?.();
+            }
+        }
+
         function toggleToolbarCollapsed(force) {
             state.toolbarCollapsed = typeof force === 'boolean' ? force : !state.toolbarCollapsed;
+            if (!state.toolbarCollapsed && state.pageHudHidden) {
+                setPageHudHidden(false);
+            }
             state.toolbarTransitioning = true;
             document.body.classList.toggle('toolbar-collapsed', state.toolbarCollapsed);
             if (els.toggleToolbarBtn) {
@@ -1347,10 +1359,43 @@
             }, 200);
         }
 
+        function handleMinusCollapseShortcut() {
+            const toolbarOnly = els.minusCollapseToggle?.getAttribute('aria-pressed') !== 'false';
+            if (toolbarOnly) {
+                if (state.pageHudHidden) setPageHudHidden(false);
+                toggleToolbarCollapsed();
+                return;
+            }
+            if (!state.toolbarCollapsed) {
+                setPageHudHidden(false);
+                toggleToolbarCollapsed(true);
+            } else if (!state.pageHudHidden) {
+                setPageHudHidden(true);
+            } else {
+                setPageHudHidden(false);
+                toggleToolbarCollapsed(false);
+            }
+        }
+
         if (els.toggleToolbarBtn) {
             els.toggleToolbarBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 toggleToolbarCollapsed();
+            });
+        }
+
+        if (els.minusCollapseToggle) {
+            els.minusCollapseToggle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const toolbarOnly = els.minusCollapseToggle.getAttribute('aria-pressed') !== 'true';
+                els.minusCollapseToggle.setAttribute('aria-pressed', String(toolbarOnly));
+                els.minusCollapseToggle.title = toolbarOnly
+                    ? '- 键：折叠/展开工具栏；点击松开后按 - 键依次折叠工具栏、收起页码浮窗、全部恢复'
+                    : '- 键：三段循环（折叠工具栏 → 收起页码浮窗 → 全部恢复）；点击按下恢复仅折叠工具栏';
+                if (toolbarOnly && state.pageHudHidden) {
+                    setPageHudHidden(false);
+                }
+                if (e.detail > 0) els.minusCollapseToggle.blur();
             });
         }
 
@@ -1546,7 +1591,7 @@
                 );
                 if (isEditable(e.target) || isEditable(document.activeElement)) return;
                 e.preventDefault();
-                toggleToolbarCollapsed();
+                handleMinusCollapseShortcut();
             }
         });
 

@@ -446,9 +446,11 @@
         .btn-unsaved { background-color: #fefce8; color: #a16207; border-color: #fde047; }
 
         .space-save-toggle,
-        .backquote-fullscreen-toggle { background-color: transparent; color: #9ca3af; border-color: #e5e7eb; }
+        .backquote-fullscreen-toggle,
+        .minus-collapse-toggle { background-color: transparent; color: #9ca3af; border-color: #e5e7eb; }
         .space-save-toggle[aria-pressed="true"],
-        .backquote-fullscreen-toggle[aria-pressed="true"] {
+        .backquote-fullscreen-toggle[aria-pressed="true"],
+        .minus-collapse-toggle[aria-pressed="true"] {
             background-color: #eff6ff;
             color: #2563eb;
             border-color: #93c5fd;
@@ -7188,7 +7190,14 @@ body.eye-protection-mode .empty-state-guide-svg {
    ========================================================================= */
 #page-hud {
     top: calc(var(--toolbar-height, 75px) + 12px);
-    transition: top 0.18s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease;
+    transition: top 0.18s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.18s ease, transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), visibility 0.18s ease;
+}
+
+body.page-hud-hidden #page-hud {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    transform: translateY(-8px) scale(0.96);
 }
 
 #search-bar,
@@ -7714,9 +7723,18 @@ body.eye-protection-mode .countdown-range-slider:hover:not(:disabled)::-moz-rang
     transform: translateY(-50%);
 }
 
+#main-toolbar #minus-collapse-toggle {
+    right: 4px;
+    top: calc(1.15px + 3px * var(--tb-scale, 1.16));
+}
+
 body.toolbar-collapsed #main-toolbar #toggle-toolbar-btn {
     top: 50% !important;
     transform: translateY(-50%) !important;
+}
+
+body.toolbar-collapsed #main-toolbar #minus-collapse-toggle {
+    display: none !important;
 }
 
 /* 顶部工具栏底边左右最外侧边角折角形 -/+ 整体缩放按钮（默认尺寸呈深灰提示色，非默认尺寸呈浅灰） */
